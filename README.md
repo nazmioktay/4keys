@@ -58,15 +58,39 @@ uvicorn app.main:app --reload
 | `GET /ml/predict?symbol=BTC/USDT:USDT` | Tek sembol için yön + güven tahmini |
 | `POST /engine/run-cycle` | Screener top listesi üzerinde bir karar döngüsü çalıştırır (paper-trading) |
 | `GET /engine/status` | Açık paper pozisyonlar ve kapanan işlem geçmişi |
+| `POST /dca/optimize` | Verilen sembol/sermaye için en iyi DCA parametre kombinasyonlarını bulur |
+
+### Modül 3 — DCA Optimizasyon Hesaplayıcısı ✅
+- `app/dca/simulator.py` — bir DCA botunun (base order + averaging orders +
+  take profit + opsiyonel stop loss) geçmiş fiyat serisi üzerindeki
+  davranışını mum mum simüle eder; kapanan işlem sayısı, kazanma oranı,
+  toplam getiri %, maksimum drawdown % ve kullanılan maksimum sermayeyi hesaplar.
+- `app/dca/optimizer.py` — deviation, deviation/order-size çarpanları, safety
+  order sayısı ve take profit için bir parametre ızgarasını (grid search)
+  tarar; her kombinasyon için base order büyüklüğünü, tüm averaging order'lar
+  teorik olarak dolsa dahi verilen sermayeyi aşmayacak şekilde otomatik
+  hesaplar, ardından sonuçları seçilen hedefe (`profit`,
+  `profit_over_drawdown`, `win_rate`) göre sıralar.
+
+`POST /dca/optimize` örnek gövde:
+```json
+{
+  "symbol": "BTC/USDT:USDT",
+  "balance": 500,
+  "direction": "long",
+  "objective": "profit_over_drawdown",
+  "top_n": 5
+}
+```
 
 ## Yol haritası
 
 - [x] Screener (Binance, teknik skor)
 - [x] ML sinyal modülü (MLP tabanlı yön tahmini)
 - [x] Otomatik açma/kapama karar motoru (paper-trading)
+- [x] DCA optimizasyon hesaplayıcısı
 - [ ] Screener + motoru periyodik/zamanlanmış bir job'a bağlama
 - [ ] Gerçek borsa emir yürütme katmanı (API anahtarı + açık onay gerektirir)
-- [ ] DCA optimizasyon hesaplayıcısı
 - [ ] JSON tabanlı strateji tanımlama motoru
 - [ ] BIST/VIOP adapter'ları
 - [ ] Portföy ve risk yönetimi kuralları
