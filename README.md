@@ -62,6 +62,42 @@ eklenmemiş bir katmandır — bu bilerek bir sonraki adıma bırakılmıştır.
   model "güvenme" derse pozisyon açılmaz, `hold`a düşülür. Bu tamamen
   opsiyoneldir; meta model eğitilmemişse sistem eskisi gibi çalışır.
 
+**Faz A — XGBoost (rehberin önerdiği ilk model)** ✅
+`app/ml/model.py::SignalModel`'in varsayılan algoritması artık **XGBoost**
+(gradient boosted karar ağaçları) — eski MLP sinir ağı `algorithm="mlp"`
+ile karşılaştırma amaçlı hâlâ seçilebilir. LSTM (Faz B) ve Reinforcement
+Learning (Faz C, opsiyonel) rehberin de önerdiği gibi bilinçli olarak
+bir sonraki adıma bırakılmıştır — Faz A stabilleşmeden Faz B'ye geçilmez.
+
+**Overfitting koruması** (rehber "2.4 Overfitting"):
+- `app/ml/validation.py::walk_forward_splits` — **Walk-Forward Validation**:
+  model bir pencerede eğitilir, hemen sonraki (görülmemiş) pencerede test
+  edilir; pencere ileri kaydırılır.
+- Aynı fonksiyonda **embargo/purge** — eğitim ile test penceresi arasına
+  `embargo_frac` genişliğinde bir zaman boşluğu konur; etiketleme ufku
+  (horizon) yüzünden test'e sızabilecek bilgi bu boşlukta atılır.
+- `app/ml/validation.py::split_out_of_sample` — **Out-of-Sample Test**:
+  kronolojik olarak en yeni dilim (varsayılan son %20) hem walk-forward
+  CV'de hem de nihai `fit()`'te ASLA kullanılmaz, yalnızca son doğrulama
+  metriği için ayrılır.
+- `SignalModel.shap_values()` — **SHAP değerleri**: her özelliğin
+  tahmine ortalama mutlak katkısını döner (`GET /ml/explain`); anlamsız
+  özellikler bu sırlamadan görülüp elenebilir. Yalnızca XGBoost için
+  çalışır (MLP bir kara kutudur).
+- **Regularization**: XGBoost L1/L2 (`reg_alpha`/`reg_lambda`) ve
+  subsample/colsample_bytree; MLP tarafında sklearn'ün L2 (alpha) +
+  early-stopping.
+- `POST /ml/train` yanıtı artık `walk_forward_mean_accuracy`,
+  `overfit_gap` (eğitim doğruluğu - ortalama test doğruluğu; büyükse
+  ezberleme işareti) ve `out_of_sample_accuracy`'yi de döner — bir
+  modelin gerçekten mi öğrendiğini yoksa geçmişi mi ezberlediğini
+  görünür kılar.
+
+**Paper trading / gerçek para notu:** Bu doğrulama katmanı da dahil
+sistemin tamamı hâlâ yalnızca paper-trading'dir; `enable_live_trading`
+ve `enable_bist_trading` varsayılan olarak `false`'tur ve hiçbir ortamda
+açılmamıştır (bkz. Modül: Güvenlik protokolü).
+
 ### Çalıştırma
 
 **Veritabansız (varsayılan, bellek içi):**
@@ -80,7 +116,8 @@ docker compose up
 | Endpoint | Açıklama |
 |---|---|
 | `GET /screener/top?direction=long\|short&limit=10` | Long/Short Top N tarama sonucu |
-| `POST /ml/train` | Birincil modeli eğitir (`labeling_method`: `"threshold"`\|`"triple_barrier"`, `calibrate`: bool, `calibration_method`: `"sigmoid"`\|`"isotonic"`) |
+| `POST /ml/train` | Birincil modeli eğitir (`algorithm`: `"xgboost"`\|`"mlp"`, `labeling_method`: `"threshold"`\|`"triple_barrier"`, `calibrate`: bool, `calibration_method`: `"sigmoid"`\|`"isotonic"`, `holdout_frac`, `walk_forward_splits`) — yanıt walk-forward + out-of-sample metriklerini de içerir |
+| `GET /ml/explain?symbol=...` | Eğitilmiş XGBoost modelinin SHAP özellik önemlerini döner |
 | `POST /ml/train-meta` | Meta-label modelini eğitir (önce `/ml/train` çağrılmış olmalı) |
 | `GET /ml/predict?symbol=BTC/USDT:USDT` | Yön + kalibre güven tahmini (meta model varsa `meta_act`/`meta_confidence` de döner) |
 | `POST /engine/run-cycle` | Screener top listesi üzerinde bir karar döngüsü çalıştırır (paper-trading) |
@@ -486,6 +523,9 @@ ile doğrulanır.
 - [x] Kelly kriteri (çeyrek/yarım/tam) pozisyon boyutlandırma + canlı işlem geçmişinden otomatik entegrasyon
 - [x] Screener + motorları periyodik/zamanlanmış bir job'a bağlama (APScheduler, FastAPI lifespan)
 - [x] ML metodolojisi yükseltmesi: triple-barrier etiketleme + olasılık kalibrasyonu + meta-labeling ("Kripto Bot Tam Rehber" entegrasyonu)
+- [x] XGBoost (Faz A) — birincil model + walk-forward/purged CV + out-of-sample holdout + SHAP açıklanabilirlik
+- [ ] LSTM (Faz B) — Faz A stabil/kârlı çalışmadan önerilmez, rehbere göre bilinçli olarak ertelendi
+- [ ] Reinforcement Learning (Faz C, opsiyonel)
 - [x] Kalıcı veritabanı katmanı (TimescaleDB/PostgreSQL, opsiyonel) + Docker Compose
 - [x] Güvenlik protokolü sertleştirme: kill switch (manuel+otomatik), sabit kaldıraç tavanı, API anahtarı çekim izni kontrolü, sır tarama betiği
 - [ ] Redis canlı cache katmanı (çoklu-process ölçeklenme gerektiğinde)

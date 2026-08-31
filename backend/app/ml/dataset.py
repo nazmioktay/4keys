@@ -26,6 +26,50 @@ def _compute_labels(
     return label_future_direction(ohlcv["close"], horizon, threshold_pct)
 
 
+def _build_symbol_frames(
+    exchange: Exchange,
+    symbols: list[str],
+    timeframe: str,
+    lookback: int,
+    horizon: int,
+    threshold_pct: float,
+    labeling_method: LabelingMethod,
+    take_profit_pct: float,
+    stop_loss_pct: float,
+) -> list[pd.DataFrame]:
+    """Her sembol için özellik+etiket çerçevesini, kronolojik sırası
+    korunmuş ve `time_frac` (0..1, o sembolün serisi içindeki göreli
+    zaman konumu) kolonuyla üretir.
+
+    `time_frac`, walk-forward / purged CV bölmelerinin (bkz.
+    `app.ml.validation`) semboller arası tutarlı bir "ne kadar yakın
+    zaman" ekseni üzerinde çalışabilmesi için vardır — semboller farklı
+    sayıda mumla dönebildiğinden mutlak satır indeksi yerine göreli
+    konum kullanılır.
+    """
+    frames: list[pd.DataFrame] = []
+
+    for symbol in symbols:
+        try:
+            ohlcv = exchange.fetch_ohlcv(symbol, timeframe, lookback)
+            if len(ohlcv) < 60:
+                continue
+            features = build_features(ohlcv)
+            labels = _compute_labels(ohlcv, labeling_method, horizon, threshold_pct, take_profit_pct, stop_loss_pct)
+            frame = features.copy()
+            frame["label"] = labels
+            frame["symbol"] = symbol
+            frame["time_frac"] = (pd.RangeIndex(len(frame)) / max(len(frame) - 1, 1))
+            frame = frame.dropna(subset=FEATURE_COLUMNS + ["label"])
+            if not frame.empty:
+                frames.append(frame)
+        except Exception as exc:  # noqa: BLE001 - tek sembol hatası tüm eğitimi durdurmamalı
+            logger.warning("dataset: skipping %s: %s", symbol, exc)
+            continue
+
+    return frames
+
+
 def build_training_dataset(
     exchange: Exchange,
     symbols: list[str],
@@ -51,24 +95,9 @@ def build_training_dataset(
       `stop_loss_pct` bu barierleri, `horizon` ise zaman aşımı penceresini
       (max_horizon) belirler.
     """
-    frames: list[pd.DataFrame] = []
-
-    for symbol in symbols:
-        try:
-            ohlcv = exchange.fetch_ohlcv(symbol, timeframe, lookback)
-            if len(ohlcv) < 60:
-                continue
-            features = build_features(ohlcv)
-            labels = _compute_labels(ohlcv, labeling_method, horizon, threshold_pct, take_profit_pct, stop_loss_pct)
-            frame = features.copy()
-            frame["label"] = labels
-            frame = frame.dropna(subset=FEATURE_COLUMNS + ["label"])
-            if not frame.empty:
-                frames.append(frame)
-        except Exception as exc:  # noqa: BLE001 - tek sembol hatası tüm eğitimi durdurmamalı
-            logger.warning("dataset: skipping %s: %s", symbol, exc)
-            continue
-
+    frames = _build_symbol_frames(
+        exchange, symbols, timeframe, lookback, horizon, threshold_pct, labeling_method, take_profit_pct, stop_loss_pct
+    )
     if not frames:
         return pd.DataFrame(columns=FEATURE_COLUMNS), pd.Series(dtype="float")
 
@@ -76,3 +105,31 @@ def build_training_dataset(
     X = combined[FEATURE_COLUMNS]
     y = combined["label"]
     return X, y
+
+
+def build_training_dataset_with_time(
+    exchange: Exchange,
+    symbols: list[str],
+    timeframe: str,
+    lookback: int,
+    horizon: int = 5,
+    threshold_pct: float = 1.0,
+    labeling_method: LabelingMethod = "threshold",
+    take_profit_pct: float = 2.0,
+    stop_loss_pct: float = 2.0,
+) -> tuple[pd.DataFrame, pd.Series, pd.Series]:
+    """`build_training_dataset` ile aynıdır, ek olarak her satır için
+    `time_frac`'i de döner — walk-forward/purged CV ve out-of-sample
+    holdout bölmeleri (`app.ml.validation`) bunu kullanır.
+    """
+    frames = _build_symbol_frames(
+        exchange, symbols, timeframe, lookback, horizon, threshold_pct, labeling_method, take_profit_pct, stop_loss_pct
+    )
+    if not frames:
+        return pd.DataFrame(columns=FEATURE_COLUMNS), pd.Series(dtype="float"), pd.Series(dtype="float")
+
+    combined = pd.concat(frames, ignore_index=True)
+    X = combined[FEATURE_COLUMNS]
+    y = combined["label"]
+    time_frac = combined["time_frac"]
+    return X, y, time_frac

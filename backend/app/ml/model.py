@@ -5,14 +5,18 @@ from typing import Literal
 import joblib
 import numpy as np
 import pandas as pd
+from sklearn.base import BaseEstimator, ClassifierMixin, clone
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.neural_network import MLPClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
+from xgboost import XGBClassifier
 
 from .features import FEATURE_COLUMNS
 
 DEFAULT_MODEL_PATH = Path(__file__).parent / "artifacts" / "signal_model.joblib"
+
+Algorithm = Literal["xgboost", "mlp"]
 
 
 @dataclass
@@ -21,7 +25,78 @@ class Prediction:
     confidence: float  # 0..1, tahmin edilen sınıfın olasılığı
 
 
-def _build_base_pipeline(early_stopping: bool = True) -> Pipeline:
+class _XGBClassifierWrapper(ClassifierMixin, BaseEstimator):
+    """`XGBClassifier`'ı, keyfi sınıf etiketleriyle (ör. -1/0/1) sklearn
+    Pipeline/CalibratedClassifierCV ile sorunsuz çalışacak şekilde sarar.
+
+    XGBoost'un sınıflandırıcısı içeride 0..n_classes-1 tamsayı etiket
+    bekler; burada gerçek etiketler saklanıp 0-indexli hale eşlenir,
+    tahminlerde geri çevrilir. `reg_alpha`/`reg_lambda` (L1/L2) ve
+    `subsample`/`colsample_bytree`, rehberin "2.4 Overfitting ->
+    Regularization" maddesindeki XGBoost önerisinin karşılığıdır.
+    """
+
+    def __init__(
+        self,
+        n_estimators: int = 300,
+        max_depth: int = 4,
+        learning_rate: float = 0.05,
+        reg_alpha: float = 0.1,
+        reg_lambda: float = 1.0,
+        subsample: float = 0.8,
+        colsample_bytree: float = 0.8,
+        random_state: int = 42,
+    ) -> None:
+        self.n_estimators = n_estimators
+        self.max_depth = max_depth
+        self.learning_rate = learning_rate
+        self.reg_alpha = reg_alpha
+        self.reg_lambda = reg_lambda
+        self.subsample = subsample
+        self.colsample_bytree = colsample_bytree
+        self.random_state = random_state
+
+    def _make_xgb(self) -> XGBClassifier:
+        return XGBClassifier(
+            n_estimators=self.n_estimators,
+            max_depth=self.max_depth,
+            learning_rate=self.learning_rate,
+            reg_alpha=self.reg_alpha,
+            reg_lambda=self.reg_lambda,
+            subsample=self.subsample,
+            colsample_bytree=self.colsample_bytree,
+            random_state=self.random_state,
+            eval_metric="mlogloss",
+        )
+
+    def fit(self, X, y):
+        y = np.asarray(y)
+        self.classes_ = np.unique(y)
+        self._label_to_idx = {label: i for i, label in enumerate(self.classes_)}
+        self._idx_to_label = {i: label for label, i in self._label_to_idx.items()}
+        y_idx = np.array([self._label_to_idx[v] for v in y])
+        self._model = self._make_xgb()
+        self._model.fit(X, y_idx)
+        return self
+
+    def predict_proba(self, X):
+        return self._model.predict_proba(X)
+
+    def predict(self, X):
+        idx = self._model.predict(X)
+        return np.array([self._idx_to_label[int(i)] for i in idx])
+
+    @property
+    def booster_model(self) -> XGBClassifier:
+        """SHAP açıklaması için altta yatan (kalibrasyondan bağımsız) fit
+        edilmiş XGBoost modeline erişim."""
+        return self._model
+
+
+def _build_base_pipeline(algorithm: Algorithm = "xgboost", early_stopping: bool = True) -> Pipeline:
+    if algorithm == "xgboost":
+        return Pipeline([("xgb", _XGBClassifierWrapper())])
+
     return Pipeline(
         [
             ("scaler", StandardScaler()),
@@ -40,10 +115,16 @@ def _build_base_pipeline(early_stopping: bool = True) -> Pipeline:
 
 
 class SignalModel:
-    """Tarama özelliklerinden yön (long/short/neutral) tahmini yapan
-    çok katmanlı yapay sinir ağı (MLP) sarmalayıcısı.
+    """Tarama özelliklerinden yön (long/short/neutral) tahmini yapan model.
 
-    `calibrate=True` (varsayılan) iken model, ham MLP olasılık çıktısını
+    Varsayılan algoritma **XGBoost** (gradient boosted karar ağaçları) —
+    "Kripto Bot Tam Rehber"in önerdiği Faz A modeli: tablo verisinde hızlı
+    eğitilir, L1/L2 regularization ile overfitting'e karşı korunur, SHAP
+    değerleriyle yorumlanabilir (bkz. `shap_values()`). `algorithm="mlp"`
+    ile eski çok katmanlı sinir ağı karşılaştırma/geriye dönük uyumluluk
+    için hâlâ seçilebilir.
+
+    `calibrate=True` (varsayılan) iken model, ham olasılık çıktısını
     doğrudan kullanmaz — `CalibratedClassifierCV` ile Platt scaling
     (`method="sigmoid"`) veya isotonic regression uygulanır. Bu önemlidir:
     kalibre edilmemiş bir "%60 güven" değeri gerçek bir olasılık değildir ve
@@ -51,8 +132,14 @@ class SignalModel:
     pozisyon boyutları sistematik olarak hatalı büyür/küçülür.
     """
 
-    def __init__(self, calibrate: bool = True, calibration_method: Literal["sigmoid", "isotonic"] = "sigmoid") -> None:
-        self._base_pipeline = _build_base_pipeline()
+    def __init__(
+        self,
+        algorithm: Algorithm = "xgboost",
+        calibrate: bool = True,
+        calibration_method: Literal["sigmoid", "isotonic"] = "sigmoid",
+    ) -> None:
+        self.algorithm = algorithm
+        self._base_pipeline = _build_base_pipeline(algorithm)
         self._pipeline = self._base_pipeline
         self._calibrate = calibrate
         self._calibration_method = calibration_method
@@ -67,8 +154,10 @@ class SignalModel:
         # MLPClassifier'ın kendi early_stopping mekanizması, iç doğrulama
         # bölmesi için sınıf başına en az birkaç örnek gerektirir; aşırı
         # dengesiz/küçük eğitim setlerinde (ör. bir sınıftan tek örnek)
-        # bunu kapatmak gerekir, yoksa fit() hata fırlatır.
-        self._base_pipeline = _build_base_pipeline(early_stopping=min_class_count >= 5)
+        # bunu kapatmak gerekir, yoksa fit() hata fırlatır. XGBoost için
+        # bu kısıt yok.
+        early_stopping = min_class_count >= 5
+        self._base_pipeline = _build_base_pipeline(self.algorithm, early_stopping=early_stopping)
 
         # CalibratedClassifierCV, StratifiedKFold(cv) kullanır; bir sınıfın örnek
         # sayısı cv'den azsa (küçük/dengesiz eğitim setlerinde olur) hata verir.
@@ -77,12 +166,18 @@ class SignalModel:
         can_calibrate = bool(self._calibrate and len(class_counts) >= 2 and min_class_count >= 3)
 
         if can_calibrate:
-            calibrated = CalibratedClassifierCV(self._base_pipeline, method=self._calibration_method, cv=3)
+            calibrated = CalibratedClassifierCV(clone(self._base_pipeline), method=self._calibration_method, cv=3)
             calibrated.fit(X_features, y)
             self._pipeline = calibrated
         else:
-            self._base_pipeline.fit(X_features, y)
             self._pipeline = self._base_pipeline
+
+        # SHAP açıklaması ve overfitting teşhisi (train-vs-holdout karşılaştırması)
+        # için, kalibrasyon yolundan bağımsız olarak tam veriyle fit edilmiş ham
+        # bir kopya her zaman tutulur (CalibratedClassifierCV içeride kendi
+        # katlarını kullanır, self._base_pipeline'ı fit etmez).
+        self._base_pipeline.fit(X_features, y)
+
         self._is_fitted = True
         self.is_calibrated = can_calibrate
 
@@ -115,12 +210,55 @@ class SignalModel:
         confidences = proba[np.arange(len(proba)), best_idx]
         return predictions, confidences
 
+    def shap_values(self, X: pd.DataFrame, max_rows: int = 200) -> pd.DataFrame:
+        """Her özelliğin tahmine ortalama katkısını (mutlak SHAP değeri)
+        döner — rehberin "SHAP değerleri: her feature'ın katkısı ölçülür;
+        anlamsız feature'lar elenir" maddesinin karşılığı. Yalnızca
+        `algorithm="xgboost"` için desteklenir (SHAP'ın asıl gücü ağaç
+        modellerinde; MLP bir kara kutudur, bkz. rehber tablosu).
+        """
+        self._require_fitted()
+        if self.algorithm != "xgboost":
+            raise ValueError("SHAP açıklaması yalnızca algorithm='xgboost' için desteklenir.")
+
+        import shap
+
+        xgb_wrapper = self._base_pipeline.named_steps["xgb"]
+        x = X[FEATURE_COLUMNS].iloc[:max_rows]
+        explainer = shap.TreeExplainer(xgb_wrapper.booster_model)
+        raw = explainer.shap_values(x)
+
+        # Çok sınıflı çıktı shap sürümüne göre (n_samples, n_features, n_classes)
+        # ya da (n_classes, n_samples, n_features) / sınıf başına liste olabilir;
+        # her durumda özellik ekseni tespit edilip (uzunluğu FEATURE_COLUMNS
+        # kadar olan eksen) örnek+sınıf üzerinden ortalama mutlak katkı alınır.
+        stacked = np.asarray(raw)
+        n_features = len(FEATURE_COLUMNS)
+        if stacked.ndim == 3:
+            feature_axis = next(ax for ax, size in enumerate(stacked.shape) if size == n_features)
+            other_axes = tuple(ax for ax in range(3) if ax != feature_axis)
+            mean_abs = np.abs(stacked).mean(axis=other_axes)
+        else:
+            mean_abs = np.abs(stacked).mean(axis=0)
+
+        importance = pd.DataFrame({"feature": FEATURE_COLUMNS, "mean_abs_shap": mean_abs})
+        return importance.sort_values("mean_abs_shap", ascending=False).reset_index(drop=True)
+
     def save(self, path: Path = DEFAULT_MODEL_PATH) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        joblib.dump(self._pipeline, path)
+        joblib.dump({"pipeline": self._pipeline, "base_pipeline": self._base_pipeline, "algorithm": self.algorithm}, path)
 
     def load(self, path: Path = DEFAULT_MODEL_PATH) -> None:
-        self._pipeline = joblib.load(path)
+        payload = joblib.load(path)
+        if isinstance(payload, dict):
+            self._pipeline = payload["pipeline"]
+            self._base_pipeline = payload["base_pipeline"]
+            self.algorithm = payload.get("algorithm", "xgboost")
+        else:
+            # Geriye dönük uyumluluk: eski model dosyaları çıplak pipeline'dı (MLP).
+            self._pipeline = payload
+            self._base_pipeline = payload
+            self.algorithm = "mlp"
         self._is_fitted = True
 
     @classmethod
