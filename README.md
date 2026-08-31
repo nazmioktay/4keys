@@ -141,6 +141,47 @@ uvicorn app.main:app --reload
 | `POST /portfolio/position-size` | Risk yüzdesi + SL mesafesinden pozisyon boyutu hesaplar |
 | `POST /portfolio/risk-check` | Durumsuz "ne olurdu" risk kontrolü (paylaşılan portföyü etkilemez) |
 
+### Modül 6 — Binance & Denizbank API Hazırlığı ✅
+**Binance canlı işlem** (`app/exchanges/binance.py`, `app/trading/`):
+- `BinanceExchange` artık opsiyonel `api_key`/`api_secret` ile kimlik
+  doğrulamalı çalışabiliyor: bakiye, pozisyon, açık emirler, emir gönderme/iptal.
+- Piyasa verisi (screener/ML/DCA/strateji) için kullanılan `get_exchange()`
+  hâlâ tamamen kimlik doğrulamasız ve gerçek veriye bakıyor — anahtarlarınız
+  bu modüllere hiç dokunmuyor.
+- Gerçek emir göndermek **üç ayrı güvenlik kapısından** geçmek zorunda
+  (`app/trading/executor.py::place_live_order`):
+  1. Ortam değişkeninde `FOURKEYS_ENABLE_LIVE_TRADING=true`
+  2. İstek gövdesinde `confirm: true` (her çağrıda ayrı ayrı)
+  3. `.env`'de tanımlı Binance API anahtarları
+  Üçünden biri eksikse istek 409 ile reddedilir. `FOURKEYS_BINANCE_TESTNET`
+  varsayılan `true` — gerçek hesaba geçmeden önce testnet'te deneyin.
+- API anahtarları **kesinlikle** koda/git'e yazılmaz; yalnızca `.env`
+  dosyasından (`.gitignore`'da) okunur — bkz. `backend/.env.example`.
+
+**Denizbank Açık Bankacılık** (`app/bank/`) — bakiye/hesap görüntüleme:
+- Denizbank'ın tek ve belgelenmiş bir "trading API"si yok; hesap bilgisine
+  erişim Türkiye'nin BDDK düzenlemesindeki Açık Bankacılık çerçevesi
+  üzerinden, bir TPP/fintech olarak kayıt olup OAuth2 onay akışıyla yapılır.
+- `DenizbankOpenBankingClient`, bu standart akışın (yetkilendirme URL'i ->
+  kod değişimi -> access token -> hesap/bakiye sorgusu) **genel kalıbını**
+  uyguluyor. Uç nokta yolları (`/oauth2/authorize`, `/oauth2/token`,
+  `/accounts`, ...) Türkiye Açık Bankacılık ekosisteminde yaygındır ama
+  **Denizbank'a özgü kesin değerler değildir** — TPP başvurunuz onaylanıp
+  geliştirici portalından gerçek `base_url`/uç noktaları aldığınızda
+  `.env` ve gerekirse `endpoint_overrides` ile güncelleyin.
+- Token'lar şu an bellek içi (süreç yeniden başlarsa kaybolur, kullanıcı
+  onay akışını tekrarlar) — üretimde şifrelenmiş bir secrets store'a taşınmalı.
+
+| Endpoint | Açıklama |
+|---|---|
+| `GET /trading/balance` | Gerçek Binance bakiyesi (kimlik bilgisi gerekir) |
+| `GET /trading/positions` | Gerçek açık pozisyonlar |
+| `POST /trading/order` | Gerçek emir gönderir — 3 güvenlik kapısı aktif |
+| `GET /bank/denizbank/authorize` | Onay için ziyaret edilecek URL'i döner |
+| `GET /bank/denizbank/callback` | Yetkilendirme kodunu token'a çevirir |
+| `GET /bank/denizbank/accounts` | Hesap listesi |
+| `GET /bank/denizbank/balances/{account_id}` | Hesap bakiyesi |
+
 ## Yol haritası
 
 - [x] Screener (Binance, teknik skor)
@@ -149,6 +190,6 @@ uvicorn app.main:app --reload
 - [x] DCA optimizasyon hesaplayıcısı
 - [x] JSON tabanlı strateji tanımlama motoru (TradingView'sız)
 - [x] Portföy / risk yönetimi kuralları (pozisyon boyutlandırma, maruziyet limitleri, günlük zarar devre kesici) + karar motoruna entegrasyon
+- [x] Binance canlı işlem hazırlığı (güvenlik kapılı) + Denizbank Açık Bankacılık şablonu
 - [ ] Screener + motorları periyodik/zamanlanmış bir job'a bağlama
-- [ ] Gerçek borsa emir yürütme katmanı (API anahtarı + açık onay gerektirir)
 - [ ] BIST/VIOP adapter'ları
