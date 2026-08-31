@@ -1,5 +1,6 @@
 from app.core.config import settings
 from app.exchanges import get_exchange
+from app.ml.meta_label import DEFAULT_META_MODEL_PATH, MetaLabelModel
 from app.ml.model import DEFAULT_MODEL_PATH, SignalModel
 from app.portfolio.shared import get_portfolio
 from app.screener.scanner import top_long, top_short
@@ -30,6 +31,7 @@ def run_cycle_once() -> list[Action]:
 
     exchange = get_exchange(settings.exchange_id)
     model = SignalModel.load_from()
+    meta_model = MetaLabelModel.load_from() if DEFAULT_META_MODEL_PATH.exists() else None
 
     results = get_scan_results()
     picks = top_long(results, settings.screener_top_n) + top_short(results, settings.screener_top_n)
@@ -42,5 +44,6 @@ def run_cycle_once() -> list[Action]:
         timeframe=settings.candle_timeframe,
         lookback=settings.candle_lookback,
         portfolio=get_portfolio(),
+        meta_model=meta_model,
     )
     return engine.run_cycle(symbols)

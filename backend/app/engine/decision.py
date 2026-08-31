@@ -1,8 +1,11 @@
 import logging
 from dataclasses import dataclass
 
+import pandas as pd
+
 from app.exchanges.base import Exchange
 from app.ml.features import latest_feature_vector
+from app.ml.meta_label import MetaLabelModel
 from app.ml.model import Prediction, SignalModel
 from app.portfolio.manager import PortfolioManager
 
@@ -34,6 +37,12 @@ class DecisionEngine:
     pozisyon sayısı, günlük zarar limiti) göre boyutlandırılır ve gerekirse
     reddedilir ("blocked" aksiyonu). `portfolio` verilmezse eski, sınırsız
     `PaperPositionStore` davranışına geri düşer (geriye dönük uyumluluk).
+
+    `meta_model` verilirse (opsiyonel, bkz. `app.ml.meta_label`), birincil
+    modelin açılış sinyali ham haliyle uygulanmaz: meta model bu sinyale
+    "güvenilir mi" kararını verir; güvenilmezse işlem açılmaz, "hold"a
+    düşülür. Bu, sabit ağırlıklı bir ensemble yerine ikinci bir modelin
+    filtre görevi görmesini sağlar (Kripto Bot Rehberi Bölüm 2.5).
     """
 
     def __init__(
@@ -47,6 +56,7 @@ class DecisionEngine:
         close_confidence: float = 0.55,
         portfolio: PortfolioManager | None = None,
         assumed_stop_loss_pct: float = 3.0,
+        meta_model: MetaLabelModel | None = None,
     ) -> None:
         self.exchange = exchange
         self.model = model
@@ -57,24 +67,35 @@ class DecisionEngine:
         self.close_confidence = close_confidence
         self.portfolio = portfolio
         self.assumed_stop_loss_pct = assumed_stop_loss_pct
+        self.meta_model = meta_model
 
-    def _predict(self, symbol: str) -> tuple[Prediction, float] | None:
+    def _predict(self, symbol: str) -> tuple[Prediction, float, pd.Series] | None:
         ohlcv = self.exchange.fetch_ohlcv(symbol, self.timeframe, self.lookback)
         feature_row = latest_feature_vector(ohlcv)
         if feature_row is None:
             return None
         prediction = self.model.predict(feature_row)
-        return prediction, float(feature_row["close"])
+        return prediction, float(feature_row["close"]), feature_row
 
     def evaluate(self, symbol: str) -> Action | None:
         result = self._predict(symbol)
         if result is None:
             return None
-        prediction, price = result
+        prediction, price, feature_row = result
         position = self.portfolio.get(symbol) if self.portfolio is not None else self.positions.get(symbol)
 
         if position is None:
             if prediction.direction in ("long", "short") and prediction.confidence >= self.open_confidence:
+                if self.meta_model is not None:
+                    meta_decision = self.meta_model.decide(feature_row, prediction.confidence)
+                    if not meta_decision.act:
+                        return Action(
+                            symbol,
+                            "hold",
+                            f"meta-label: sinyale güvenilmiyor (meta güven={meta_decision.confidence:.2f})",
+                            price,
+                            prediction.confidence,
+                        )
                 return Action(symbol, f"open_{prediction.direction}", "model açılış sinyali", price, prediction.confidence)
             return Action(symbol, "hold", "yeterli güven yok / nötr sinyal", price, prediction.confidence)
 

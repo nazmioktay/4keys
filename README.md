@@ -43,6 +43,25 @@ gerçek borsaya emir göndermez. Gerçek parayla otomatik işlem açma/kapama, A
 anahtarı yönetimi ve kullanıcının açık onayını gerektiren ayrı, bilinçli olarak
 eklenmemiş bir katmandır — bu bilerek bir sonraki adıma bırakılmıştır.
 
+**ML metodolojisi yükseltmesi** ("Kripto Bot Tam Rehber" Bölüm 2.4-2.5'e göre):
+- `app/ml/labeling.py::triple_barrier_labels` — sabit eşikli "N mum sonra ne
+  oldu?" etiketlemesine ek olarak, kâr hedefi/stop-loss/zaman aşımı
+  bariyerlerinden hangisi ÖNCE tetiklenirse ona göre etiketleyen, gerçek
+  işlem mantığını daha doğru yansıtan bir yöntem (mum içi high/low kullanır).
+  `POST /ml/train`'de `labeling_method: "triple_barrier"` ile seçilir.
+- `app/ml/model.py` — model artık `CalibratedClassifierCV` ile (Platt
+  scaling / isotonic regression) **kalibre edilmiş** olasılık üretir;
+  kalibre edilmemiş bir "%60 güven" gerçek bir olasılık değildir ve Kelly
+  kriterine (Modül: Portföy) doğrudan verilirse pozisyon boyutları
+  sistematik olarak hatalı çıkar. Eğitim seti çok küçük/dengesizse (bir
+  sınıfta yetersiz örnek) kalibrasyon otomatik ve güvenli şekilde atlanır.
+- `app/ml/meta_label.py` — **meta-labeling**: sabit ağırlıklı bir ensemble
+  yerine, ikinci bir modelin "birincil modelin sinyaline gir/girme" kararı
+  verdiği yaklaşım. `POST /ml/train-meta` ile eğitilir; eğitilmişse
+  `DecisionEngine` her açılış sinyalini önce meta modele danışır — meta
+  model "güvenme" derse pozisyon açılmaz, `hold`a düşülür. Bu tamamen
+  opsiyoneldir; meta model eğitilmemişse sistem eskisi gibi çalışır.
+
 ### Çalıştırma
 
 ```bash
@@ -54,8 +73,9 @@ uvicorn app.main:app --reload
 | Endpoint | Açıklama |
 |---|---|
 | `GET /screener/top?direction=long\|short&limit=10` | Long/Short Top N tarama sonucu |
-| `POST /ml/train` | Modeli eğitir (body: `{"symbols": [...], "horizon": 5, "threshold_pct": 1.0}`, `symbols` boş bırakılırsa screener top listesi kullanılır) |
-| `GET /ml/predict?symbol=BTC/USDT:USDT` | Tek sembol için yön + güven tahmini |
+| `POST /ml/train` | Birincil modeli eğitir (`labeling_method`: `"threshold"`\|`"triple_barrier"`, `calibrate`: bool, `calibration_method`: `"sigmoid"`\|`"isotonic"`) |
+| `POST /ml/train-meta` | Meta-label modelini eğitir (önce `/ml/train` çağrılmış olmalı) |
+| `GET /ml/predict?symbol=BTC/USDT:USDT` | Yön + kalibre güven tahmini (meta model varsa `meta_act`/`meta_confidence` de döner) |
 | `POST /engine/run-cycle` | Screener top listesi üzerinde bir karar döngüsü çalıştırır (paper-trading) |
 | `GET /engine/status` | Açık paper pozisyonlar ve kapanan işlem geçmişi |
 | `POST /dca/optimize` | Verilen sembol/sermaye için en iyi DCA parametre kombinasyonlarını bulur |
@@ -295,4 +315,6 @@ Artık kullanıcı her seferinde `/screener/top` veya `/engine/run-cycle`'ı ell
 - [x] Güçlü backtest motoru (otomatik veri yeterliliği keşfi + train/test + Sharpe/Sortino/Calmar)
 - [x] Kelly kriteri (çeyrek/yarım/tam) pozisyon boyutlandırma + canlı işlem geçmişinden otomatik entegrasyon
 - [x] Screener + motorları periyodik/zamanlanmış bir job'a bağlama (APScheduler, FastAPI lifespan)
+- [x] ML metodolojisi yükseltmesi: triple-barrier etiketleme + olasılık kalibrasyonu + meta-labeling ("Kripto Bot Tam Rehber" entegrasyonu)
+- [ ] Kalıcı veritabanı katmanı (TimescaleDB + Redis) — rehberde tanımlı, henüz eklenmedi
 - [ ] BIST/VIOP adapter'ları
