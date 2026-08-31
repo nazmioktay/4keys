@@ -8,6 +8,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.api.routes import backtest, bank, bist, dca, engine, ml, portfolio, scheduler, screener, security, strategy, trading
 from app.api.routes import db as db_routes
+from app.core.config import settings
 from app.db.session import init_db
 from app.scheduler.scheduler import start_scheduler, stop_scheduler
 
@@ -52,7 +53,7 @@ app = FastAPI(title="4keys", description="Algoritmik kripto trading platformu", 
 app.add_middleware(UnhandledExceptionMiddleware)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=settings.cors_origins_list,
     allow_methods=["*"],
     allow_headers=["*"],
 )

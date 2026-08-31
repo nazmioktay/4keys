@@ -11,6 +11,16 @@ class Settings(BaseSettings):
     screener_top_n: int = 10
     default_starting_equity: float = 1000.0
 
+    # --- CORS ---
+    # Virgülle ayrılmış izinli origin listesi. Varsayılan yerel geliştirme
+    # (Vite dev server) içindir; production'da .env üzerinden gerçek
+    # frontend domain'i (ör. https://app.4kyonetim.com.tr) ile değiştirilmelidir.
+    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
+
+    @property
+    def cors_origins_list(self) -> list[str]:
+        return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
+
     # --- Binance canlı işlem (Modül 6 — API hazırlığı) ---
     # ASLA koda veya git'e yazmayın; yalnızca ortam değişkeni / .env dosyasından okunur.
     binance_api_key: SecretStr = SecretStr("")
