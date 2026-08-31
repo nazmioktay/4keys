@@ -345,6 +345,44 @@ SQLAlchemy tabanlı, **tamamen opsiyonel** bir kalıcılık katmanı.
 sistem çoklu-process/çoklu-sunucuya ölçeklenmeye başladığında gerçek değer
 katacak, o aşamaya bırakıldı.
 
+### Modül 10 — Güvenlik Protokolü Sertleştirme (Bölüm 9) ✅
+"Kripto Bot Tam Rehber" Bölüm 9'daki kontrol listesinin **kod içinde
+gerçekten uygulanabilir** maddeleri:
+
+- `app/security/kill_switch.py` — **kill switch**: manuel (`POST
+  /security/kill-switch/activate`) veya **otomatik** (oturum drawdown'u
+  `FOURKEYS_KILL_SWITCH_DAILY_DRAWDOWN_PCT`'i, varsayılan %15, aştığında —
+  bkz. `PortfolioManager._maybe_trip_kill_switch`) devreye girer. Aktifken:
+  `DecisionEngine` yeni pozisyon açmaz (`"blocked"` aksiyonu), zamanlanmış
+  `engine_cycle` işi çalışmaz (piyasa verisi bile çekmez), ve
+  `place_live_order`/`set_live_leverage` gerçek borsaya hiçbir şey göndermez.
+  Açık pozisyonlar otomatik kapatılmaz — kapatma kararı bilinçli olarak
+  kullanıcıya bırakılmıştır (bkz. Bölüm 0.1 roller).
+- `app/security/safety.py::MAX_LEVERAGE = 3` — Bölüm 9.3'teki "kod içi sabit
+  limit" birebir: `.env`/ortam değişkeniyle **değiştirilemez**, sadece kodu
+  düzenleyip yeniden deploy ederek değiştirilebilir. `POST /trading/leverage`
+  bu tavanı aşan hiçbir isteği kabul etmez.
+- `app/security/safety.py::check_withdrawals_disabled` — canlı emirden/kaldıraç
+  değişikliğinden önce Binance'e API anahtarının **çekim izninin kapalı**
+  olduğu sorulur (Bölüm 9.1, birinci madde); izin açıksa VEYA doğrulama
+  başarısız olursa (ör. borsa erişilemedi) varsayılan olarak **temkinli
+  davranılıp emir engellenir** ("fail closed").
+- `scripts/check_secrets.py` — Bölüm 9.5'teki "commit'te .env/anahtar
+  sızıntısı tespiti" için çalıştırılabilir bir tarayıcı; git tarafından
+  takip edilen tüm dosyaları API anahtarı deseni, `.env` dosyası ve özel
+  anahtar bloğu için tarar. Bu repoya karşı çalıştırıldı, temiz çıktı verdi.
+
+| Endpoint | Açıklama |
+|---|---|
+| `GET /security/status` | Kill switch durumu, live-trading bayrağı, max kaldıraç, drawdown eşiği |
+| `POST /security/kill-switch/activate` | Kill switch'i manuel devreye alır |
+| `POST /security/kill-switch/deactivate` | Kill switch'i kapatır |
+| `POST /trading/leverage` | Gerçek kaldıracı değiştirir — `MAX_LEVERAGE` tavanına ve tüm canlı-işlem kapılarına tabidir |
+
+**Operasyonel güvenlik (Bölüm 9.4) — bunlar kodla değil, sizin altyapı/hesap
+ayarlarınızla sağlanır, bu proje kapsamının dışındadır:** Binance hesabında
+2FA, VPS'e SSH-key ile giriş, fail2ban, düzenli veritabanı yedeği.
+
 ## Yol haritası
 
 - [x] Screener (Binance, teknik skor)
@@ -359,5 +397,6 @@ katacak, o aşamaya bırakıldı.
 - [x] Screener + motorları periyodik/zamanlanmış bir job'a bağlama (APScheduler, FastAPI lifespan)
 - [x] ML metodolojisi yükseltmesi: triple-barrier etiketleme + olasılık kalibrasyonu + meta-labeling ("Kripto Bot Tam Rehber" entegrasyonu)
 - [x] Kalıcı veritabanı katmanı (TimescaleDB/PostgreSQL, opsiyonel) + Docker Compose
+- [x] Güvenlik protokolü sertleştirme: kill switch (manuel+otomatik), sabit kaldıraç tavanı, API anahtarı çekim izni kontrolü, sır tarama betiği
 - [ ] Redis canlı cache katmanı (çoklu-process ölçeklenme gerektiğinde)
 - [ ] BIST/VIOP adapter'ları

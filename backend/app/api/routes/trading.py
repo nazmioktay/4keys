@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException
 
-from app.trading.executor import LiveTradingDisabled, get_trading_exchange, place_live_order
-from app.trading.schemas import OrderRequest, OrderResult
+from app.trading.executor import LiveTradingDisabled, get_trading_exchange, place_live_order, set_live_leverage
+from app.trading.schemas import LeverageRequest, LeverageResult, OrderRequest, OrderResult
 
 router = APIRouter(prefix="/trading", tags=["trading"])
 
@@ -39,3 +39,17 @@ def order(payload: OrderRequest) -> OrderResult:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return OrderResult(raw=raw)
+
+
+@router.post("/leverage", response_model=LeverageResult)
+def leverage(payload: LeverageRequest) -> LeverageResult:
+    """Gerçek kaldıracı değiştirir. `order` ile aynı güvenlik kapılarına ek
+    olarak, kod içi sabit bir tavana (bkz. `app.security.safety.MAX_LEVERAGE`,
+    Güvenlik Protokolü Bölüm 9.3) tabidir — bu tavan `.env` ile aşılamaz."""
+    try:
+        raw = set_live_leverage(payload)
+    except LiveTradingDisabled as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return LeverageResult(raw=raw)

@@ -2,6 +2,7 @@ import logging
 
 from app.engine.service import ModelNotTrained, run_cycle_once
 from app.screener.service import refresh as refresh_screener
+from app.security.kill_switch import KillSwitchActive
 
 from . import status
 
@@ -37,6 +38,8 @@ def job_run_engine_cycle() -> None:
         summary = ", ".join(f"{a.symbol}:{a.type}" for a in actions) or "aksiyon yok"
         status.record(ENGINE_CYCLE_JOB_ID, ok=True, detail=summary)
     except ModelNotTrained as exc:
+        status.record(ENGINE_CYCLE_JOB_ID, ok=True, detail=f"atlandı: {exc}")
+    except KillSwitchActive as exc:
         status.record(ENGINE_CYCLE_JOB_ID, ok=True, detail=f"atlandı: {exc}")
     except Exception as exc:  # noqa: BLE001 - zamanlayıcı thread'i asla çökmemeli
         logger.exception("engine cycle job failed")

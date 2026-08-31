@@ -9,6 +9,7 @@ from app.ml.features import latest_feature_vector
 from app.ml.meta_label import MetaLabelModel
 from app.ml.model import Prediction, SignalModel
 from app.portfolio.manager import PortfolioManager
+from app.security import kill_switch
 
 from .positions import PaperPositionStore
 
@@ -110,6 +111,9 @@ class DecisionEngine:
         return Action(symbol, "hold", "pozisyon açık, sinyal değişmedi", price, prediction.confidence)
 
     def _open(self, symbol: str, direction: str, price: float) -> Action | None:
+        if kill_switch.is_active():
+            return Action(symbol, "blocked", f"kill switch aktif: {kill_switch.status().reason}", price, 0.0)
+
         if self.portfolio is None:
             self.positions.open(symbol, direction, price)
             return None

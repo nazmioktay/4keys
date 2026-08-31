@@ -5,6 +5,7 @@ from app.ml.model import DEFAULT_MODEL_PATH, SignalModel
 from app.portfolio.shared import get_portfolio
 from app.screener.scanner import top_long, top_short
 from app.screener.service import get_scan_results
+from app.security import kill_switch
 
 from .decision import Action, DecisionEngine
 from .positions import PaperPositionStore
@@ -26,6 +27,9 @@ def run_cycle_once() -> list[Action]:
     tetikleyici arasında tutarlı davranış garanti eder. Screener taramasını
     tekrarlamaz; `app.screener.service` önbelleğini paylaşır.
     """
+    if kill_switch.is_active():
+        raise kill_switch.KillSwitchActive(f"Kill switch aktif: {kill_switch.status().reason}")
+
     if not DEFAULT_MODEL_PATH.exists():
         raise ModelNotTrained("Model henüz eğitilmedi. Önce /ml/train çağırın (veya train_signal_model).")
 

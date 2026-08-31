@@ -87,3 +87,18 @@ class BinanceExchange(Exchange):
     def cancel_order(self, order_id: str, symbol: str, market_type: str = "future") -> dict:
         self._require_auth()
         return self._client(market_type).cancel_order(order_id, symbol)
+
+    def set_leverage(self, symbol: str, leverage: int) -> dict:
+        self._require_auth()
+        return self._futures.set_leverage(leverage, symbol)
+
+    def get_api_key_permissions(self) -> dict:
+        """Binance'e bu API anahtarının izinlerini sorar (Güvenlik Protokolü
+        Bölüm 9.1 — çekim izninin kapalı olduğunu KOD İÇİNDE doğrulamak için).
+
+        ccxt'nin `sapiGetAccountApiRestrictions` uç noktasını sarar; bazı alt
+        hesap/izin kombinasyonlarında Binance bu uç noktayı kısıtlayabilir,
+        bu durumda çağıran taraf hatayı "doğrulanamadı" olarak ele almalıdır.
+        """
+        self._require_auth()
+        return self._spot.sapiGetAccountApiRestrictions()

@@ -1,7 +1,9 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+from app.core.config import settings
 from app.db import repository as db
+from app.security import kill_switch
 
 from .risk_manager import calculate_kelly_position_size, calculate_position_size, evaluate_risk
 from .schemas import PositionExposure, RiskDecision, RiskRules, TradeStats
@@ -134,7 +136,25 @@ class PortfolioManager:
         }
         self.closed_history.append(record)
         db.record_trade(record)
+        self._maybe_trip_kill_switch()
         return record
+
+    def _maybe_trip_kill_switch(self) -> None:
+        """Güvenlik Protokolü Bölüm 9.3: günlük/oturum drawdown limiti
+        aşılırsa kill switch'i otomatik devreye alır. Zaten aktifse tekrar
+        tetiklemez (ilk tetikleyen sebep ve zaman korunur)."""
+        if kill_switch.is_active():
+            return
+        if self.starting_equity <= 0:
+            return
+        drawdown_pct = max(0.0, (self.starting_equity - self.equity) / self.starting_equity * 100)
+        if drawdown_pct >= settings.kill_switch_daily_drawdown_pct:
+            kill_switch.activate(
+                reason=(
+                    f"Oturum drawdown'u %{drawdown_pct:.2f}, limiti (%{settings.kill_switch_daily_drawdown_pct}) aştı."
+                ),
+                triggered_by="auto_drawdown",
+            )
 
     def status(self) -> dict:
         return {

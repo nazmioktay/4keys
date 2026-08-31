@@ -18,3 +18,13 @@ class OrderRequest(BaseModel):
 
 class OrderResult(BaseModel):
     raw: dict
+
+
+class LeverageRequest(BaseModel):
+    symbol: str
+    leverage: int = Field(..., ge=1, description="İstenen kaldıraç; kod içi sabit tavanı (bkz. security.MAX_LEVERAGE) aşamaz")
+    confirm: bool = Field(default=False, description="Gerçek kaldıraç değişikliği için açıkça true olmalı.")
+
+
+class LeverageResult(BaseModel):
+    raw: dict

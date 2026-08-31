@@ -36,6 +36,15 @@ class Settings(BaseSettings):
     # postgresql+psycopg2://user:pass@localhost:5432/fourkeys
     database_url: str = ""
 
+    # --- Güvenlik protokolü (Modül: Kripto Bot Rehberi Bölüm 9) ---
+    # Günlük/oturum drawdown bu yüzdeyi aşarsa kill switch OTOMATİK devreye girer
+    # (bkz. app.security.kill_switch) — tüm yeni pozisyon açma girişimleri durur.
+    kill_switch_daily_drawdown_pct: float = 15.0
+    # Canlı emirden önce Binance'ten API anahtarının çekim izninin kapalı
+    # olduğu doğrulanır; doğrulama başarısız olursa (ör. borsa erişilemedi)
+    # varsayılan olarak temkinli davranılıp emir engellenir.
+    require_api_key_permission_check: bool = True
+
     model_config = SettingsConfigDict(env_prefix="FOURKEYS_", env_file=".env")
 
 
