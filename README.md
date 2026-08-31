@@ -133,12 +133,37 @@ uvicorn app.main:app --reload
   entegrasyonu varsayılan olarak kullanıyor — yani ana para yönetimi artık
   ML motorunun bir parçası, ayrı bir hesap makinesi değil.
 
+**Kelly kriteri (çeyrek/yarım/tam) pozisyon boyutlandırma:**
+- `RiskRules.position_sizing_method`: `"fixed_risk"` (klasik, varsayılan) veya
+  `"kelly"`.
+- `app/portfolio/risk_manager.py::kelly_fraction` — full Kelly formülü
+  (`f* = p - q/b`); beklenen değeri negatif çıkan "kenarlar" için asla
+  negatif pozisyon önermez, 0 döner.
+- `kelly_multiplier`: çeyrek Kelly=`0.25`, yarım Kelly=`0.5` (varsayılan,
+  önerilen — full Kelly pratikte çok volatildir), tam Kelly=`1.0`.
+- `max_kelly_fraction_pct`: formül ne derse desin bir işleme ayrılacak
+  sermayenin üst güvenlik sınırı (istatistikler az örneklemli/yanlış
+  olabileceği için).
+- **Otomatik/canlı entegrasyon:** Kelly istatistikleri (kazanma oranı,
+  ortalama kazanç/kayıp) varsayılan olarak `PortfolioManager`'ın **kendi
+  kapanmış işlem geçmişinden** otomatik hesaplanır — yani otomatik alım
+  satım motoru (ML karar motoru / DCA / stratejiler, hepsi aynı
+  `PortfolioManager`'dan geçiyor) canlı performansına göre kendi kendini
+  ayarlar. `kelly_min_trades` (varsayılan 20) kadar kapanmış işlem
+  birikene kadar güvenli tarafta kalınıp otomatik olarak `fixed_risk`'e
+  düşülür. `/backtest/run` raporundan gelen istatistikleri "önsel" olarak
+  denemek isterseniz `/portfolio/kelly-size` ile bağımsız hesaplayabilir,
+  veya `propose_open(..., kelly_stats_override=...)` ile programatik
+  olarak geçebilirsiniz.
+
 | Endpoint | Açıklama |
 |---|---|
-| `GET /portfolio/status` | Equity, açık pozisyonlar, kapanan işlemler, aktif kurallar |
-| `PUT /portfolio/rules` | Risk kurallarını günceller |
+| `GET /portfolio/status` | Equity, açık pozisyonlar, kapanan işlemler, aktif kurallar, işlem istatistikleri |
+| `PUT /portfolio/rules` | Risk kurallarını (fixed_risk veya Kelly) günceller |
 | `POST /portfolio/reset` | Portföyü verilen sermaye/kurallarla sıfırdan başlatır |
-| `POST /portfolio/position-size` | Risk yüzdesi + SL mesafesinden pozisyon boyutu hesaplar |
+| `POST /portfolio/position-size` | Risk yüzdesi + SL mesafesinden pozisyon boyutu hesaplar (fixed_risk) |
+| `GET /portfolio/trade-stats` | Portföyün kendi geçmişinden hesaplanan kazanma oranı / ort. kazanç-kayıp |
+| `POST /portfolio/kelly-size` | Çeyrek/yarım/tam Kelly'ye göre bağımsız pozisyon boyutu hesaplar |
 | `POST /portfolio/risk-check` | Durumsuz "ne olurdu" risk kontrolü (paylaşılan portföyü etkilemez) |
 
 ### Modül 6 — Binance & Denizbank API Hazırlığı ✅
@@ -241,5 +266,6 @@ Yanıt: `data_sufficiency` (kaç mum kullanıldı, yeterli miydi, neden),
 - [x] Portföy / risk yönetimi kuralları (pozisyon boyutlandırma, maruziyet limitleri, günlük zarar devre kesici) + karar motoruna entegrasyon
 - [x] Binance canlı işlem hazırlığı (güvenlik kapılı) + Denizbank Açık Bankacılık şablonu
 - [x] Güçlü backtest motoru (otomatik veri yeterliliği keşfi + train/test + Sharpe/Sortino/Calmar)
+- [x] Kelly kriteri (çeyrek/yarım/tam) pozisyon boyutlandırma + canlı işlem geçmişinden otomatik entegrasyon
 - [ ] Screener + motorları periyodik/zamanlanmış bir job'a bağlama
 - [ ] BIST/VIOP adapter'ları

@@ -1,4 +1,56 @@
-from .schemas import PositionExposure, RiskDecision, RiskRules
+from .schemas import KELLY_VARIANTS, PositionExposure, RiskDecision, RiskRules
+
+
+def kelly_fraction(win_rate_pct: float, avg_win_pct: float, avg_loss_pct: float) -> float:
+    """Full Kelly kesrini (0..1) hesaplar.
+
+    Formül: f* = p - q/b
+      p = kazanma olasılığı, q = 1-p, b = kazanç/kayıp oranı (odds)
+    `avg_loss_pct` negatif olmalıdır (örn. -2.5). Kelly negatif çıkarsa
+    (beklenen değer negatif, yani bu "kenar" işlem açmaya değmez) 0 döner —
+    hiçbir zaman negatif (short-the-edge) pozisyon önerilmez.
+    """
+    if avg_win_pct <= 0 or avg_loss_pct >= 0:
+        return 0.0
+    p = max(min(win_rate_pct / 100, 1.0), 0.0)
+    q = 1 - p
+    b = avg_win_pct / abs(avg_loss_pct)
+    if b <= 0:
+        return 0.0
+    f = p - q / b
+    return max(f, 0.0)
+
+
+def resolve_kelly_multiplier(variant: str, custom_multiplier: float | None) -> float:
+    if variant == "custom":
+        if custom_multiplier is None:
+            raise ValueError("variant='custom' için custom_multiplier zorunludur.")
+        return custom_multiplier
+    return KELLY_VARIANTS[variant]
+
+
+def calculate_kelly_position_size(
+    equity: float,
+    win_rate_pct: float,
+    avg_win_pct: float,
+    avg_loss_pct: float,
+    kelly_multiplier: float,
+    max_kelly_fraction_pct: float,
+) -> tuple[float, float, float]:
+    """Çeyrek/yarım/tam Kelly kriterine göre pozisyon boyutu hesaplar.
+
+    Full Kelly agresif ve volatildir; pratikte çoğu profesyonel yarım (0.5)
+    veya çeyrek (0.25) Kelly kullanır. `max_kelly_fraction_pct`, formül ne
+    derse desin bir işleme ayrılacak sermayeyi güvenlik amacıyla üstten
+    sınırlar (istatistikler yanlış/az örneklemli olabileceği için).
+
+    Döner: (size_quote, applied_kelly_pct, full_kelly_pct)
+    """
+    full_kelly_pct = kelly_fraction(win_rate_pct, avg_win_pct, avg_loss_pct) * 100
+    applied_pct = min(full_kelly_pct * kelly_multiplier, max_kelly_fraction_pct)
+    applied_pct = max(applied_pct, 0.0)
+    size_quote = equity * applied_pct / 100
+    return size_quote, applied_pct, full_kelly_pct
 
 
 def calculate_position_size(

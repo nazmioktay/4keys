@@ -3,16 +3,36 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
+KELLY_VARIANTS: dict[str, float] = {"quarter": 0.25, "half": 0.5, "full": 1.0}
+
+
 class RiskRules(BaseModel):
     """Ana para yönetimi kuralları — tüm botlar/stratejiler bu kurallar
     üzerinden pozisyon açar; kurallar aşılıyorsa işlem küçültülür veya reddedilir.
     """
 
-    max_risk_per_trade_pct: float = Field(1.0, gt=0, description="Bir işlemde riske edilecek sermaye yüzdesi (SL mesafesine göre boyutlandırma için)")
+    max_risk_per_trade_pct: float = Field(1.0, gt=0, description="Bir işlemde riske edilecek sermaye yüzdesi (SL mesafesine göre boyutlandırma için) — position_sizing_method='fixed_risk' iken kullanılır")
     max_total_exposure_pct: float = Field(50.0, gt=0, description="Tüm açık pozisyonların toplamının sermayeye oranı üst sınırı")
     max_symbol_exposure_pct: float = Field(15.0, gt=0, description="Tek bir sembole ayrılabilecek maksimum sermaye yüzdesi")
     max_concurrent_positions: int = Field(5, ge=1, description="Aynı anda açık olabilecek maksimum farklı sembol sayısı")
     daily_loss_limit_pct: float = Field(5.0, gt=0, description="Bu yüzdeye ulaşan günlük/oturum zararında yeni işlem açılmaz")
+
+    # --- Kelly kriteri tabanlı pozisyon boyutlandırma ---
+    position_sizing_method: Literal["fixed_risk", "kelly"] = Field(
+        "fixed_risk", description="'fixed_risk': SL mesafesine göre sabit risk yüzdesi. 'kelly': Kelly kriteri."
+    )
+    kelly_multiplier: float = Field(
+        0.5, gt=0, le=1.5,
+        description="Full Kelly'nin uygulanacak kesri. Çeyrek Kelly=0.25, yarım Kelly=0.5 (önerilen/varsayılan), tam Kelly=1.0",
+    )
+    kelly_min_trades: int = Field(
+        20, ge=5,
+        description="Kelly istatistiklerinin (kazanma oranı, ort. kazanç/kayıp) güvenilir sayılması için gereken minimum kapanmış işlem sayısı. Yeterli geçmiş yoksa fixed_risk'e düşülür.",
+    )
+    max_kelly_fraction_pct: float = Field(
+        25.0, gt=0,
+        description="Kelly formülü ne derse desin, bir işleme ayrılacak sermayenin üst güvenlik sınırı (%)",
+    )
 
 
 class PositionSizeRequest(BaseModel):
@@ -49,6 +69,13 @@ class RiskDecision(BaseModel):
     reasons: list[str] = Field(default_factory=list)
 
 
+class TradeStats(BaseModel):
+    num_trades: int
+    win_rate_pct: float
+    avg_win_pct: float
+    avg_loss_pct: float
+
+
 class PortfolioStatus(BaseModel):
     equity: float
     starting_equity: float
@@ -56,3 +83,21 @@ class PortfolioStatus(BaseModel):
     open_positions: list[dict]
     closed_history: list[dict]
     rules: RiskRules
+    trade_stats: TradeStats
+
+
+class KellySizeRequest(BaseModel):
+    equity: float = Field(..., gt=0)
+    win_rate_pct: float = Field(..., ge=0, le=100)
+    avg_win_pct: float = Field(..., gt=0, description="Ortalama kazanan işlem getirisi (pozitif yüzde)")
+    avg_loss_pct: float = Field(..., lt=0, description="Ortalama kaybeden işlem getirisi (negatif yüzde, örn. -2.5)")
+    variant: Literal["quarter", "half", "full", "custom"] = "half"
+    custom_multiplier: float | None = Field(default=None, gt=0, le=1.5, description="variant='custom' iken kullanılır")
+    max_kelly_fraction_pct: float = Field(25.0, gt=0)
+
+
+class KellySizeResponse(BaseModel):
+    full_kelly_pct: float
+    applied_kelly_pct: float
+    kelly_multiplier_used: float
+    size_quote: float

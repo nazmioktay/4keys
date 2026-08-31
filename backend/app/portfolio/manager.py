@@ -1,8 +1,8 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from .risk_manager import calculate_position_size, evaluate_risk
-from .schemas import PositionExposure, RiskDecision, RiskRules
+from .risk_manager import calculate_kelly_position_size, calculate_position_size, evaluate_risk
+from .schemas import PositionExposure, RiskDecision, RiskRules, TradeStats
 
 
 @dataclass
@@ -26,6 +26,17 @@ class PortfolioManager:
     pozisyon sayısı, günlük zarar limiti) göre boyutlandırır ve gerekirse
     reddeder. Tüm modüller (ML karar motoru, DCA botları, manuel stratejiler)
     gerçek/paper emir öncesi bu katmandan geçmelidir.
+
+    `rules.position_sizing_method` iki modu destekler:
+    - `"fixed_risk"`: stop-loss mesafesine göre sabit risk yüzdesi (klasik).
+    - `"kelly"`: çeyrek/yarım/tam Kelly kriteri. İstatistikler (kazanma
+      oranı, ortalama kazanç/kayıp) varsayılan olarak bu portföyün KENDİ
+      kapanmış işlem geçmişinden otomatik hesaplanır — yani sistem canlı
+      performansına göre kendi kendini ayarlar. Yeterli geçmiş
+      (`rules.kelly_min_trades`) birikene kadar güvenli tarafta kalmak için
+      otomatik olarak `fixed_risk`'e düşer. Bir backtest raporundan gelen
+      istatistikleri "önsel" (prior) olarak kullanmak isterseniz
+      `kelly_stats_override` ile geçebilirsiniz.
     """
 
     def __init__(self, starting_equity: float, rules: RiskRules | None = None) -> None:
@@ -39,18 +50,59 @@ class PortfolioManager:
     def get(self, symbol: str) -> PortfolioPosition | None:
         return self.positions.get(symbol)
 
+    def trade_stats(self) -> TradeStats:
+        """Kapanmış işlem geçmişinden kazanma oranı ve ortalama kazanç/kayıp hesaplar."""
+        pnls = [record["pnl_pct"] for record in self.closed_history]
+        if not pnls:
+            return TradeStats(num_trades=0, win_rate_pct=0.0, avg_win_pct=0.0, avg_loss_pct=0.0)
+
+        wins = [p for p in pnls if p > 0]
+        losses = [p for p in pnls if p < 0]
+        return TradeStats(
+            num_trades=len(pnls),
+            win_rate_pct=round(len(wins) / len(pnls) * 100, 2),
+            avg_win_pct=round(sum(wins) / len(wins), 3) if wins else 0.0,
+            avg_loss_pct=round(sum(losses) / len(losses), 3) if losses else 0.0,
+        )
+
     def propose_open(
         self,
         symbol: str,
         direction: str,
         entry_price: float,
         stop_loss_price: float,
+        kelly_stats_override: TradeStats | None = None,
     ) -> RiskDecision:
+        size_quote = self._size_new_position(symbol, direction, entry_price, stop_loss_price, kelly_stats_override)
+        exposures = [PositionExposure(symbol=p.symbol, size_quote=p.size_quote) for p in self.positions.values()]
+        return evaluate_risk(self.equity, exposures, self.realized_pnl_session, symbol, size_quote, self.rules)
+
+    def _size_new_position(
+        self,
+        symbol: str,
+        direction: str,
+        entry_price: float,
+        stop_loss_price: float,
+        kelly_stats_override: TradeStats | None,
+    ) -> float:
+        if self.rules.position_sizing_method == "kelly":
+            stats = kelly_stats_override or self.trade_stats()
+            if stats.num_trades >= self.rules.kelly_min_trades and stats.avg_loss_pct < 0:
+                size_quote, _, _ = calculate_kelly_position_size(
+                    self.equity,
+                    stats.win_rate_pct,
+                    stats.avg_win_pct,
+                    stats.avg_loss_pct,
+                    self.rules.kelly_multiplier,
+                    self.rules.max_kelly_fraction_pct,
+                )
+                return size_quote
+            # Yeterli/geçerli Kelly istatistiği yok -> güvenli tarafta kal, fixed_risk kullan.
+
         size_quote, _, _ = calculate_position_size(
             self.equity, entry_price, stop_loss_price, self.rules.max_risk_per_trade_pct, direction
         )
-        exposures = [PositionExposure(symbol=p.symbol, size_quote=p.size_quote) for p in self.positions.values()]
-        return evaluate_risk(self.equity, exposures, self.realized_pnl_session, symbol, size_quote, self.rules)
+        return size_quote
 
     def open(self, symbol: str, direction: str, entry_price: float, size_quote: float) -> PortfolioPosition:
         position = PortfolioPosition(symbol=symbol, direction=direction, entry_price=entry_price, size_quote=size_quote)
@@ -98,4 +150,5 @@ class PortfolioManager:
             ],
             "closed_history": self.closed_history,
             "rules": self.rules,
+            "trade_stats": self.trade_stats(),
         }
