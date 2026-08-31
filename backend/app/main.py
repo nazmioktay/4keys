@@ -2,7 +2,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.api.routes import backtest, bank, dca, engine, ml, portfolio, scheduler, screener, security, strategy, trading
+from app.api.routes import backtest, bank, bist, dca, engine, ml, portfolio, scheduler, screener, security, strategy, trading
 from app.api.routes import db as db_routes
 from app.db.session import init_db
 from app.scheduler.scheduler import start_scheduler, stop_scheduler
@@ -30,6 +30,7 @@ app.include_router(backtest.router)
 app.include_router(scheduler.router)
 app.include_router(db_routes.router)
 app.include_router(security.router)
+app.include_router(bist.router)
 
 
 @app.get("/health")

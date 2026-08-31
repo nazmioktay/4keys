@@ -383,6 +383,40 @@ gerçekten uygulanabilir** maddeleri:
 ayarlarınızla sağlanır, bu proje kapsamının dışındadır:** Binance hesabında
 2FA, VPS'e SSH-key ile giriş, fail2ban, düzenli veritabanı yedeği.
 
+### Modül 11 — BIST/VIOP Entegrasyonu (Denizbank AlgoLab) ✅
+BIST/VIOP'un Binance gibi tek, halka açık bir retail API'si yok; Türkiye'de
+algoritmik erişim bir aracı kurum API'si üzerinden olur. Zaten Denizbank
+bağlantımız olduğu için **Denizbank AlgoLab** (retail algoritmik trading
+API'si, BIST hisse + VIOP vadeli) hedeflendi.
+
+**Dürüstlük notu (Denizbank Açık Bankacılık entegrasyonuyla aynı prensip):**
+AlgoLab'ın sabit, halka açık bir OpenAPI şeması yok. `app/exchanges/algolab.py`,
+AlgoLab'ın yaygın bilinen genel kimlik doğrulama akışını (API key + kullanıcı
+adı/şifre → SMS/e-posta doğrulama kodu → oturum hash'i) ve tipik uç nokta
+kalıbını doğru mimariyle uyguluyor; kesin uç nokta yolları/yanıt alan adları
+API key başvurunuz sonrası erişeceğiniz güncel dokümantasyonla teyit
+edilmeli (`_endpoints` sözlüğü tek noktadan güncellenecek şekilde tasarlandı).
+
+- `AlgoLabExchange`, screener/ML/backtest modüllerinin kullandığı aynı
+  `Exchange` arayüzünü uyguluyor — mimari olarak Binance ile birebir aynı
+  soyutlamayı paylaşıyor.
+- **İki adımlı oturum**: `POST /bist/login` (kullanıcı adı/şifre → SMS/e-posta
+  kodu tetiklenir) → `POST /bist/login/verify` (kodu doğrulayıp oturum
+  hash'ini alır). Binance'ten farklı olarak AlgoLab'da **piyasa verisi bile
+  oturum gerektirir**.
+- **Aynı güvenlik prensipleri**: gerçek emir göndermek kill switch'in kapalı
+  olmasını, `FOURKEYS_ENABLE_BIST_TRADING=true`'yu VE `confirm: true`'yu
+  gerektirir — Binance'teki üç kapılı sistemin birebir aynısı.
+
+| Endpoint | Açıklama |
+|---|---|
+| `POST /bist/login` | 1. adım: kullanıcı adı/şifre, SMS/e-posta kodu tetikler |
+| `POST /bist/login/verify` | 2. adım: doğrulama kodunu girip oturumu tamamlar |
+| `GET /bist/symbols?market_type=equity\|viop` | Sembol listesi |
+| `GET /bist/ohlcv?symbol=&timeframe=&limit=` | Geçmiş mum verisi |
+| `GET /bist/positions` | Açık pozisyonlar |
+| `POST /bist/order` | Gerçek emir gönderir — 3 güvenlik kapısı aktif |
+
 ## Yol haritası
 
 - [x] Screener (Binance, teknik skor)
@@ -399,4 +433,4 @@ ayarlarınızla sağlanır, bu proje kapsamının dışındadır:** Binance hesa
 - [x] Kalıcı veritabanı katmanı (TimescaleDB/PostgreSQL, opsiyonel) + Docker Compose
 - [x] Güvenlik protokolü sertleştirme: kill switch (manuel+otomatik), sabit kaldıraç tavanı, API anahtarı çekim izni kontrolü, sır tarama betiği
 - [ ] Redis canlı cache katmanı (çoklu-process ölçeklenme gerektiğinde)
-- [ ] BIST/VIOP adapter'ları
+- [x] BIST/VIOP adapter'ı (Denizbank AlgoLab — oturum tabanlı, aynı Exchange arayüzü, aynı güvenlik kapıları)

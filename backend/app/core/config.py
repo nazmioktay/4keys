@@ -45,6 +45,16 @@ class Settings(BaseSettings):
     # varsayılan olarak temkinli davranılıp emir engellenir.
     require_api_key_permission_check: bool = True
 
+    # --- BIST/VIOP (Denizbank AlgoLab) ---
+    # AlgoLab API başvurunuzdan aldığınız değerlerle doldurun. Kimlik
+    # doğrulama iki adımlıdır (kullanıcı adı/şifre -> SMS/e-posta kodu),
+    # bkz. /bist/login ve /bist/login/verify.
+    algolab_base_url: str = "https://www.algolab.com.tr/api"
+    algolab_api_key: SecretStr = SecretStr("")
+    algolab_username: str = ""
+    algolab_password: SecretStr = SecretStr("")
+    enable_bist_trading: bool = False  # Binance'teki enable_live_trading ile aynı mantık — ikinci güvenlik kapısı
+
     model_config = SettingsConfigDict(env_prefix="FOURKEYS_", env_file=".env")
 
 
