@@ -25,6 +25,11 @@ class Settings(BaseSettings):
     denizbank_client_secret: SecretStr = SecretStr("")
     denizbank_redirect_uri: str = "http://localhost:8000/bank/denizbank/callback"
 
+    # --- Periyodik zamanlayıcı (Modül: Screener + motorların otomatik döngüsü) ---
+    scheduler_enabled: bool = True
+    screener_refresh_seconds: int = 60
+    engine_cycle_seconds: int = 300
+
     model_config = SettingsConfigDict(env_prefix="FOURKEYS_", env_file=".env")
 
 

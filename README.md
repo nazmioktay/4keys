@@ -256,6 +256,33 @@ Yanıt: `data_sufficiency` (kaç mum kullanıldı, yeterli miydi, neden),
 |---|---|
 | `POST /backtest/run` | DCA veya strateji için otomatik veri keşifli, train/test ayrımlı tam backtest raporu |
 
+### Modül 8 — Screener ve Motorların Periyodik Zamanlayıcıya Bağlanması ✅
+Artık kullanıcı her seferinde `/screener/top` veya `/engine/run-cycle`'ı elle
+çağırmak zorunda değil — uygulama ayağa kalktığı anda arka planda otomatik
+çalışan bir zamanlayıcı (APScheduler) devreye giriyor:
+
+- `app/screener/service.py` — screener önbelleğini (`refresh()`) hem API hem
+  zamanlayıcı için paylaşılan tek kaynak haline getirdi.
+- `app/engine/service.py` — `/engine/run-cycle`'daki mantığı `run_cycle_once()`
+  olarak dışarı çıkardı; **screener önbelleğini tekrar taramadan** yeniden
+  kullanıyor (iki job aynı veriyi paylaşıyor, gereksiz borsa çağrısı yok).
+- `app/scheduler/` — `job_refresh_screener` (varsayılan her 60 saniyede bir)
+  ve `job_run_engine_cycle` (varsayılan her 300 saniyede bir) işlerini
+  `BackgroundScheduler` ile FastAPI'nin `lifespan`'ına bağladı: uygulama
+  başlarken otomatik başlıyor, kapanırken düzgün kapanıyor.
+- **Dayanıklılık:** Bir job'daki hata (borsa erişilemedi, model henüz
+  eğitilmedi vb.) zamanlayıcı thread'ini asla çökertmez — yakalanıp
+  `/scheduler/status` üzerinden görülebilir şekilde kaydedilir. Model henüz
+  eğitilmemişse bu bir hata değil, "atlandı" olarak işaretlenir.
+- `FOURKEYS_SCHEDULER_ENABLED=false` ile tamamen kapatılabilir;
+  `FOURKEYS_SCREENER_REFRESH_SECONDS` / `FOURKEYS_ENGINE_CYCLE_SECONDS` ile
+  aralıklar ayarlanabilir.
+
+| Endpoint | Açıklama |
+|---|---|
+| `GET /scheduler/status` | Her job için sonraki/son çalışma zamanı, son sonuç, çalışma/hata sayısı |
+| `POST /scheduler/trigger/{job_id}` | Bir job'ı (`screener_refresh` veya `engine_cycle`) beklemeden hemen çalıştırır |
+
 ## Yol haritası
 
 - [x] Screener (Binance, teknik skor)
@@ -267,5 +294,5 @@ Yanıt: `data_sufficiency` (kaç mum kullanıldı, yeterli miydi, neden),
 - [x] Binance canlı işlem hazırlığı (güvenlik kapılı) + Denizbank Açık Bankacılık şablonu
 - [x] Güçlü backtest motoru (otomatik veri yeterliliği keşfi + train/test + Sharpe/Sortino/Calmar)
 - [x] Kelly kriteri (çeyrek/yarım/tam) pozisyon boyutlandırma + canlı işlem geçmişinden otomatik entegrasyon
-- [ ] Screener + motorları periyodik/zamanlanmış bir job'a bağlama
+- [x] Screener + motorları periyodik/zamanlanmış bir job'a bağlama (APScheduler, FastAPI lifespan)
 - [ ] BIST/VIOP adapter'ları
