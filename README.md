@@ -451,6 +451,28 @@ gerçek bir middleware, CORSMiddleware'den SONRA eklenerek onun İÇİNDE
 çalışacak şekilde. Bu, hem gerçek sunucuya karşı curl ile hem de
 `tests/test_error_handling.py` ile doğrulandı.
 
+### Modül 13 — Demo/sentetik veri modu ✅
+Gerçek borsaya ağ erişimi olmayan ortamlarda (ör. bu geliştirme
+sandbox'ı, kısıtlı ağ politikası olan CI, offline geliştirme) tüm
+boru hattını (screener → ML eğitimi → karar motoru) uçtan uca canlı
+göstermek için `app/exchanges/demo.py::DemoExchange` eklendi. Sembol
+başına sabit bir seed ile deterministik, GBM benzeri sentetik OHLCV
+üretir; `Exchange` arayüzünü implemente eder, bu yüzden screener/ML/
+strateji modülleri onu Binance'ten ayırt etmeden kullanır.
+
+**Nasıl açılır:**
+```bash
+FOURKEYS_EXCHANGE_ID=demo uvicorn app.main:app --reload
+```
+
+**Güvenlik notu:** Demo modu yalnızca salt-okunur piyasa verisi
+arayüzüne (`app.exchanges.get_exchange`) bağlıdır. Gerçek emir verme
+yolu (`app.trading.executor.get_trading_exchange`) `exchange_id`
+ayarını hiç okumaz ve her zaman gerçek `BinanceExchange`'e sabitlenmiştir
+— yani demo modu asla gerçek bir emrin gönderilmesine yol açamaz. Bu,
+`tests/test_demo_exchange.py::test_trading_executor_never_uses_demo_exchange`
+ile doğrulanır.
+
 ## Yol haritası
 
 - [x] Screener (Binance, teknik skor)
@@ -469,3 +491,4 @@ gerçek bir middleware, CORSMiddleware'den SONRA eklenerek onun İÇİNDE
 - [ ] Redis canlı cache katmanı (çoklu-process ölçeklenme gerektiğinde)
 - [x] BIST/VIOP adapter'ı (Denizbank AlgoLab — oturum tabanlı, aynı Exchange arayüzü, aynı güvenlik kapıları)
 - [x] Frontend (React) — Portföy/Al-Sat/Araştırıcı/Ayarlar, gerçek backend'e bağlı
+- [x] Demo/sentetik veri modu (`FOURKEYS_EXCHANGE_ID=demo`) — ağ erişimi olmadan uçtan uca canlı gösterim
