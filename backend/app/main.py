@@ -1,11 +1,38 @@
+import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.api.routes import backtest, bank, bist, dca, engine, ml, portfolio, scheduler, screener, security, strategy, trading
 from app.api.routes import db as db_routes
 from app.db.session import init_db
 from app.scheduler.scheduler import start_scheduler, stop_scheduler
+
+logger = logging.getLogger(__name__)
+
+
+class UnhandledExceptionMiddleware(BaseHTTPMiddleware):
+    """Beklenmeyen (yakalanmamış) hataları düzgün bir JSON yanıtına çevirir.
+
+    Bunun bir `@app.exception_handler(Exception)` yerine gerçek bir
+    middleware olmasının nedeni: Starlette, bare `Exception` için kayıtlı
+    bir exception handler'ı `ServerErrorMiddleware`'e ekler — bu da
+    `CORSMiddleware`'in DIŞINDA (üstünde) çalışır. Sonuç: hata yanıtı CORS
+    başlıklarını hiç almaz ve tarayıcıda gerçek hata mesajı yerine anlamsız
+    bir "Failed to fetch" görünür. Middleware olarak (ve CORSMiddleware'den
+    SONRA eklenerek, böylece ondan İÇERİDE çalışacak şekilde) yazmak,
+    ürettiği yanıtın normal akışla CORSMiddleware'den geçmesini sağlar.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        try:
+            return await call_next(request)
+        except Exception as exc:  # noqa: BLE001 - kullanıcıya anlamlı bir hata dönmek için kasıtlı geniş yakalama
+            logger.exception("unhandled exception on %s %s", request.method, request.url.path)
+            return JSONResponse(status_code=502, content={"detail": f"Beklenmeyen bir hata oluştu: {exc}"})
 
 
 @asynccontextmanager
@@ -17,6 +44,18 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="4keys", description="Algoritmik kripto trading platformu", lifespan=lifespan)
+
+# Sıra önemli: CORSMiddleware önce eklenir (dıştaki katman), hata yakalama
+# middleware'i sonra eklenir (içteki katman) — böylece hata yanıtları da
+# CORS işleminden geçer. Starlette `add_middleware` her çağrıda listenin
+# başına ekler; bu yüzden SONRA eklenen İÇTE çalışır.
+app.add_middleware(UnhandledExceptionMiddleware)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 app.include_router(screener.router)
 app.include_router(ml.router)

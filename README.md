@@ -417,6 +417,40 @@ edilmeli (`_endpoints` sözlüğü tek noktadan güncellenecek şekilde tasarlan
 | `GET /bist/positions` | Açık pozisyonlar |
 | `POST /bist/order` | Gerçek emir gönderir — 3 güvenlik kapısı aktif |
 
+### Modül 12 — Frontend (React) ✅
+`frontend/` altında, backend'e gerçekten bağlanan basit bir React paneli.
+Görsel olarak ilk paylaşılan 3Commas ekran görüntülerindeki koyu tema ve alt
+sekme yapısını (Portföy / Al-Sat / AI Asistan / Araştırıcı / Ayarlar) izler,
+ama her sekme sahiden var olan bir backend uç noktasına bağlıdır — hiçbir
+sahte/işlevsiz buton yok. **AI Asistan** sekmesi bilinçli olarak "henüz
+eklenmedi" diyor, çünkü arkasında gerçek bir özellik yok.
+
+| Sekme | Bağlı olduğu modül |
+|---|---|
+| Portföy | `/portfolio/status`, `/security/status` — equity, açık pozisyonlar, kill switch durumu |
+| Al-Sat | `/dca/optimize`, `/strategy/examples`+`/strategy/backtest`, `/engine/run-cycle` |
+| Araştırıcı | `/screener/top` — Top 10 Long/Short |
+| Ayarlar | `/portfolio/rules` (düzenlenebilir), `/security/*` (kill switch aç/kapa), `/scheduler/status`, `/db/status` |
+
+**Çalıştırma:**
+```bash
+cd frontend
+npm install
+npm run dev
+```
+Backend'in `localhost:8000`'de çalıştığını varsayar; `docker compose up`
+ile de (backend + frontend + TimescaleDB) birlikte ayağa kalkar.
+
+**Bu modülü kurarken gerçek bir backend hatası bulundu ve düzeltildi:**
+FastAPI/Starlette'te bare `Exception` için kayıtlı bir `exception_handler`,
+`CORSMiddleware`'in DIŞINDA çalışan `ServerErrorMiddleware`'e ekleniyor —
+bu yüzden yakalanmamış hatalar CORS başlıklarını hiç almıyor ve tarayıcıda
+gerçek hata mesajı yerine anlamsız bir "Failed to fetch" görünüyordu. Çözüm:
+`app/main.py::UnhandledExceptionMiddleware` — bir exception handler değil,
+gerçek bir middleware, CORSMiddleware'den SONRA eklenerek onun İÇİNDE
+çalışacak şekilde. Bu, hem gerçek sunucuya karşı curl ile hem de
+`tests/test_error_handling.py` ile doğrulandı.
+
 ## Yol haritası
 
 - [x] Screener (Binance, teknik skor)
@@ -434,3 +468,4 @@ edilmeli (`_endpoints` sözlüğü tek noktadan güncellenecek şekilde tasarlan
 - [x] Güvenlik protokolü sertleştirme: kill switch (manuel+otomatik), sabit kaldıraç tavanı, API anahtarı çekim izni kontrolü, sır tarama betiği
 - [ ] Redis canlı cache katmanı (çoklu-process ölçeklenme gerektiğinde)
 - [x] BIST/VIOP adapter'ı (Denizbank AlgoLab — oturum tabanlı, aynı Exchange arayüzü, aynı güvenlik kapıları)
+- [x] Frontend (React) — Portföy/Al-Sat/Araştırıcı/Ayarlar, gerçek backend'e bağlı
