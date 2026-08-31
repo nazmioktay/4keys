@@ -23,6 +23,7 @@ class DCABacktestResult(BaseModel):
     max_drawdown_pct: float
     max_capital_used: float
     avg_trade_duration_candles: float
+    trade_pnls_pct: list[float] = []
 
 
 class DCAOptimizeRequest(BaseModel):

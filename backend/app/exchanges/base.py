@@ -17,8 +17,12 @@ class Exchange(ABC):
         """Verilen kote para birimi ve piyasa tipi için işlem gören sembolleri döner."""
 
     @abstractmethod
-    def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int) -> pd.DataFrame:
+    def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int, since: int | None = None) -> pd.DataFrame:
         """Bir sembol için OHLCV mum verisini DataFrame olarak döner.
 
         Kolonlar: timestamp, open, high, low, close, volume
+
+        `since` verilirse (Unix ms), o zamandan itibaren ileriye doğru en
+        fazla `limit` mum döner — geçmişe doğru sayfalama (bkz.
+        `app.backtest.data.fetch_full_history`) bunu kullanır.
         """

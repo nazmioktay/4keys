@@ -50,9 +50,9 @@ class BinanceExchange(Exchange):
             and (market_type != "future" or m.get("swap"))
         ]
 
-    def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int) -> pd.DataFrame:
+    def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int, since: int | None = None) -> pd.DataFrame:
         client = self._client("future")
-        raw = client.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit)
+        raw = client.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit, since=since)
         df = pd.DataFrame(raw, columns=["timestamp", "open", "high", "low", "close", "volume"])
         df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
         return df

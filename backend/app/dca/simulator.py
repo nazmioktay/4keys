@@ -32,6 +32,7 @@ def simulate_dca(prices: np.ndarray, params: DCAParams) -> DCABacktestResult:
     max_capital_used = 0.0
     durations: list[int] = []
     equity_curve = [0.0]
+    trade_pnls_pct: list[float] = []
 
     i = 0
     while i < n:
@@ -71,6 +72,7 @@ def simulate_dca(prices: np.ndarray, params: DCAParams) -> DCABacktestResult:
                 wins += 1
                 durations.append(j - entry_index)
                 equity_curve.append(equity_curve[-1] + profit_quote)
+                trade_pnls_pct.append(round(pnl_pct, 4))
                 i = j + 1
                 closed = True
                 break
@@ -81,6 +83,7 @@ def simulate_dca(prices: np.ndarray, params: DCAParams) -> DCABacktestResult:
                 trades_closed += 1
                 durations.append(j - entry_index)
                 equity_curve.append(equity_curve[-1] + loss_quote)
+                trade_pnls_pct.append(round(pnl_pct, 4))
                 i = j + 1
                 closed = True
                 break
@@ -116,4 +119,5 @@ def simulate_dca(prices: np.ndarray, params: DCAParams) -> DCABacktestResult:
         max_drawdown_pct=round(max_drawdown_pct, 2),
         max_capital_used=round(max_capital_used, 4),
         avg_trade_duration_candles=round(avg_duration, 2),
+        trade_pnls_pct=trade_pnls_pct,
     )

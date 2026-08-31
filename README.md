@@ -182,6 +182,55 @@ uvicorn app.main:app --reload
 | `GET /bank/denizbank/accounts` | Hesap listesi |
 | `GET /bank/denizbank/balances/{account_id}` | Hesap bakiyesi |
 
+### Modül 7 — Güçlü Backtest Motoru (Otomatik Veri Yeterliliği + Train/Test) ✅
+DCA ve JSON-strateji motorlarını ortak bir çatı altında birleştiren, tek
+uçlu, "gerçekten güvenilir mi?" sorusuna cevap veren bir backtest sistemi.
+
+- `app/backtest/data.py` — `fetch_full_history`: Binance gibi borsaların
+  tek istekte verdiği sınırlı mum sayısını (`since` parametresini ilerleterek)
+  sayfalayıp istenen kadar (veya borsada mevcut olan kadar) geçmişi birleştirir.
+- `app/backtest/runner.py::_discover_sufficient_history` — **"geçmiş veri
+  miktarını öğrenerek oluştur"**: sabit bir mum sayısı varsaymak yerine, az
+  veriyle (`initial_candles`) başlayıp verilen strateji/DCA parametreleriyle
+  kaç kapanan işlem ürettiğine bakar; hedef işlem sayısına (`min_trades`,
+  istatistiksel anlamlılık için varsayılan 30) ulaşılana, borsanın geçmişi
+  tükenene ya da `max_candles` sınırına varılana kadar veriyi ikişer katına
+  çıkararak genişletir. Sonuçta kaç mumun gerçekten yeterli olduğunu ve
+  yeterli olup olmadığını raporlar.
+- `app/backtest/metrics.py` — zengin performans metrikleri: toplam getiri,
+  CAGR, **Sharpe**, **Sortino**, **Calmar**, **profit factor**, kazanma
+  oranı, ortalama kazanç/kayıp, expectancy, maksimum drawdown — işlem
+  sıklığından yıllıklaştırma otomatik hesaplanır.
+- `app/backtest/runner.py::run_backtest_report` — keşfedilen veriyi
+  kronolojik olarak **eğitim (in-sample) / test (out-of-sample)** olarak
+  ikiye böler, her ikisi ve tüm veri için ayrı metrik hesaplar; eğitimde
+  kârlı ama testte zararlıysa veya test performansı eğitimin çok altında
+  kalıyorsa **aşırı uyum (overfitting) uyarısı** üretir.
+- DCA ve strateji motorları tek bir arayüzden (`_simulate`) çağrıldığı için
+  aynı backtest altyapısı ikisinde de kullanılıyor — kod tekrarı yok.
+
+`POST /backtest/run` örnek gövde (DCA veya strateji, tam olarak biri):
+```json
+{
+  "symbol": "BTC/USDT:USDT",
+  "strategy": {
+    "name": "RSI Aşırı Satım Sıçraması",
+    "direction": "long",
+    "entry": {"type": "compare", "left": {"indicator": "rsi"}, "op": "lt", "right": {"value": 30}},
+    "take_profit_pct": 2.0
+  },
+  "min_trades": 30,
+  "max_candles": 5000,
+  "train_ratio": 0.7
+}
+```
+Yanıt: `data_sufficiency` (kaç mum kullanıldı, yeterli miydi, neden),
+`train_metrics`, `test_metrics`, `full_period_metrics`, `warnings`.
+
+| Endpoint | Açıklama |
+|---|---|
+| `POST /backtest/run` | DCA veya strateji için otomatik veri keşifli, train/test ayrımlı tam backtest raporu |
+
 ## Yol haritası
 
 - [x] Screener (Binance, teknik skor)
@@ -191,5 +240,6 @@ uvicorn app.main:app --reload
 - [x] JSON tabanlı strateji tanımlama motoru (TradingView'sız)
 - [x] Portföy / risk yönetimi kuralları (pozisyon boyutlandırma, maruziyet limitleri, günlük zarar devre kesici) + karar motoruna entegrasyon
 - [x] Binance canlı işlem hazırlığı (güvenlik kapılı) + Denizbank Açık Bankacılık şablonu
+- [x] Güçlü backtest motoru (otomatik veri yeterliliği keşfi + train/test + Sharpe/Sortino/Calmar)
 - [ ] Screener + motorları periyodik/zamanlanmış bir job'a bağlama
 - [ ] BIST/VIOP adapter'ları
