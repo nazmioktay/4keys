@@ -1,6 +1,7 @@
 import logging
 
 from app.core.config import settings
+from app.db import repository as db
 from app.exchanges.base import Exchange
 
 from .indicators import compute_indicators, composite_score
@@ -34,6 +35,14 @@ def scan_market(exchange: Exchange) -> list[ScreenerResult]:
                     rsi=float(last["rsi"]),
                     trend="up" if last["ema_fast"] > last["ema_slow"] else "down",
                 )
+            )
+            db.record_latest_candle(symbol, settings.candle_timeframe, last)
+            db.record_signal(
+                symbol,
+                source="screener",
+                direction="long" if score > 0 else ("short" if score < 0 else "neutral"),
+                confidence=min(abs(score) / 100, 1.0),
+                price=float(last["close"]),
             )
         except Exception as exc:  # noqa: BLE001 - tek sembol hatası taramayı durdurmamalı
             logger.warning("skipping %s: %s", symbol, exc)

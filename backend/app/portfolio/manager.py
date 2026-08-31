@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
+from app.db import repository as db
+
 from .risk_manager import calculate_kelly_position_size, calculate_position_size, evaluate_risk
 from .schemas import PositionExposure, RiskDecision, RiskRules, TradeStats
 
@@ -131,6 +133,7 @@ class PortfolioManager:
             "closed_at": datetime.now(timezone.utc).isoformat(),
         }
         self.closed_history.append(record)
+        db.record_trade(record)
         return record
 
     def status(self) -> dict:

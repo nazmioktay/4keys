@@ -3,11 +3,14 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app.api.routes import backtest, bank, dca, engine, ml, portfolio, scheduler, screener, strategy, trading
+from app.api.routes import db as db_routes
+from app.db.session import init_db
 from app.scheduler.scheduler import start_scheduler, stop_scheduler
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    init_db()
     start_scheduler()
     yield
     stop_scheduler()
@@ -25,6 +28,7 @@ app.include_router(trading.router)
 app.include_router(bank.router)
 app.include_router(backtest.router)
 app.include_router(scheduler.router)
+app.include_router(db_routes.router)
 
 
 @app.get("/health")

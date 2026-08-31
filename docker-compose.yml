@@ -1,0 +1,32 @@
+services:
+  db:
+    image: timescale/timescaledb:latest-pg16
+    environment:
+      POSTGRES_DB: fourkeys
+      POSTGRES_USER: fourkeys
+      POSTGRES_PASSWORD: fourkeys
+    volumes:
+      - fourkeys_db_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fourkeys"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    environment:
+      FOURKEYS_DATABASE_URL: postgresql+psycopg2://fourkeys:fourkeys@db:5432/fourkeys
+    env_file:
+      - ./backend/.env
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+volumes:
+  fourkeys_db_data:

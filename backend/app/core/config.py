@@ -30,6 +30,12 @@ class Settings(BaseSettings):
     screener_refresh_seconds: int = 60
     engine_cycle_seconds: int = 300
 
+    # --- Kalıcı veritabanı (Modül: TimescaleDB/PostgreSQL) ---
+    # Boş bırakılırsa tamamen devre dışıdır; sistem bellek içi durumla
+    # (mevcut davranış) çalışmaya devam eder. Örnek:
+    # postgresql+psycopg2://user:pass@localhost:5432/fourkeys
+    database_url: str = ""
+
     model_config = SettingsConfigDict(env_prefix="FOURKEYS_", env_file=".env")
 
 
