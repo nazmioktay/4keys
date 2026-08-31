@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 
-from app.api.routes import dca, engine, ml, screener
+from app.api.routes import dca, engine, ml, screener, strategy
 
 app = FastAPI(title="4keys", description="Algoritmik kripto trading platformu")
 
@@ -8,6 +8,7 @@ app.include_router(screener.router)
 app.include_router(ml.router)
 app.include_router(engine.router)
 app.include_router(dca.router)
+app.include_router(strategy.router)
 
 
 @app.get("/health")

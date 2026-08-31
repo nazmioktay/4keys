@@ -83,14 +83,45 @@ uvicorn app.main:app --reload
 }
 ```
 
+### Modül 4 — TradingView'sız Strateji Motoru ✅
+- `app/strategy/schemas.py` — JSON kural ağacı: `compare` (örn. `rsi < 30`),
+  `cross` (örn. `ema_fast`, `ema_slow`'u yukarı keser), `and`/`or` ile
+  birleştirme. Pine Script yazmaya gerek yok.
+- `app/strategy/evaluator.py` — kural ağacını tek bir mum için değerlendirir
+- `app/strategy/engine.py` — entry/exit kuralları + opsiyonel take-profit/stop-loss
+  ile geçmiş veri üzerinde tam backtest çalıştırır
+- `app/strategy/examples.py` — hazır örnekler (RSI dip alımı, EMA altın
+  kesişim, MACD momentum short) — `GET /strategy/examples` ile alınıp
+  doğrudan değiştirilip denenebilir
+
+`POST /strategy/backtest` örnek gövde:
+```json
+{
+  "symbol": "BTC/USDT:USDT",
+  "strategy": {
+    "name": "RSI Aşırı Satım Sıçraması",
+    "direction": "long",
+    "entry": {"type": "compare", "left": {"indicator": "rsi"}, "op": "lt", "right": {"value": 30}},
+    "exit": {"type": "compare", "left": {"indicator": "rsi"}, "op": "gt", "right": {"value": 55}},
+    "take_profit_pct": 4.0,
+    "stop_loss_pct": 3.0
+  }
+}
+```
+
+| Endpoint | Açıklama |
+|---|---|
+| `GET /strategy/examples` | Hazır strateji örnekleri (kopyalayıp değiştirilebilir) |
+| `POST /strategy/backtest` | Verilen JSON stratejiyi geçmiş veri üzerinde test eder |
+
 ## Yol haritası
 
 - [x] Screener (Binance, teknik skor)
 - [x] ML sinyal modülü (MLP tabanlı yön tahmini)
 - [x] Otomatik açma/kapama karar motoru (paper-trading)
 - [x] DCA optimizasyon hesaplayıcısı
-- [ ] Screener + motoru periyodik/zamanlanmış bir job'a bağlama
+- [x] JSON tabanlı strateji tanımlama motoru (TradingView'sız)
+- [ ] Screener + motorları periyodik/zamanlanmış bir job'a bağlama
 - [ ] Gerçek borsa emir yürütme katmanı (API anahtarı + açık onay gerektirir)
-- [ ] JSON tabanlı strateji tanımlama motoru
 - [ ] BIST/VIOP adapter'ları
 - [ ] Portföy ve risk yönetimi kuralları
