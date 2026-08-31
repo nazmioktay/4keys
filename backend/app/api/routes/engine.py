@@ -6,22 +6,18 @@ from app.engine.decision import DecisionEngine
 from app.engine.positions import PaperPositionStore
 from app.exchanges import get_exchange
 from app.ml.model import DEFAULT_MODEL_PATH, SignalModel
+from app.portfolio.schemas import PortfolioStatus
+from app.portfolio.shared import get_portfolio
 from app.screener.scanner import scan_market, top_long, top_short
 
 router = APIRouter(prefix="/engine", tags=["engine"])
 
-# Süreç ömrü boyunca paylaşılan tek paper-trading defteri.
-# NOT: Bu bellek içi bir simülasyondur, gerçek borsa emri göndermez.
+# Geriye dönük uyumluluk / portföy yöneticisi olmadan tek başına kullanım için.
 _positions = PaperPositionStore()
 
 
 class CycleResponse(BaseModel):
     actions: list[dict]
-
-
-class StatusResponse(BaseModel):
-    open_positions: list[dict]
-    closed_history: list[dict]
 
 
 @router.post("/run-cycle", response_model=CycleResponse)
@@ -42,6 +38,7 @@ def run_cycle() -> CycleResponse:
         positions=_positions,
         timeframe=settings.candle_timeframe,
         lookback=settings.candle_lookback,
+        portfolio=get_portfolio(),
     )
     actions = engine.run_cycle(symbols)
     return CycleResponse(
@@ -58,17 +55,11 @@ def run_cycle() -> CycleResponse:
     )
 
 
-@router.get("/status", response_model=StatusResponse)
-def status() -> StatusResponse:
-    return StatusResponse(
-        open_positions=[
-            {
-                "symbol": p.symbol,
-                "direction": p.direction,
-                "entry_price": p.entry_price,
-                "opened_at": p.opened_at.isoformat(),
-            }
-            for p in _positions.list_open()
-        ],
-        closed_history=_positions.closed_history,
-    )
+@router.get("/status", response_model=PortfolioStatus)
+def status() -> PortfolioStatus:
+    """Karar motorunun açtığı/kapattığı pozisyonları portföy durumu olarak döner.
+
+    Detaylı risk kuralları ve manuel işlemler için bkz. /portfolio/* uçları —
+    ikisi de aynı paylaşılan PortfolioManager örneğini kullanır.
+    """
+    return PortfolioStatus(**get_portfolio().status())

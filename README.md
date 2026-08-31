@@ -114,6 +114,33 @@ uvicorn app.main:app --reload
 | `GET /strategy/examples` | Hazır strateji örnekleri (kopyalayıp değiştirilebilir) |
 | `POST /strategy/backtest` | Verilen JSON stratejiyi geçmiş veri üzerinde test eder |
 
+### Modül 5 — Portföy / Risk Yönetimi ✅
+- `app/portfolio/risk_manager.py` — saf fonksiyonlar:
+  - `calculate_position_size` — equity, giriş fiyatı, stop-loss fiyatı ve
+    işlem başına risk yüzdesinden pozisyon boyutunu geriye hesaplar (SL'e
+    çarpılırsa kaybedilecek tutar tam olarak istenen risk kadar olur)
+  - `evaluate_risk` — önerilen bir pozisyonu şu kurallara karşı denetler:
+    işlem başına risk, toplam portföy maruziyeti, sembol bazlı maruziyet,
+    maksimum eşzamanlı pozisyon sayısı, günlük/oturum zarar limiti (circuit
+    breaker) — mümkün olduğunda reddetmek yerine boyutu güvenli sınıra küçültür
+- `app/portfolio/manager.py` — `PortfolioManager`: equity, açık pozisyonlar
+  ve gerçekleşen kâr/zararı tutan, yukarıdaki kuralları uygulayan durum
+  yöneticisi
+- **Entegrasyon:** `app/engine/decision.py`'deki ML karar motoru artık
+  opsiyonel bir `PortfolioManager` alıyor; verildiğinde her açılış sinyali
+  ham haliyle uygulanmıyor, risk kurallarından geçip boyutlandırılıyor veya
+  reddediliyor (`"blocked"` aksiyonu + sebep). `/engine/run-cycle` bu
+  entegrasyonu varsayılan olarak kullanıyor — yani ana para yönetimi artık
+  ML motorunun bir parçası, ayrı bir hesap makinesi değil.
+
+| Endpoint | Açıklama |
+|---|---|
+| `GET /portfolio/status` | Equity, açık pozisyonlar, kapanan işlemler, aktif kurallar |
+| `PUT /portfolio/rules` | Risk kurallarını günceller |
+| `POST /portfolio/reset` | Portföyü verilen sermaye/kurallarla sıfırdan başlatır |
+| `POST /portfolio/position-size` | Risk yüzdesi + SL mesafesinden pozisyon boyutu hesaplar |
+| `POST /portfolio/risk-check` | Durumsuz "ne olurdu" risk kontrolü (paylaşılan portföyü etkilemez) |
+
 ## Yol haritası
 
 - [x] Screener (Binance, teknik skor)
@@ -121,7 +148,7 @@ uvicorn app.main:app --reload
 - [x] Otomatik açma/kapama karar motoru (paper-trading)
 - [x] DCA optimizasyon hesaplayıcısı
 - [x] JSON tabanlı strateji tanımlama motoru (TradingView'sız)
+- [x] Portföy / risk yönetimi kuralları (pozisyon boyutlandırma, maruziyet limitleri, günlük zarar devre kesici) + karar motoruna entegrasyon
 - [ ] Screener + motorları periyodik/zamanlanmış bir job'a bağlama
 - [ ] Gerçek borsa emir yürütme katmanı (API anahtarı + açık onay gerektirir)
 - [ ] BIST/VIOP adapter'ları
-- [ ] Portföy ve risk yönetimi kuralları

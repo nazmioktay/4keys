@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from app.exchanges.base import Exchange
 from app.ml.features import latest_feature_vector
 from app.ml.model import Prediction, SignalModel
+from app.portfolio.manager import PortfolioManager
 
 from .positions import PaperPositionStore
 
@@ -13,7 +14,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class Action:
     symbol: str
-    type: str  # "open_long" | "open_short" | "close" | "hold"
+    type: str  # "open_long" | "open_short" | "close" | "hold" | "blocked"
     reason: str
     price: float
     confidence: float
@@ -22,11 +23,17 @@ class Action:
 class DecisionEngine:
     """ML sinyalini mevcut pozisyon durumuyla birleştirip aksiyon üretir.
 
-    Bu sınıf yalnızca karar üretir ve `PaperPositionStore` üzerinde simüle
-    eder; gerçek borsaya emir göndermez. Canlı emir yürütmek isteyen bir
-    katman, buradan gelen `Action` nesnelerini tüketip borsa API'sine
-    dönüştürmelidir — ve bu, kullanıcının API anahtarlarını ve açık onayını
-    gerektiren ayrı bir adım olmalıdır.
+    Bu sınıf yalnızca karar üretir; gerçek borsaya emir göndermez. Canlı emir
+    yürütmek isteyen bir katman, buradan gelen `Action` nesnelerini tüketip
+    borsa API'sine dönüştürmelidir — ve bu, kullanıcının API anahtarlarını ve
+    açık onayını gerektiren ayrı bir adım olmalıdır.
+
+    `portfolio` verilirse (önerilen), açılış sinyalleri ham haliyle
+    uygulanmaz: `app.portfolio.manager.PortfolioManager` üzerinden risk
+    kurallarına (işlem başına risk, toplam/sembol maruziyeti, eşzamanlı
+    pozisyon sayısı, günlük zarar limiti) göre boyutlandırılır ve gerekirse
+    reddedilir ("blocked" aksiyonu). `portfolio` verilmezse eski, sınırsız
+    `PaperPositionStore` davranışına geri düşer (geriye dönük uyumluluk).
     """
 
     def __init__(
@@ -38,6 +45,8 @@ class DecisionEngine:
         lookback: int,
         open_confidence: float = 0.6,
         close_confidence: float = 0.55,
+        portfolio: PortfolioManager | None = None,
+        assumed_stop_loss_pct: float = 3.0,
     ) -> None:
         self.exchange = exchange
         self.model = model
@@ -46,6 +55,8 @@ class DecisionEngine:
         self.lookback = lookback
         self.open_confidence = open_confidence
         self.close_confidence = close_confidence
+        self.portfolio = portfolio
+        self.assumed_stop_loss_pct = assumed_stop_loss_pct
 
     def _predict(self, symbol: str) -> tuple[Prediction, float] | None:
         ohlcv = self.exchange.fetch_ohlcv(symbol, self.timeframe, self.lookback)
@@ -60,7 +71,7 @@ class DecisionEngine:
         if result is None:
             return None
         prediction, price = result
-        position = self.positions.get(symbol)
+        position = self.portfolio.get(symbol) if self.portfolio is not None else self.positions.get(symbol)
 
         if position is None:
             if prediction.direction in ("long", "short") and prediction.confidence >= self.open_confidence:
@@ -75,13 +86,37 @@ class DecisionEngine:
 
         return Action(symbol, "hold", "pozisyon açık, sinyal değişmedi", price, prediction.confidence)
 
-    def apply(self, action: Action) -> None:
+    def _open(self, symbol: str, direction: str, price: float) -> Action | None:
+        if self.portfolio is None:
+            self.positions.open(symbol, direction, price)
+            return None
+
+        stop_loss_price = (
+            price * (1 - self.assumed_stop_loss_pct / 100)
+            if direction == "long"
+            else price * (1 + self.assumed_stop_loss_pct / 100)
+        )
+        decision = self.portfolio.propose_open(symbol, direction, price, stop_loss_price)
+        if not decision.allowed or decision.size_quote <= 0:
+            reason = "; ".join(decision.reasons) or "risk kuralları nedeniyle reddedildi"
+            return Action(symbol, "blocked", reason, price, 0.0)
+
+        self.portfolio.open(symbol, direction, price, decision.size_quote)
+        return None
+
+    def apply(self, action: Action) -> Action:
         if action.type == "open_long":
-            self.positions.open(action.symbol, "long", action.price)
-        elif action.type == "open_short":
-            self.positions.open(action.symbol, "short", action.price)
-        elif action.type == "close":
-            self.positions.close(action.symbol, action.price)
+            blocked = self._open(action.symbol, "long", action.price)
+            return blocked or action
+        if action.type == "open_short":
+            blocked = self._open(action.symbol, "short", action.price)
+            return blocked or action
+        if action.type == "close":
+            if self.portfolio is not None:
+                self.portfolio.close(action.symbol, action.price)
+            else:
+                self.positions.close(action.symbol, action.price)
+        return action
 
     def run_cycle(self, symbols: list[str]) -> list[Action]:
         actions: list[Action] = []
@@ -93,6 +128,5 @@ class DecisionEngine:
                 continue
             if action is None:
                 continue
-            self.apply(action)
-            actions.append(action)
+            actions.append(self.apply(action))
         return actions
