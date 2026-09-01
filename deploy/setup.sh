@@ -9,8 +9,8 @@ set -euo pipefail
 #   curl -fsSL https://raw.githubusercontent.com/nazmioktay/4keys/main/deploy/setup.sh | bash
 # ============================================================
 
-APP_DOMAIN="app.4kyonetim.com.tr"
-API_DOMAIN="api.4kyonetim.com.tr"
+APP_DOMAIN="app.acromer.com"
+API_DOMAIN="api.acromer.com"
 REPO_URL="https://github.com/nazmioktay/4keys.git"
 APP_DIR="/opt/4keys"
 LETSENCRYPT_EMAIL="nazmioktay@gmail.com"
