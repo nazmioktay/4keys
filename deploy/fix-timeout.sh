@@ -9,8 +9,8 @@ set -euo pipefail
 # container'ını yeniden başlatır.
 #
 # Çalıştırma (sunucuda, root olarak):
-#   curl -fsSL raw.githubusercontent.com/nazmioktay/4keys/main/deploy/fix_timeout.sh -o fix_timeout.sh
-#   bash fix_timeout.sh
+#   curl -fsSL raw.githubusercontent.com/nazmioktay/4keys/main/deploy/fix-timeout.sh -o fix-timeout.sh
+#   bash fix-timeout.sh
 # ============================================================
 
 cat > /etc/nginx/conf.d/timeouts.conf <<'EOF'
