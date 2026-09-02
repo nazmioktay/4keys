@@ -4,6 +4,8 @@ from app.core.config import settings
 from app.db import repository as db
 from app.exchanges.base import Exchange
 
+from app.ml.features import build_features
+
 from .indicators import compute_indicators, composite_score
 from .schemas import ScreenerResult
 
@@ -37,6 +39,10 @@ def scan_market(exchange: Exchange) -> list[ScreenerResult]:
                 )
             )
             db.record_latest_candle(symbol, settings.candle_timeframe, last)
+            if symbol in settings.feature_snapshot_symbols_list:
+                ml_features = build_features(ohlcv).dropna()
+                if not ml_features.empty:
+                    db.record_feature_snapshot(symbol, settings.candle_timeframe, last["timestamp"], ml_features.iloc[-1])
             db.record_signal(
                 symbol,
                 source="screener",

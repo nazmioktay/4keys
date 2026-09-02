@@ -5,8 +5,20 @@ import pandas as pd
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-from .models import OHLCVRaw, SignalRecord, TradeRecord
+from .models import FeatureSnapshot, OHLCVRaw, SignalRecord, TradeRecord
 from .session import is_enabled, session_scope
+
+FEATURE_SNAPSHOT_COLUMNS = [
+    "rsi_norm",
+    "macd_hist_norm",
+    "ema_gap",
+    "momentum",
+    "volume_ratio",
+    "price_position",
+    "return_1",
+    "return_3",
+    "return_5",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +90,66 @@ def record_trade(trade: dict) -> None:
             )
     except SQLAlchemyError:
         logger.exception("trade persist failed for %s", trade.get("symbol"))
+
+
+def record_feature_snapshot(symbol: str, timeframe: str, time, feature_row: pd.Series) -> None:
+    """Bir sembolün en son (tam dolu) ML özellik vektörünü `feature_snapshots`
+    tablosuna kaydeder — bkz. `app.ml.features.FEATURE_COLUMNS`.
+
+    `time`, bu özellik vektörünün hesaplandığı mumun zaman damgasıdır
+    (çağıran taraf, kendi ham OHLCV'sinden geçirir).
+
+    Kalıcılık burada da bir yan etkidir: DB kapalı/erişilemez olsa bile
+    screener çalışmaya devam eder, hata sadece loglanır.
+    """
+    if not is_enabled():
+        return
+    try:
+        with session_scope() as db:
+            db.add(
+                FeatureSnapshot(
+                    time=_to_pydatetime(time),
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    close=float(feature_row["close"]),
+                    **{col: float(feature_row[col]) for col in FEATURE_SNAPSHOT_COLUMNS},
+                )
+            )
+    except IntegrityError:
+        pass  # bu zaman damgası için zaten kaydedilmiş
+    except SQLAlchemyError:
+        logger.exception("feature snapshot persist failed for %s", symbol)
+
+
+def get_feature_snapshots(symbol: str, timeframe: str, limit: int = 5000) -> pd.DataFrame:
+    """Bir sembol için biriken ML özellik vektörlerini kronolojik sırayla
+    (en eskiden en yeniye) döner — LSTM/RL eğitiminde kullanılacak zaman
+    serisi veri setinin kaynağı. DB kapalıysa veya kayıt yoksa boş DataFrame.
+    """
+    if not is_enabled():
+        return pd.DataFrame(columns=["time", "symbol", "close", *FEATURE_SNAPSHOT_COLUMNS])
+    try:
+        with session_scope() as db:
+            query = (
+                select(FeatureSnapshot)
+                .where(FeatureSnapshot.symbol == symbol, FeatureSnapshot.timeframe == timeframe)
+                .order_by(FeatureSnapshot.time.desc())
+                .limit(limit)
+            )
+            rows = db.execute(query).scalars().all()
+            records = [
+                {
+                    "time": r.time,
+                    "symbol": r.symbol,
+                    "close": r.close,
+                    **{col: getattr(r, col) for col in FEATURE_SNAPSHOT_COLUMNS},
+                }
+                for r in reversed(rows)
+            ]
+            return pd.DataFrame(records)
+    except SQLAlchemyError:
+        logger.exception("failed to read feature snapshots for %s", symbol)
+        return pd.DataFrame(columns=["time", "symbol", "close", *FEATURE_SNAPSHOT_COLUMNS])
 
 
 def get_recent_trades(limit: int = 50) -> list[dict]:

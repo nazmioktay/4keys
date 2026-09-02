@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Query
 
+from app.core.config import settings
 from app.db import repository as db
 from app.db.session import check_connection, is_enabled
 
@@ -25,3 +26,16 @@ def signals(
     source: str | None = Query(None, description="'screener' | 'ml' | 'meta'"),
 ) -> list[dict]:
     return db.get_recent_signals(limit, symbol, source)
+
+
+@router.get("/features")
+def features(
+    symbol: str = Query("BTC/USDT:USDT", description="Bkz. FOURKEYS_FEATURE_SNAPSHOT_SYMBOLS"),
+    timeframe: str | None = None,
+    limit: int = Query(5000, ge=1, le=50000),
+) -> dict:
+    """Zamanla biriken ML özellik vektörlerini (bkz. `app.ml.features.FEATURE_COLUMNS`)
+    döner — ileride LSTM/RL eğitiminde kullanılacak zaman serisi veri setinin
+    şu ana kadar ne kadar biriktiğini gösterir."""
+    df = db.get_feature_snapshots(symbol, timeframe or settings.candle_timeframe, limit)
+    return {"symbol": symbol, "rows": len(df), "data": df.to_dict(orient="records")}

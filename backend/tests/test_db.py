@@ -101,6 +101,55 @@ def test_portfolio_manager_close_persists_trade_to_db():
     assert trades[0]["symbol"] == "BTC/USDT"
 
 
+def _feature_row(close: float = 100.0) -> pd.Series:
+    return pd.Series(
+        {
+            "close": close,
+            "rsi_norm": 0.1,
+            "macd_hist_norm": 0.2,
+            "ema_gap": -0.1,
+            "momentum": 0.3,
+            "volume_ratio": 1.2,
+            "price_position": 0.6,
+            "return_1": 0.05,
+            "return_3": 0.1,
+            "return_5": 0.15,
+        }
+    )
+
+
+def test_record_and_read_feature_snapshot_roundtrip():
+    t1 = pd.Timestamp("2024-01-01T00:00:00Z")
+    t2 = pd.Timestamp("2024-01-01T04:00:00Z")
+    db.record_feature_snapshot("BTC/USDT:USDT", "4h", t1, _feature_row(close=100.0))
+    db.record_feature_snapshot("BTC/USDT:USDT", "4h", t2, _feature_row(close=105.0))
+
+    snapshots = db.get_feature_snapshots("BTC/USDT:USDT", "4h", limit=10)
+    assert len(snapshots) == 2
+    # kronolojik sırayla (en eskiden en yeniye) dönmeli
+    assert snapshots.iloc[0]["close"] == pytest.approx(100.0)
+    assert snapshots.iloc[1]["close"] == pytest.approx(105.0)
+    assert "rsi_norm" in snapshots.columns
+
+
+def test_feature_snapshot_deduplicates_on_conflict():
+    t1 = pd.Timestamp("2024-01-01T00:00:00Z")
+    db.record_feature_snapshot("BTC/USDT:USDT", "4h", t1, _feature_row())
+    db.record_feature_snapshot("BTC/USDT:USDT", "4h", t1, _feature_row())  # aynı time/symbol/tf -> yutulmalı
+
+    from app.db.models import FeatureSnapshot
+    from app.db.session import session_scope
+
+    with session_scope() as s:
+        count = s.query(FeatureSnapshot).count()
+    assert count == 1
+
+
+def test_feature_snapshots_noop_when_disabled(_db_disabled):
+    db.record_feature_snapshot("BTC/USDT:USDT", "4h", pd.Timestamp("2024-01-01T00:00:00Z"), _feature_row())
+    assert db.get_feature_snapshots("BTC/USDT:USDT", "4h").empty
+
+
 def test_repository_functions_are_noop_when_disabled(_db_disabled):
     db.record_signal("BTC/USDT", source="ml", direction="long", confidence=0.5, price=100.0)
     db.record_trade(
@@ -112,6 +161,38 @@ def test_repository_functions_are_noop_when_disabled(_db_disabled):
     )
     assert db.get_recent_trades() == []
     assert db.get_recent_signals() == []
+
+
+def test_scan_market_persists_feature_snapshots_for_configured_symbols():
+    import numpy as np
+
+    from app.exchanges.base import Exchange
+    from app.screener.scanner import scan_market
+
+    class _FakeExchange(Exchange):
+        def list_symbols(self, quote_currency, market_type):
+            return ["BTC/USDT:USDT", "ETH/USDT:USDT"]
+
+        def fetch_ohlcv(self, symbol, timeframe, limit, since=None):
+            n = max(limit, 220)
+            close = np.linspace(100, 200, n) + np.random.default_rng(0).normal(0, 0.5, n)
+            return pd.DataFrame(
+                {
+                    "timestamp": pd.date_range("2024-01-01", periods=n, freq="4h"),
+                    "open": close,
+                    "high": close + 1,
+                    "low": close - 1,
+                    "close": close,
+                    "volume": 1000.0,
+                }
+            )
+
+    scan_market(_FakeExchange())
+
+    btc_snapshots = db.get_feature_snapshots("BTC/USDT:USDT", "4h", limit=10)
+    eth_snapshots = db.get_feature_snapshots("ETH/USDT:USDT", "4h", limit=10)
+    assert len(btc_snapshots) == 1  # ayarlarda yalnızca BTC/USDT:USDT var
+    assert len(eth_snapshots) == 0  # ETH ayarlarda değil, kaydedilmemeli
 
 
 def test_repository_never_raises_when_db_url_invalid(monkeypatch):

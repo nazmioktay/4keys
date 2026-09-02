@@ -9,6 +9,16 @@ class Settings(BaseSettings):
     candle_timeframe: str = "4h"
     candle_lookback: int = 200
     screener_top_n: int = 10
+
+    # --- Feature snapshot biriktirme (LSTM/RL için ileride kullanılacak
+    # zaman serisi veri seti) --- Virgülle ayrılmış sembol listesi; her
+    # tarama döngüsünde bu sembollerin ML özellik vektörü (bkz.
+    # app.ml.features.FEATURE_COLUMNS) feature_snapshots tablosuna kaydedilir.
+    feature_snapshot_symbols: str = "BTC/USDT:USDT"
+
+    @property
+    def feature_snapshot_symbols_list(self) -> list[str]:
+        return [s.strip() for s in self.feature_snapshot_symbols.split(",") if s.strip()]
     default_starting_equity: float = 1000.0
 
     # --- CORS ---

@@ -354,7 +354,8 @@ SQLAlchemy tabanlı, **tamamen opsiyonel** bir kalıcılık katmanı.
 - `app/db/models.py` — rehberle aynı isimlendirme: `ohlcv_raw` (ham mum
   verisi, TimescaleDB varsa hypertable'a çevrilir), `signals` (screener/ML/
   meta'nın ürettiği her tahmin), `trades` (kapanan her işlem — Sharpe/win
-  rate/drawdown gibi tüm performans ölçümünün temeli).
+  rate/drawdown gibi tüm performans ölçümünün temeli), `feature_snapshots`
+  (aşağıda ayrıca açıklanıyor).
 - `app/db/session.py` — `FOURKEYS_DATABASE_URL` boşsa katman tamamen
   devre dışıdır, sistem eskisi gibi bellek içi çalışır (geriye dönük
   uyumlu, DB kurulum zorunluluğu yok). Doluysa `init_db()` uygulama
@@ -375,6 +376,21 @@ SQLAlchemy tabanlı, **tamamen opsiyonel** bir kalıcılık katmanı.
 | `GET /db/status` | Veritabanı etkin mi ve bağlantı kuruluyor mu |
 | `GET /db/trades?limit=50` | Kalıcı işlem geçmişi (süreç yeniden başlasa da kaybolmaz) |
 | `GET /db/signals?limit=50&symbol=&source=` | Kalıcı sinyal geçmişi (`source`: screener\|ml\|meta) |
+| `GET /db/features?symbol=BTC/USDT:USDT&limit=5000` | Biriken ML özellik vektörleri (aşağıya bkz.) |
+
+**Feature snapshot biriktirme (LSTM/RL için zaman serisi veri seti hazırlığı):**
+`app/db/models.py::FeatureSnapshot` — her tarama döngüsünde, `FOURKEYS_FEATURE_SNAPSHOT_SYMBOLS`
+ile belirlenen sembollerin (varsayılan: `BTC/USDT:USDT`) 9 ML özelliği
+(bkz. `app.ml.features.FEATURE_COLUMNS`) zaman damgasıyla kaydedilir
+(`app/screener/scanner.py` içine kancalanmıştır). XGBoost şu an hâlâ her
+eğitimde Binance'ten anlık ham veri çekiyor — bu tablo onu DEĞİŞTİRMİYOR,
+ayrı ve bağımsız bir birikim. Amaç: zamanla burada gerçek, kesintisiz bir
+piyasa zaman serisi oluşsun; LSTM (sekans modeli) ve Reinforcement Learning
+ajanı ileride Binance'ten sınırlı bir geçmişle değil, burada biriken uzun
+gerçek veriyle eğitilebilsin. `app/db/repository.py::get_feature_snapshots`
+bu veriyi kronolojik DataFrame olarak okur — hem bu ileriye dönük kullanım
+hem de istenirse XGBoost eğitimini de canlı Binance çekişinden bu tabloya
+geçirmek için hazır.
 
 **Not:** Rehberin Redis "canlı cache" katmanı (son 500 mum, aktif sinyal)
 şimdilik eklenmedi — mevcut tek-process mimaride bellek içi önbellekler
