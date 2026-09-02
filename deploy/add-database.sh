@@ -31,7 +31,7 @@ if [ -f "$APP_DIR/.db_password" ]; then
   DB_PASSWORD=$(cat "$APP_DIR/.db_password")
   echo "==> Mevcut veritabanı şifresi kullanılıyor."
 else
-  DB_PASSWORD=$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 32)
+  DB_PASSWORD=$(openssl rand -hex 16)
   echo "$DB_PASSWORD" > "$APP_DIR/.db_password"
   chmod 600 "$APP_DIR/.db_password"
   echo "==> Yeni veritabanı şifresi üretildi ve kaydedildi."
