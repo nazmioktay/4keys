@@ -57,6 +57,18 @@ class BinanceExchange(Exchange):
         df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
         return df
 
+    def fetch_funding_rate(self, symbol: str) -> float | None:
+        """Şu anki (bir sonraki ödemede uygulanacak) funding rate'i döner
+        (ör. 0.0001 = %0.01). Kimlik doğrulama gerektirmez, herkese açık
+        veridir. Perpetual futures'a özgüdür — spot sembollerde None döner.
+        """
+        try:
+            result = self._futures.fetch_funding_rate(symbol)
+            rate = result.get("fundingRate")
+            return float(rate) if rate is not None else None
+        except Exception:  # noqa: BLE001 - makro veri opsiyoneldir, hata ana akışı bozmamalı
+            return None
+
     # ---- Kimlik doğrulamalı hesap/emir işlemleri ----
 
     def fetch_balance(self, market_type: str = "future") -> dict:

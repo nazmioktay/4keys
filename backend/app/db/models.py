@@ -101,6 +101,32 @@ class FeatureSnapshot(Base):
     sr_level_count_norm: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
+class MacroSnapshot(Base):
+    """Ücretsiz makro/piyasa bağlamı verilerinin periyodik anlık görüntüsü
+    (bkz. `app.macro.data`). Kripto fiyatı yalnızca kendi grafiğinde değil,
+    daha geniş piyasa bağlamında hareket eder — TOTAL, BTC dominansı,
+    funding rate, VIX, altın, dünya borsa endeksleri, Fed/ECB faiz
+    oranları. LSTM/RL eğitiminde OHLCV tabanlı özelliklerin yanına ek
+    bağlam olarak kullanılabilir.
+    """
+
+    __tablename__ = "macro_snapshots"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    time: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
+    total_market_cap: Mapped[float | None] = mapped_column(Float, nullable=True)
+    btc_dominance: Mapped[float | None] = mapped_column(Float, nullable=True)
+    funding_rate_btc: Mapped[float | None] = mapped_column(Float, nullable=True)
+    vix: Mapped[float | None] = mapped_column(Float, nullable=True)
+    gold_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sp500: Mapped[float | None] = mapped_column(Float, nullable=True)
+    nasdaq: Mapped[float | None] = mapped_column(Float, nullable=True)
+    nikkei: Mapped[float | None] = mapped_column(Float, nullable=True)
+    dax: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fed_funds_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ecb_deposit_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
 class TradeRecord(Base):
     """Gerçekleşen (kapanan) her işlem — Bölüm 3.4-3.6'daki `trades` tablosu.
 

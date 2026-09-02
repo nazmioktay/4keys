@@ -49,6 +49,13 @@ class Settings(BaseSettings):
     scheduler_enabled: bool = True
     screener_refresh_seconds: int = 60
     engine_cycle_seconds: int = 300
+    macro_refresh_seconds: int = 21600  # 6 saat — makro veriler (VIX, altın, faiz oranları vb.) günde birkaç kez yeterli
+
+    # --- Ücretsiz makro veri kaynakları (bkz. app.macro.data) ---
+    # FRED (ABD Merkez Bankası) API anahtarı — ücretsiz, anında alınır:
+    # https://fred.stlouisfed.org/docs/api/api_key.html . Boş bırakılırsa
+    # Fed faiz oranı verisi atlanır (diğer kaynaklar etkilenmez).
+    fred_api_key: str = ""
 
     # --- Kalıcı veritabanı (Modül: TimescaleDB/PostgreSQL) ---
     # Boş bırakılırsa tamamen devre dışıdır; sistem bellek içi durumla

@@ -7,13 +7,27 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.ml.features import FEATURE_COLUMNS
 
-from .models import FeatureSnapshot, OHLCVRaw, SignalRecord, TradeRecord
+from .models import FeatureSnapshot, MacroSnapshot, OHLCVRaw, SignalRecord, TradeRecord
 from .session import is_enabled, session_scope
 
 # `feature_snapshots` tablosunun kolonları, ML modelinin kullandığı
 # özellik listesiyle (bkz. app.ml.features.FEATURE_COLUMNS) birebir
 # senkron tutulur — "close" ayrıca ele alınır, feature listesinde değildir.
 FEATURE_SNAPSHOT_COLUMNS = list(FEATURE_COLUMNS)
+
+MACRO_SNAPSHOT_COLUMNS = [
+    "total_market_cap",
+    "btc_dominance",
+    "funding_rate_btc",
+    "vix",
+    "gold_price",
+    "sp500",
+    "nasdaq",
+    "nikkei",
+    "dax",
+    "fed_funds_rate",
+    "ecb_deposit_rate",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -145,6 +159,47 @@ def get_feature_snapshots(symbol: str, timeframe: str, limit: int = 5000) -> pd.
     except SQLAlchemyError:
         logger.exception("failed to read feature snapshots for %s", symbol)
         return pd.DataFrame(columns=["time", "symbol", "close", *FEATURE_SNAPSHOT_COLUMNS])
+
+
+def record_macro_snapshot(values: dict) -> None:
+    """Ücretsiz makro veri kaynaklarının (bkz. `app.macro.data`) bir anlık
+    görüntüsünü `macro_snapshots` tablosuna kaydeder. Kaynakların bir kısmı
+    None olabilir (o kaynak o an erişilemedi) — bu normaldir, satır yine de
+    kaydedilir; eksik alanlar NULL kalır."""
+    if not is_enabled():
+        return
+    try:
+        with session_scope() as db:
+            db.add(MacroSnapshot(**{col: values.get(col) for col in MACRO_SNAPSHOT_COLUMNS}))
+    except SQLAlchemyError:
+        logger.exception("macro snapshot persist failed")
+
+
+def get_latest_macro_snapshot() -> dict | None:
+    if not is_enabled():
+        return None
+    try:
+        with session_scope() as db:
+            row = db.execute(select(MacroSnapshot).order_by(MacroSnapshot.time.desc()).limit(1)).scalar_one_or_none()
+            if row is None:
+                return None
+            return {"time": row.time.isoformat(), **{col: getattr(row, col) for col in MACRO_SNAPSHOT_COLUMNS}}
+    except SQLAlchemyError:
+        logger.exception("failed to read latest macro snapshot")
+        return None
+
+
+def get_macro_snapshots(limit: int = 500) -> pd.DataFrame:
+    if not is_enabled():
+        return pd.DataFrame(columns=["time", *MACRO_SNAPSHOT_COLUMNS])
+    try:
+        with session_scope() as db:
+            rows = db.execute(select(MacroSnapshot).order_by(MacroSnapshot.time.desc()).limit(limit)).scalars().all()
+            records = [{"time": r.time, **{col: getattr(r, col) for col in MACRO_SNAPSHOT_COLUMNS}} for r in reversed(rows)]
+            return pd.DataFrame(records)
+    except SQLAlchemyError:
+        logger.exception("failed to read macro snapshots")
+        return pd.DataFrame(columns=["time", *MACRO_SNAPSHOT_COLUMNS])
 
 
 def get_recent_trades(limit: int = 50) -> list[dict]:

@@ -1,6 +1,9 @@
 import logging
 
+from app.core.config import settings
 from app.engine.service import ModelNotTrained, run_cycle_once
+from app.exchanges import get_exchange
+from app.macro.service import refresh_and_record_macro_snapshot
 from app.screener.service import refresh as refresh_screener
 from app.security.kill_switch import KillSwitchActive
 
@@ -10,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 SCREENER_REFRESH_JOB_ID = "screener_refresh"
 ENGINE_CYCLE_JOB_ID = "engine_cycle"
+MACRO_REFRESH_JOB_ID = "macro_refresh"
 
 
 def job_refresh_screener() -> None:
@@ -44,3 +48,18 @@ def job_run_engine_cycle() -> None:
     except Exception as exc:  # noqa: BLE001 - zamanlayıcı thread'i asla çökmemeli
         logger.exception("engine cycle job failed")
         status.record(ENGINE_CYCLE_JOB_ID, ok=False, detail=str(exc))
+
+
+def job_refresh_macro() -> None:
+    """Periyodik iş: ücretsiz makro veri kaynaklarının (TOTAL, BTC
+    dominansı, funding rate, VIX, altın, dünya endeksleri, Fed/ECB faiz
+    oranları) bir anlık görüntüsünü alıp kaydeder (bkz. `app.macro`)."""
+    try:
+        exchange = get_exchange(settings.exchange_id)
+        snapshot = refresh_and_record_macro_snapshot(exchange)
+        missing = [k for k, v in snapshot.items() if v is None]
+        detail = "tüm kaynaklar alındı" if not missing else f"eksik kaynaklar: {', '.join(missing)}"
+        status.record(MACRO_REFRESH_JOB_ID, ok=True, detail=detail)
+    except Exception as exc:  # noqa: BLE001 - zamanlayıcı thread'i asla çökmemeli
+        logger.exception("macro refresh job failed")
+        status.record(MACRO_REFRESH_JOB_ID, ok=False, detail=str(exc))

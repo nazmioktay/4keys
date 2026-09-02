@@ -541,6 +541,38 @@ ayarını hiç okumaz ve her zaman gerçek `BinanceExchange`'e sabitlenmiştir
 `tests/test_demo_exchange.py::test_trading_executor_never_uses_demo_exchange`
 ile doğrulanır.
 
+### Modül 14 — Ücretsiz Makro/Piyasa Bağlamı Verileri ✅
+`app/macro/` — kripto fiyatı yalnızca kendi grafiğinde hareket etmiyor;
+daha geniş piyasa bağlamını (TOTAL, BTC dominansı, funding rate, VIX,
+altın, dünya borsa endeksleri, Fed/ECB faiz oranları) periyodik olarak
+toplayıp `macro_snapshots` tablosuna kaydeder — LSTM/RL eğitiminde OHLCV
+tabanlı özelliklerin yanına ek bağlam olarak kullanılabilir.
+
+- `app/macro/data.py` — her kaynak izole bir fonksiyon, **asla exception
+  fırlatmaz** (bir kaynak geçici erişilemez olursa yalnızca `None` döner,
+  diğerlerini etkilemez):
+  - **CoinGecko** (`/global`, key gerekmez): TOTAL piyasa değeri, BTC dominansı
+  - **Binance** (kimlik doğrulamasız, `BinanceExchange.fetch_funding_rate`): BTC perpetual funding rate
+  - **Yahoo Finance** (`yfinance`, key gerekmez): VIX, altın (`GC=F`), S&P 500, Nasdaq, Nikkei, DAX
+  - **ECB İstatistik Veri Ambarı (SDW)** (key gerekmez): mevduat faizi
+  - **FRED** (ABD Merkez Bankası, ücretsiz ama key gerekir — `FOURKEYS_FRED_API_KEY`): efektif federal fon oranı; key boşsa yalnızca bu kaynak atlanır
+- `app/scheduler/jobs.py::job_refresh_macro` — `FOURKEYS_MACRO_REFRESH_SECONDS`
+  (varsayılan 6 saat) periyoduyla otomatik çalışır; makro veriler günlük/
+  saatlik değiştiği için screener/motor kadar sık yenilenmesine gerek yok.
+- `app/db/models.py::MacroSnapshot` — TimescaleDB/PostgreSQL açıkken kalıcı.
+
+| Endpoint | Açıklama |
+|---|---|
+| `GET /macro/latest` | En son kaydedilen makro anlık görüntü |
+| `GET /macro/history?limit=500` | Zaman içindeki makro birikimi |
+| `POST /macro/refresh` | Tüm kaynakları şimdi çeker ve kaydeder (zamanlayıcıyı beklemeden) |
+
+**Faz 2'ye ertelenenler (ücretsiz/güvenilir bir kaynağı olmadığı için):**
+BTC likidasyon heatmap'i (Coinglass gibi kaynaklar çoğunlukla ücretli API
+veya kırılgan scraping gerektiriyor) ve BTC ETF akışları (Farside/SoSoValue'nun
+resmi ücretsiz API'si yok) — bunlar için ücretli bir API'ye abone olmak ya
+da scraping riskini kabul etmek gerekecek; kullanıcıyla ayrıca karar verilecek.
+
 ## Yol haritası
 
 - [x] Screener (Binance, teknik skor)
@@ -563,3 +595,7 @@ ile doğrulanır.
 - [x] BIST/VIOP adapter'ı (Denizbank AlgoLab — oturum tabanlı, aynı Exchange arayüzü, aynı güvenlik kapıları)
 - [x] Frontend (React) — Portföy/Al-Sat/Araştırıcı/Ayarlar, gerçek backend'e bağlı
 - [x] Demo/sentetik veri modu (`FOURKEYS_EXCHANGE_ID=demo`) — ağ erişimi olmadan uçtan uca canlı gösterim
+- [x] Kullanıcının manuel işlemde kullandığı 8 gösterge ML özelliklerine eklendi (Heikin Ashi, Stoch RSI log, MavilimW, PMax, Regresyon Kanalı, WaveTrend, Nadaraya-Watson, Dynamic S/R) — 9 özellik → 24
+- [x] Ücretsiz makro/piyasa bağlamı verileri (TOTAL, BTC dominansı, funding rate, VIX, altın, dünya endeksleri, Fed/ECB faiz oranları)
+- [ ] BTC likidasyon heatmap'i + BTC ETF akışları — ücretsiz/güvenilir kaynak yok, Faz 2'ye ertelendi
+- [ ] Çoklu zaman dilimi mimarisi (4h karar / 1D yön / 1h destek)
