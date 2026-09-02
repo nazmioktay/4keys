@@ -80,6 +80,26 @@ class FeatureSnapshot(Base):
     return_3: Mapped[float] = mapped_column(Float)
     return_5: Mapped[float] = mapped_column(Float)
 
+    # --- Kullanıcının manuel işlemde kullandığı ek göstergeler ---
+    # nullable=True: bu kolonlar tabloya SONRADAN eklendi (bkz.
+    # app.db.session._add_missing_columns); önceden kaydedilmiş satırlar
+    # bu kolonlar için NULL içerir.
+    ha_trend: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ha_body_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    stoch_rsi_k: Mapped[float | None] = mapped_column(Float, nullable=True)
+    stoch_rsi_d: Mapped[float | None] = mapped_column(Float, nullable=True)
+    mavilim_gap: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pmax_trend: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pmax_dist_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    linreg_zscore: Mapped[float | None] = mapped_column(Float, nullable=True)
+    linreg_slope_norm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    wt_diff_norm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    wt_cross: Mapped[float | None] = mapped_column(Float, nullable=True)
+    nwe_position: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sr_dist_support_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sr_dist_resistance_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    sr_level_count_norm: Mapped[float | None] = mapped_column(Float, nullable=True)
+
 
 class TradeRecord(Base):
     """Gerçekleşen (kapanan) her işlem — Bölüm 3.4-3.6'daki `trades` tablosu.

@@ -2,7 +2,8 @@ import logging
 from contextlib import contextmanager
 from typing import Iterator
 
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.types import Float
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -72,6 +73,7 @@ def init_db() -> bool:
 
     engine = get_engine()
     Base.metadata.create_all(engine)
+    _add_missing_columns(engine)
 
     try:
         with engine.begin() as conn:
@@ -82,6 +84,33 @@ def init_db() -> bool:
         logger.info("TimescaleDB hypertable kurulamadı (düz PostgreSQL/SQLite olabilir): %s", exc)
 
     return True
+
+
+def _add_missing_columns(engine) -> None:
+    """Hafif şema göçü: `Base.metadata.create_all` yalnızca EKSİK tabloları
+    oluşturur, VAR OLAN bir tabloya sonradan eklenen kolonları eklemez.
+    Modele yeni bir Float kolonu eklendiğinde (ör. yeni bir ML özelliği),
+    var olan `feature_snapshots` tablosu üzerinde bu fonksiyon eksik
+    kolonları `ALTER TABLE ADD COLUMN` ile (NULL edilebilir olarak, eski
+    satırlar bozulmadan) tamamlar. Yalnızca yeni Float kolonlar için
+    güvenlidir; kolon tipi/isim değişikliği veya silme desteklenmez.
+    """
+    inspector = inspect(engine)
+    for table in Base.metadata.sorted_tables:
+        if not inspector.has_table(table.name):
+            continue
+        existing_columns = {col["name"] for col in inspector.get_columns(table.name)}
+        for column in table.columns:
+            if column.name in existing_columns:
+                continue
+            if not isinstance(column.type, Float):
+                continue  # yalnızca yeni Float kolonlar için otomatik ekleme yapılır
+            try:
+                with engine.begin() as conn:
+                    conn.execute(text(f'ALTER TABLE {table.name} ADD COLUMN "{column.name}" FLOAT'))
+                logger.info("added missing column %s.%s", table.name, column.name)
+            except Exception as exc:  # noqa: BLE001 - en kötü ihtimalle kolon eklenmez, sistem çalışmaya devam eder
+                logger.warning("could not add column %s.%s: %s", table.name, column.name, exc)
 
 
 def check_connection() -> bool:

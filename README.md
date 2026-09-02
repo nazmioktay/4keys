@@ -380,7 +380,7 @@ SQLAlchemy tabanlı, **tamamen opsiyonel** bir kalıcılık katmanı.
 
 **Feature snapshot biriktirme (LSTM/RL için zaman serisi veri seti hazırlığı):**
 `app/db/models.py::FeatureSnapshot` — her tarama döngüsünde, `FOURKEYS_FEATURE_SNAPSHOT_SYMBOLS`
-ile belirlenen sembollerin (varsayılan: `BTC/USDT:USDT`) 9 ML özelliği
+ile belirlenen sembollerin (varsayılan: `BTC/USDT:USDT`) 24 ML özelliği
 (bkz. `app.ml.features.FEATURE_COLUMNS`) zaman damgasıyla kaydedilir
 (`app/screener/scanner.py` içine kancalanmıştır). XGBoost şu an hâlâ her
 eğitimde Binance'ten anlık ham veri çekiyor — bu tablo onu DEĞİŞTİRMİYOR,
@@ -391,6 +391,21 @@ gerçek veriyle eğitilebilsin. `app/db/repository.py::get_feature_snapshots`
 bu veriyi kronolojik DataFrame olarak okur — hem bu ileriye dönük kullanım
 hem de istenirse XGBoost eğitimini de canlı Binance çekişinden bu tabloya
 geçirmek için hazır.
+
+**Kullanıcının manuel TradingView göstergeleri (`app/ml/advanced_indicators.py`):**
+Orijinal 9 özelliğin üzerine, kullanıcının kendi manuel işlemde kullandığı
+göstergelerin Python karşılıkları eklendi — Heikin Ashi, Stochastic RSI
+(log-getiri üzerinden), MavilimW, PMax, Doğrusal Regresyon Kanalı,
+WaveTrend (LazyBear), Nadaraya-Watson Envelope ve LonesomeTheBlue'nun
+pivot-kümeleme tabanlı Dinamik Destek/Direnç göstergesi — toplam 24
+özellik. Hepsi **causal** (yalnızca geçmiş veriye bakar, "repaint" etmez);
+Nadaraya-Watson ve Dynamic S/R için bu özellikle test edilmiştir
+(`tests/test_advanced_indicators.py::test_*_is_causal`) çünkü LuxAlgo'nun
+varsayılan Nadaraya-Watson scripti gibi popüler versiyonlar geleceğe
+bakarak repaint eder — canlı işlemde güvenilmez sonuç verir, burada
+kullanılmadı. `feature_snapshots` tablosuna yeni kolonlar eklendiğinde
+(`app/db/session.py::_add_missing_columns`) var olan tablo/satırlar
+bozulmadan otomatik tamamlanır — şema göçü gerekmez.
 
 **Not:** Rehberin Redis "canlı cache" katmanı (son 500 mum, aktif sinyal)
 şimdilik eklenmedi — mevcut tek-process mimaride bellek içi önbellekler

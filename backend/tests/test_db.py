@@ -102,20 +102,11 @@ def test_portfolio_manager_close_persists_trade_to_db():
 
 
 def _feature_row(close: float = 100.0) -> pd.Series:
-    return pd.Series(
-        {
-            "close": close,
-            "rsi_norm": 0.1,
-            "macd_hist_norm": 0.2,
-            "ema_gap": -0.1,
-            "momentum": 0.3,
-            "volume_ratio": 1.2,
-            "price_position": 0.6,
-            "return_1": 0.05,
-            "return_3": 0.1,
-            "return_5": 0.15,
-        }
-    )
+    from app.ml.features import FEATURE_COLUMNS
+
+    data = {"close": close}
+    data.update({col: 0.1 for col in FEATURE_COLUMNS})
+    return pd.Series(data)
 
 
 def test_record_and_read_feature_snapshot_roundtrip():

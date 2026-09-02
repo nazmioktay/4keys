@@ -5,20 +5,15 @@ import pandas as pd
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
+from app.ml.features import FEATURE_COLUMNS
+
 from .models import FeatureSnapshot, OHLCVRaw, SignalRecord, TradeRecord
 from .session import is_enabled, session_scope
 
-FEATURE_SNAPSHOT_COLUMNS = [
-    "rsi_norm",
-    "macd_hist_norm",
-    "ema_gap",
-    "momentum",
-    "volume_ratio",
-    "price_position",
-    "return_1",
-    "return_3",
-    "return_5",
-]
+# `feature_snapshots` tablosunun kolonları, ML modelinin kullandığı
+# özellik listesiyle (bkz. app.ml.features.FEATURE_COLUMNS) birebir
+# senkron tutulur — "close" ayrıca ele alınır, feature listesinde değildir.
+FEATURE_SNAPSHOT_COLUMNS = list(FEATURE_COLUMNS)
 
 logger = logging.getLogger(__name__)
 
