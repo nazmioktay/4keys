@@ -6,3 +6,4 @@ venv/
 *.egg-info/
 .env
 backend/app/ml/artifacts/
+.db_password
