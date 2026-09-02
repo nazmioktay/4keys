@@ -72,7 +72,11 @@ def record_signal(symbol: str, source: str, direction: str, confidence: float, p
         return
     try:
         with session_scope() as db:
-            db.add(SignalRecord(symbol=symbol, source=source, direction=direction, confidence=confidence, price=price))
+            db.add(
+                SignalRecord(
+                    symbol=symbol, source=source, direction=direction, confidence=float(confidence), price=float(price)
+                )
+            )
     except SQLAlchemyError:
         logger.exception("signal persist failed for %s", symbol)
 
@@ -87,11 +91,11 @@ def record_trade(trade: dict) -> None:
                 TradeRecord(
                     symbol=trade["symbol"],
                     direction=trade["direction"],
-                    entry_price=trade["entry_price"],
-                    exit_price=trade["exit_price"],
-                    size_quote=trade.get("size_quote", 0.0),
-                    pnl_pct=trade["pnl_pct"],
-                    pnl_quote=trade.get("pnl_quote", 0.0),
+                    entry_price=float(trade["entry_price"]),
+                    exit_price=float(trade["exit_price"]),
+                    size_quote=float(trade.get("size_quote", 0.0)),
+                    pnl_pct=float(trade["pnl_pct"]),
+                    pnl_quote=float(trade.get("pnl_quote", 0.0)),
                     opened_at=datetime.fromisoformat(trade["opened_at"]),
                     closed_at=datetime.fromisoformat(trade["closed_at"]),
                     source=trade.get("source", "engine"),

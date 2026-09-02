@@ -75,6 +75,25 @@ def test_record_and_read_signal_roundtrip():
     assert len(btc_only) == 1
 
 
+def test_record_signal_casts_numpy_types_to_native_float():
+    """psycopg2/PostgreSQL, pandas/numpy hesaplamalarından (ör.
+    composite_score) gelen np.float64 değerlerini SQLite'ın aksine kabul
+    etmez ("InvalidSchemaName: schema 'np' does not exist" hatası verir) —
+    bu yüzden record_signal her zaman native Python float'a çevirmelidir.
+    """
+    import numpy as np
+
+    db.record_signal("BTC/USDT", source="screener", direction="short", confidence=np.float64(0.71), price=np.float64(168.13))
+
+    from app.db.models import SignalRecord
+    from app.db.session import session_scope
+
+    with session_scope() as s:
+        row = s.query(SignalRecord).filter_by(symbol="BTC/USDT").one()
+        assert type(row.confidence) is float
+        assert type(row.price) is float
+
+
 def test_record_latest_candle_deduplicates_on_conflict():
     row = pd.Series(
         {"timestamp": pd.Timestamp("2024-01-01T00:00:00Z"), "open": 1, "high": 2, "low": 0.5, "close": 1.5, "volume": 100}
