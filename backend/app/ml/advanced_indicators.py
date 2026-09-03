@@ -164,6 +164,113 @@ def nadaraya_watson_envelope(close: pd.Series, bandwidth: float = 8.0, mult: flo
     return pd.DataFrame({"nwe_mid": smoothed_s, "nwe_upper": upper, "nwe_lower": lower})
 
 
+def _true_range(ohlcv: pd.DataFrame) -> pd.Series:
+    high, low, close = ohlcv["high"], ohlcv["low"], ohlcv["close"]
+    prev_close = close.shift(1)
+    return pd.concat([high - low, (high - prev_close).abs(), (low - prev_close).abs()], axis=1).max(axis=1)
+
+
+def average_true_range(ohlcv: pd.DataFrame, length: int = 14) -> pd.Series:
+    """ATR (Average True Range) — volatilite ölçüsü, stop-loss mesafesi
+    belirlemede de kullanılır."""
+    return _true_range(ohlcv).ewm(alpha=1 / length, adjust=False).mean()
+
+
+def bollinger_bands(close: pd.Series, length: int = 20, mult: float = 2.0) -> pd.DataFrame:
+    """Bollinger Bands: hareketli ortalama +/- N standart sapma bantları."""
+    mid = close.rolling(length).mean()
+    std = close.rolling(length).std()
+    upper = mid + mult * std
+    lower = mid - mult * std
+    span = (upper - lower).replace(0, float("nan"))
+    percent_b = ((close - lower) / span).clip(-1, 2)
+    bandwidth = (span / mid.replace(0, float("nan")))
+    return pd.DataFrame({"bb_upper": upper, "bb_lower": lower, "bb_mid": mid, "bb_percent_b": percent_b, "bb_bandwidth": bandwidth})
+
+
+def adx(ohlcv: pd.DataFrame, length: int = 14) -> pd.DataFrame:
+    """ADX (Average Directional Index) — trend gücü (yönsüz), +DI/-DI ile
+    birlikte trendin yönü de çıkarılabilir."""
+    high, low = ohlcv["high"], ohlcv["low"]
+    up_move = high.diff()
+    down_move = -low.diff()
+    plus_dm = pd.Series(np.where((up_move > down_move) & (up_move > 0), up_move, 0.0), index=ohlcv.index)
+    minus_dm = pd.Series(np.where((down_move > up_move) & (down_move > 0), down_move, 0.0), index=ohlcv.index)
+
+    tr = _true_range(ohlcv)
+    atr = tr.ewm(alpha=1 / length, adjust=False).mean()
+    plus_di = 100 * plus_dm.ewm(alpha=1 / length, adjust=False).mean() / atr.replace(0, float("nan"))
+    minus_di = 100 * minus_dm.ewm(alpha=1 / length, adjust=False).mean() / atr.replace(0, float("nan"))
+
+    dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, float("nan"))
+    adx_line = dx.ewm(alpha=1 / length, adjust=False).mean()
+    return pd.DataFrame({"adx": adx_line, "plus_di": plus_di, "minus_di": minus_di})
+
+
+def rolling_vwap(ohlcv: pd.DataFrame, length: int = 20) -> pd.Series:
+    """Hacim ağırlıklı ortalama fiyat (VWAP), kayan pencerede — kripto
+    perpetual'larda gün içi seans sıfırlaması olmadığından rolling
+    pencere kullanılır (causal, geleceğe bakmaz)."""
+    typical = (ohlcv["high"] + ohlcv["low"] + ohlcv["close"]) / 3
+    pv = typical * ohlcv["volume"]
+    return pv.rolling(length).sum() / ohlcv["volume"].rolling(length).sum().replace(0, float("nan"))
+
+
+def on_balance_volume(ohlcv: pd.DataFrame) -> pd.Series:
+    """OBV (On-Balance Volume): fiyat yükselirken hacmi ekler, düşerken
+    çıkarır — hacim akışının fiyat yönüyle uyumlu olup olmadığını gösterir."""
+    direction = np.sign(ohlcv["close"].diff().fillna(0.0))
+    return (direction * ohlcv["volume"]).cumsum()
+
+
+def supertrend(ohlcv: pd.DataFrame, atr_length: int = 10, multiplier: float = 3.0) -> pd.DataFrame:
+    """SuperTrend: ATR bantlı, klasik trend takip göstergesi."""
+    atr = average_true_range(ohlcv, atr_length)
+    hl2 = (ohlcv["high"] + ohlcv["low"]) / 2
+    upper_band = hl2 + multiplier * atr
+    lower_band = hl2 - multiplier * atr
+    close = ohlcv["close"].to_numpy()
+    ub = upper_band.to_numpy(copy=True)
+    lb = lower_band.to_numpy(copy=True)
+    n = len(close)
+
+    line = np.full(n, np.nan)
+    trend = np.ones(n)
+    line[0] = lb[0]
+    for i in range(1, n):
+        lb[i] = max(lb[i], line[i - 1]) if trend[i - 1] == 1 and close[i - 1] > line[i - 1] else lb[i]
+        ub[i] = min(ub[i], line[i - 1]) if trend[i - 1] == -1 and close[i - 1] < line[i - 1] else ub[i]
+        if trend[i - 1] == 1:
+            trend[i] = -1.0 if close[i] < lb[i] else 1.0
+        else:
+            trend[i] = 1.0 if close[i] > ub[i] else -1.0
+        line[i] = lb[i] if trend[i] == 1 else ub[i]
+
+    return pd.DataFrame({"supertrend": line, "supertrend_trend": trend}, index=ohlcv.index)
+
+
+def ichimoku_cloud(ohlcv: pd.DataFrame, tenkan_len: int = 9, kijun_len: int = 26, senkou_b_len: int = 52) -> pd.DataFrame:
+    """Ichimoku Bulutu: Tenkan-sen, Kijun-sen ve bulut (Senkou A/B)
+    sınırları — geleceğe kaydırma (plotting offset) uygulanmadan, yalnızca
+    o ana kadarki veriyle (causal) hesaplanır."""
+    high, low = ohlcv["high"], ohlcv["low"]
+    tenkan = (high.rolling(tenkan_len).max() + low.rolling(tenkan_len).min()) / 2
+    kijun = (high.rolling(kijun_len).max() + low.rolling(kijun_len).min()) / 2
+    senkou_a = (tenkan + kijun) / 2
+    senkou_b = (high.rolling(senkou_b_len).max() + low.rolling(senkou_b_len).min()) / 2
+    return pd.DataFrame({"tenkan": tenkan, "kijun": kijun, "senkou_a": senkou_a, "senkou_b": senkou_b})
+
+
+def fibonacci_retracement_position(ohlcv: pd.DataFrame, length: int = 100) -> pd.Series:
+    """Son `length` bardaki en yüksek/en düşük arasında, güncel fiyatın
+    Fibonacci geri çekilme seviyeleri cinsinden konumu (0 = dip, 1 = tepe;
+    0.382/0.5/0.618 klasik retracement seviyeleridir)."""
+    swing_high = ohlcv["high"].rolling(length).max()
+    swing_low = ohlcv["low"].rolling(length).min()
+    span = (swing_high - swing_low).replace(0, float("nan"))
+    return ((ohlcv["close"] - swing_low) / span).clip(0, 1)
+
+
 def dynamic_support_resistance(
     ohlcv: pd.DataFrame, pivot_lookback: int = 10, channel_lookback: int = 284, channel_width_pct: float = 10.0, min_pivots: int = 2
 ) -> pd.DataFrame:

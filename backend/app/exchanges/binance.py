@@ -50,9 +50,39 @@ class BinanceExchange(Exchange):
             and (market_type != "future" or m.get("swap"))
         ]
 
+    _MAX_CANDLES_PER_CALL = 1000  # Binance futures REST API'sinin tek istekteki üst sınırı
+
     def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int, since: int | None = None) -> pd.DataFrame:
+        """`limit` mum döner. `limit`, Binance'in tek istekteki üst sınırını
+        (1000) aşarsa, geriye doğru sayfalama (pagination) yaparak birden
+        fazla istekle birleştirir — böylece 1000'den çok mumluk (aylar/yıllar
+        süren) geçmiş veri de ücretsiz ve güvenle çekilebilir.
+        """
         client = self._client("future")
-        raw = client.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit, since=since)
+        if limit <= self._MAX_CANDLES_PER_CALL:
+            raw = client.fetch_ohlcv(symbol, timeframe=timeframe, limit=limit, since=since)
+            return self._to_frame(raw)
+
+        timeframe_ms = client.parse_timeframe(timeframe) * 1000
+        end_ms = client.milliseconds()
+        start_ms = since if since is not None else end_ms - limit * timeframe_ms
+
+        all_rows: list[list] = []
+        cursor = start_ms
+        while len(all_rows) < limit and cursor < end_ms:
+            batch = client.fetch_ohlcv(symbol, timeframe=timeframe, limit=self._MAX_CANDLES_PER_CALL, since=cursor)
+            if not batch:
+                break
+            all_rows.extend(batch)
+            last_ts = batch[-1][0]
+            if last_ts <= cursor:  # ilerleme yoksa sonsuz döngüyü önle
+                break
+            cursor = last_ts + timeframe_ms
+
+        return self._to_frame(all_rows[-limit:])
+
+    @staticmethod
+    def _to_frame(raw: list[list]) -> pd.DataFrame:
         df = pd.DataFrame(raw, columns=["timestamp", "open", "high", "low", "close", "volume"])
         df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
         return df

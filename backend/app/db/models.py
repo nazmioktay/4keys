@@ -100,6 +100,24 @@ class FeatureSnapshot(Base):
     sr_dist_resistance_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
     sr_level_count_norm: Mapped[float | None] = mapped_column(Float, nullable=True)
 
+    # --- OHLC mum yapısı + ek TradingView göstergeleri (2. tur) ---
+    candle_body_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    candle_upper_wick_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    candle_lower_wick_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    true_range_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    atr_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    bb_percent_b: Mapped[float | None] = mapped_column(Float, nullable=True)
+    bb_bandwidth_norm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    adx_norm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    di_diff_norm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    vwap_gap_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    obv_slope_norm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    supertrend_trend: Mapped[float | None] = mapped_column(Float, nullable=True)
+    supertrend_dist_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ichimoku_cloud_position: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ichimoku_tk_cross: Mapped[float | None] = mapped_column(Float, nullable=True)
+    fib_retracement_position: Mapped[float | None] = mapped_column(Float, nullable=True)
+
 
 class MacroSnapshot(Base):
     """Ücretsiz makro/piyasa bağlamı verilerinin periyodik anlık görüntüsü

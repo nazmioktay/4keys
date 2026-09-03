@@ -12,9 +12,19 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
 from xgboost import XGBClassifier
 
-from .features import FEATURE_COLUMNS
+from .features import ALL_FEATURE_COLUMNS as FEATURE_COLUMNS
 
 DEFAULT_MODEL_PATH = Path(__file__).parent / "artifacts" / "signal_model.joblib"
+
+
+def _select_features(X: pd.DataFrame) -> pd.DataFrame:
+    """`FEATURE_COLUMNS`'ı seçer; eksik kolonları (ör. makro geçmişi henüz
+    kısa olduğu için NaN kalan satırlar, veya makro merge'den geçmemiş
+    eski/elle kurulmuş veri) 0.0 (normalize edilmiş makro özellikler için
+    "nötr" değer) ile doldurur — StandardScaler (MLP yolu) ve SHAP gibi
+    NaN kabul etmeyen adımların kırılmasını önler; XGBoost zaten NaN'ı
+    kendi içinde ele alabilir ama tutarlılık için aynı yol izlenir."""
+    return X.reindex(columns=FEATURE_COLUMNS, fill_value=0.0).fillna(0.0)
 
 Algorithm = Literal["xgboost", "mlp"]
 
@@ -147,7 +157,7 @@ class SignalModel:
         self.is_calibrated = False
 
     def fit(self, X: pd.DataFrame, y: pd.Series) -> None:
-        X_features = X[FEATURE_COLUMNS]
+        X_features = _select_features(X)
         class_counts = y.value_counts()
         min_class_count = int(class_counts.min()) if len(class_counts) else 0
 
@@ -187,7 +197,7 @@ class SignalModel:
 
     def predict(self, feature_row: pd.Series) -> Prediction:
         self._require_fitted()
-        x = feature_row[FEATURE_COLUMNS].to_frame().T
+        x = feature_row.reindex(FEATURE_COLUMNS).fillna(0.0).to_frame().T
         proba = self._pipeline.predict_proba(x)[0]
         classes = self._pipeline.classes_
         best_idx = int(np.argmax(proba))
@@ -202,7 +212,7 @@ class SignalModel:
         kalibre edilmiş olasılığı) dizilerini döner. Meta-labeling eğitim
         seti kurmak ve toplu değerlendirme için kullanılır."""
         self._require_fitted()
-        x = X[FEATURE_COLUMNS]
+        x = _select_features(X)
         proba = self._pipeline.predict_proba(x)
         classes = self._pipeline.classes_
         best_idx = np.argmax(proba, axis=1)
@@ -224,7 +234,7 @@ class SignalModel:
         import shap
 
         xgb_wrapper = self._base_pipeline.named_steps["xgb"]
-        x = X[FEATURE_COLUMNS].iloc[:max_rows]
+        x = _select_features(X).iloc[:max_rows]
         explainer = shap.TreeExplainer(xgb_wrapper.booster_model)
         raw = explainer.shap_values(x)
 

@@ -5,8 +5,9 @@ import pandas as pd
 
 from app.exchanges.base import Exchange
 
-from .features import FEATURE_COLUMNS, build_features
+from .features import ALL_FEATURE_COLUMNS, FEATURE_COLUMNS, build_features
 from .labeling import label_future_direction, triple_barrier_labels
+from .macro_features import load_macro_history, merge_macro_features
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,7 @@ def _build_symbol_frames(
     konum kullanılır.
     """
     frames: list[pd.DataFrame] = []
+    macro_history = load_macro_history()
 
     for symbol in symbols:
         try:
@@ -55,6 +57,7 @@ def _build_symbol_frames(
             if len(ohlcv) < 60:
                 continue
             features = build_features(ohlcv)
+            features = merge_macro_features(features, macro_history)
             labels = _compute_labels(ohlcv, labeling_method, horizon, threshold_pct, take_profit_pct, stop_loss_pct)
             frame = features.copy()
             frame["label"] = labels
@@ -99,10 +102,10 @@ def build_training_dataset(
         exchange, symbols, timeframe, lookback, horizon, threshold_pct, labeling_method, take_profit_pct, stop_loss_pct
     )
     if not frames:
-        return pd.DataFrame(columns=FEATURE_COLUMNS), pd.Series(dtype="float")
+        return pd.DataFrame(columns=ALL_FEATURE_COLUMNS), pd.Series(dtype="float")
 
     combined = pd.concat(frames, ignore_index=True)
-    X = combined[FEATURE_COLUMNS]
+    X = combined[ALL_FEATURE_COLUMNS]
     y = combined["label"]
     return X, y
 
@@ -126,10 +129,10 @@ def build_training_dataset_with_time(
         exchange, symbols, timeframe, lookback, horizon, threshold_pct, labeling_method, take_profit_pct, stop_loss_pct
     )
     if not frames:
-        return pd.DataFrame(columns=FEATURE_COLUMNS), pd.Series(dtype="float"), pd.Series(dtype="float")
+        return pd.DataFrame(columns=ALL_FEATURE_COLUMNS), pd.Series(dtype="float"), pd.Series(dtype="float")
 
     combined = pd.concat(frames, ignore_index=True)
-    X = combined[FEATURE_COLUMNS]
+    X = combined[ALL_FEATURE_COLUMNS]
     y = combined["label"]
     time_frac = combined["time_frac"]
     return X, y, time_frac

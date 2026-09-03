@@ -10,6 +10,7 @@ from app.ml.dataset import LabelingMethod
 from app.ml.features import latest_feature_vector
 from app.ml.meta_label import DEFAULT_META_MODEL_PATH, MetaLabelModel
 from app.ml.lstm_model import DEFAULT_LSTM_MODEL_PATH, LSTMSignalModel
+from app.ml.macro_features import latest_macro_feature_row
 from app.ml.model import DEFAULT_MODEL_PATH, Algorithm, SignalModel
 from app.ml.sequence_dataset import build_sequence_dataset
 from app.ml.train import train_lstm_signal_model, train_meta_label_model, train_signal_model_validated
@@ -179,7 +180,7 @@ def explain(symbol: str | None = Query(None, description="Boş bırakılırsa sc
 
     from app.ml.dataset import build_training_dataset
 
-    X, _y = build_training_dataset(exchange, symbols, settings.candle_timeframe, settings.candle_lookback)
+    X, _y = build_training_dataset(exchange, symbols, settings.ml_train_timeframe, settings.ml_train_lookback)
     if len(X) == 0:
         raise HTTPException(status_code=422, detail="Açıklama için yeterli veri yok.")
 
@@ -248,7 +249,7 @@ def predict_lstm(symbol: str = Query(..., description="Örn: BTC/USDT:USDT")) ->
     exchange = get_exchange(settings.exchange_id)
     model = LSTMSignalModel.load_from()
 
-    X, _y, _t = build_sequence_dataset(exchange, [symbol], settings.candle_timeframe, settings.candle_lookback, seq_len=model.seq_len)
+    X, _y, _t = build_sequence_dataset(exchange, [symbol], settings.ml_train_timeframe, settings.ml_train_lookback, seq_len=model.seq_len)
     if len(X) == 0:
         raise HTTPException(status_code=422, detail="Tahmin için yeterli veri yok (seq_len'e ulaşmıyor).")
 
@@ -294,10 +295,12 @@ def predict(symbol: str = Query(..., description="Örn: BTC/USDT:USDT")) -> Pred
         raise HTTPException(status_code=409, detail="Model henüz eğitilmedi. Önce /ml/train çağırın.")
 
     exchange = get_exchange(settings.exchange_id)
-    ohlcv = exchange.fetch_ohlcv(symbol, settings.candle_timeframe, settings.candle_lookback)
+    ohlcv = exchange.fetch_ohlcv(symbol, settings.ml_train_timeframe, settings.ml_train_lookback)
     feature_row = latest_feature_vector(ohlcv)
     if feature_row is None:
         raise HTTPException(status_code=422, detail="Yeterli veri yok.")
+    for col, value in latest_macro_feature_row().items():
+        feature_row[col] = value
 
     model = SignalModel.load_from()
     prediction = model.predict(feature_row)

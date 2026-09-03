@@ -5,7 +5,6 @@ import numpy as np
 import torch
 from torch import nn
 
-from .features import FEATURE_COLUMNS
 from .model import Prediction
 
 DEFAULT_LSTM_MODEL_PATH = Path(__file__).parent / "artifacts" / "lstm_model.pt"
@@ -67,6 +66,7 @@ class LSTMSignalModel:
         self._idx_to_label: dict[int, float] = {}
         self._feature_mean: np.ndarray | None = None
         self._feature_std: np.ndarray | None = None
+        self._n_features: int | None = None
 
     def _normalize(self, X: np.ndarray) -> np.ndarray:
         return (X - self._feature_mean) / self._feature_std
@@ -97,6 +97,7 @@ class LSTMSignalModel:
         X_norm = self._normalize(X)
 
         n_features = X.shape[2]
+        self._n_features = n_features
         self._net = _LSTMNet(
             input_size=n_features,
             hidden_size=self.hidden_size,
@@ -169,7 +170,7 @@ class LSTMSignalModel:
                 "hidden_size": self.hidden_size,
                 "num_layers": self.num_layers,
                 "dropout": self.dropout,
-                "n_features": len(FEATURE_COLUMNS),
+                "n_features": self._n_features,
                 "classes": self.classes_,
                 "feature_mean": self._feature_mean,
                 "feature_std": self._feature_std,
@@ -188,6 +189,7 @@ class LSTMSignalModel:
         self._idx_to_label = {i: label for label, i in self._label_to_idx.items()}
         self._feature_mean = checkpoint["feature_mean"]
         self._feature_std = checkpoint["feature_std"]
+        self._n_features = checkpoint["n_features"]
 
         self._net = _LSTMNet(
             input_size=checkpoint["n_features"],

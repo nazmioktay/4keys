@@ -82,7 +82,8 @@ denenene kadar `/ml/predict-lstm` sonuçlarına güvenilmemeli. Odak
 tekrar Faz A (XGBoost)'a döndü.
 `app/ml/lstm_model.py::LSTMSignalModel` — çok katmanlı, dropout'lu bir
 LSTM (Long Short-Term Memory) sinir ağı. XGBoost her barı BAĞIMSIZ bir
-satır olarak görürken, LSTM son `seq_len` barın 24 özellikli vektörünü
+satır olarak görürken, LSTM son `seq_len` barın (bu bölüm yazıldığında
+24 olan, şimdi 39'a çıkan) özellikli vektörünü
 SIRAYLA okuyup önceki adımlardan öğrendiğini bir gizli duruma taşır —
 rehberin "Güçlü olduğu alan: Sekans ve zaman örüntüleri" satırının
 karşılığı.
@@ -98,6 +99,41 @@ karşılığı.
 - `POST /ml/train-lstm` — `seq_len`, `epochs` gibi parametrelerle eğitir,
   train loss/accuracy ve out-of-sample doğruluğunu döner.
 - `GET /ml/predict-lstm?symbol=...` — en son `seq_len` bardan tahmin üretir.
+
+**Veri altyapısı genişletmesi (2026-09, LSTM'in overfit sonucuna tepki
+olarak — "önce veri, sonra daha fazla özellik" sırası):**
+- `app/exchanges/binance.py::BinanceExchange.fetch_ohlcv` artık **sayfalama
+  (pagination)** yapabiliyor: `limit`, Binance'in tek istekteki üst sınırını
+  (1000 mum) aşarsa otomatik olarak birden fazla istekle birleştiriyor —
+  ücretsiz olarak aylar/yıllar süren geçmiş veri çekilebiliyor.
+- `Settings.ml_train_timeframe` (varsayılan `1h`) ve `ml_train_lookback`
+  (varsayılan `1500`) — screener'ın canlı görüntülediği `candle_timeframe`
+  (`4h`) / `candle_lookback`'ten **bilinçli olarak ayrı** tutulur: screener
+  4h'de kalırken, ML eğitimi artık daha ince taneli ve çok daha derin
+  (~1500 saat ≈ 62 gün, ~20 sembolle 10.000+ satır) bir geçmişle çalışır.
+- `FEATURE_COLUMNS` 24'ten **39 teknik özelliğe** çıkarıldı: ham OHLC mum
+  yapısı (`candle_body_pct`, `candle_upper_wick_pct`, `candle_lower_wick_pct`,
+  `true_range_pct` — ham fiyat değil, ölçeklenmiş oranlar) ve kullanıcının
+  istediği ek TradingView göstergeleri (`app/ml/advanced_indicators.py`):
+  **Bollinger Bands** (`bb_percent_b`, `bb_bandwidth_norm`), **ATR**
+  (`atr_pct`), **ADX** (`adx_norm`, `di_diff_norm`), **VWAP**
+  (`vwap_gap_pct`), **OBV** (`obv_slope_norm`), **SuperTrend**
+  (`supertrend_trend`, `supertrend_dist_pct`), **Ichimoku Bulutu**
+  (`ichimoku_cloud_position`, `ichimoku_tk_cross`), **Fibonacci geri
+  çekilme** (`fib_retracement_position`).
+- `MACRO_FEATURE_COLUMNS` (11 ayrı kolon) — `app/ml/macro_features.py`,
+  `macro_snapshots` tablosundaki geçmişi zaman bazlı **en-yakın-geçmiş
+  eşleştirmeyle** (`pd.merge_asof`, `direction="backward"` — geleceğe
+  bakma YOK) OHLCV barlarına ekler; her makro kolon kendi geçmişinin
+  ortalama/std'siyle normalize edilir. Makro geçmişi kısa olduğu sürece
+  (toplama yakın zamanda başladı) bu kolonlar çoğu eski bar için NaN
+  kalır — bu satırlar EĞİTİMDEN ATILMAZ (XGBoost NaN'ı doğal olarak ele
+  alabiliyor), yalnızca `/ml/predict` gibi canlı/tekil tahmin yollarında
+  eksik makro değerler 0.0 (nötr) ile doldurulur
+  (`app.ml.model._select_features`). Makro geçmişi biriktikçe bu
+  özelliklerin gerçek ayırt ediciliği otomatik olarak artacak.
+- `ALL_FEATURE_COLUMNS = FEATURE_COLUMNS + MACRO_FEATURE_COLUMNS` (39+11=50)
+  — XGBoost'un artık gerçekte gördüğü tam girdi seti budur.
 
 **Faz C — Reinforcement Learning (opsiyonel)** — henüz kurulmadı, rehberin
 kendisi de zorunlu değil diyor.
@@ -415,8 +451,8 @@ SQLAlchemy tabanlı, **tamamen opsiyonel** bir kalıcılık katmanı.
 
 **Feature snapshot biriktirme (LSTM/RL için zaman serisi veri seti hazırlığı):**
 `app/db/models.py::FeatureSnapshot` — her tarama döngüsünde, `FOURKEYS_FEATURE_SNAPSHOT_SYMBOLS`
-ile belirlenen sembollerin (varsayılan: `BTC/USDT:USDT`) 24 ML özelliği
-(bkz. `app.ml.features.FEATURE_COLUMNS`) zaman damgasıyla kaydedilir
+ile belirlenen sembollerin (varsayılan: `BTC/USDT:USDT`) 39 teknik ML
+özelliği (bkz. `app.ml.features.FEATURE_COLUMNS`) zaman damgasıyla kaydedilir
 (`app/screener/scanner.py` içine kancalanmıştır). XGBoost şu an hâlâ her
 eğitimde Binance'ten anlık ham veri çekiyor — bu tablo onu DEĞİŞTİRMİYOR,
 ayrı ve bağımsız bir birikim. Amaç: zamanla burada gerçek, kesintisiz bir

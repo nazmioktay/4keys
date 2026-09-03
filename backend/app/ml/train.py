@@ -44,8 +44,8 @@ def train_signal_model(
     X, y = build_training_dataset(
         exchange,
         symbols,
-        timeframe or settings.candle_timeframe,
-        lookback or settings.candle_lookback,
+        timeframe or settings.ml_train_timeframe,
+        lookback or settings.ml_train_lookback,
         horizon,
         threshold_pct,
         labeling_method,
@@ -92,8 +92,8 @@ def train_signal_model_validated(
     X, y, time_frac = build_training_dataset_with_time(
         exchange,
         symbols,
-        timeframe or settings.candle_timeframe,
-        lookback or settings.candle_lookback,
+        timeframe or settings.ml_train_timeframe,
+        lookback or settings.ml_train_lookback,
         horizon,
         threshold_pct,
         labeling_method,
@@ -169,8 +169,8 @@ def train_lstm_signal_model(
     X, y, time_frac = build_sequence_dataset(
         exchange,
         symbols,
-        timeframe or settings.candle_timeframe,
-        lookback or settings.candle_lookback,
+        timeframe or settings.ml_train_timeframe,
+        lookback or settings.ml_train_lookback,
         seq_len=seq_len,
         horizon=horizon,
         threshold_pct=threshold_pct,
@@ -239,8 +239,8 @@ def train_meta_label_model(
     X, y = build_training_dataset(
         exchange,
         symbols,
-        timeframe or settings.candle_timeframe,
-        lookback or settings.candle_lookback,
+        timeframe or settings.ml_train_timeframe,
+        lookback or settings.ml_train_lookback,
         horizon,
         threshold_pct,
         labeling_method,

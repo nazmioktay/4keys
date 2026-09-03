@@ -4,13 +4,21 @@ import pandas as pd
 from app.screener.indicators import compute_indicators
 
 from .advanced_indicators import (
+    adx,
+    average_true_range,
+    bollinger_bands,
     dynamic_support_resistance,
+    fibonacci_retracement_position,
     heikin_ashi,
+    ichimoku_cloud,
     linear_regression_channel,
     mavilim_w,
     nadaraya_watson_envelope,
+    on_balance_volume,
     pmax,
+    rolling_vwap,
     stoch_rsi_log,
+    supertrend,
     wavetrend,
 )
 
@@ -40,7 +48,48 @@ FEATURE_COLUMNS = [
     "sr_dist_support_pct",
     "sr_dist_resistance_pct",
     "sr_level_count_norm",
+    # --- OHLC mum yapısı (ölçeklenmiş, ham fiyat değil) ---
+    "candle_body_pct",
+    "candle_upper_wick_pct",
+    "candle_lower_wick_pct",
+    "true_range_pct",
+    # --- Ek TradingView göstergeleri ---
+    "atr_pct",
+    "bb_percent_b",
+    "bb_bandwidth_norm",
+    "adx_norm",
+    "di_diff_norm",
+    "vwap_gap_pct",
+    "obv_slope_norm",
+    "supertrend_trend",
+    "supertrend_dist_pct",
+    "ichimoku_cloud_position",
+    "ichimoku_tk_cross",
+    "fib_retracement_position",
 ]
+
+# Makro/piyasa bağlamı özellikleri (app.macro.service ile toplanan
+# `macro_snapshots` tablosundan, zaman bazlı en-yakın-geçmiş eşleştirmeyle
+# (as-of merge) eklenir — bkz. `app.ml.macro_features`). Ayrı bir liste
+# olarak tutulur çünkü DB geçmişi kısaysa (henüz yeni toplanmaya
+# başlandıysa) bu kolonlar geriye dönük olarak yalnızca yaklaşık
+# (en-eski-bilinen-değerle doldurulmuş) değerler taşıyabilir.
+MACRO_FEATURE_COLUMNS = [
+    "macro_total_market_cap_norm",
+    "macro_btc_dominance_norm",
+    "macro_funding_rate_btc",
+    "macro_vix_norm",
+    "macro_gold_norm",
+    "macro_sp500_norm",
+    "macro_nasdaq_norm",
+    "macro_nikkei_norm",
+    "macro_dax_norm",
+    "macro_fed_funds_rate_norm",
+    "macro_ecb_deposit_rate_norm",
+]
+
+# Modelin gerçekten gördüğü tüm girdi kolonları (teknik + makro).
+ALL_FEATURE_COLUMNS = FEATURE_COLUMNS + MACRO_FEATURE_COLUMNS
 
 
 def build_features(ohlcv: pd.DataFrame) -> pd.DataFrame:
@@ -109,7 +158,60 @@ def build_features(ohlcv: pd.DataFrame) -> pd.DataFrame:
     features["sr_dist_resistance_pct"] = sr_levels["sr_dist_resistance_pct"].clip(0, 20).fillna(20)
     features["sr_level_count_norm"] = (sr_levels["sr_level_count"] / 5).clip(0, 3)
 
+    # --- OHLC mum yapısı (ham fiyat yerine ölçeklenmiş oranlar) ---
+    candle_range = (ohlcv["high"] - ohlcv["low"]).replace(0, float("nan"))
+    features["candle_body_pct"] = ((ohlcv["close"] - ohlcv["open"]) / ohlcv["close"]).clip(-0.05, 0.05) * 20
+    features["candle_upper_wick_pct"] = ((ohlcv["high"] - ohlcv[["open", "close"]].max(axis=1)) / candle_range).clip(0, 1)
+    features["candle_lower_wick_pct"] = ((ohlcv[["open", "close"]].min(axis=1) - ohlcv["low"]) / candle_range).clip(0, 1)
+
+    # --- ATR (volatilite / stop-loss mesafesi) ---
+    atr = average_true_range(ohlcv)
+    features["atr_pct"] = (atr / ohlcv["close"]).clip(0, 0.2) * 10
+    features["true_range_pct"] = (candle_range / ohlcv["close"]).clip(0, 0.2) * 10
+
+    # --- Bollinger Bands (volatilite) ---
+    bb = bollinger_bands(ohlcv["close"])
+    features["bb_percent_b"] = bb["bb_percent_b"]
+    features["bb_bandwidth_norm"] = bb["bb_bandwidth"].clip(0, 0.5) * 4
+
+    # --- ADX (trend gücü) ---
+    adx_df = adx(ohlcv)
+    features["adx_norm"] = (adx_df["adx"] / 50).clip(0, 2)
+    di_span = (adx_df["plus_di"] + adx_df["minus_di"]).replace(0, float("nan"))
+    features["di_diff_norm"] = ((adx_df["plus_di"] - adx_df["minus_di"]) / di_span).clip(-1, 1)
+
+    # --- VWAP (hacim ağırlıklı ortalama fiyat) ---
+    vwap = rolling_vwap(ohlcv)
+    features["vwap_gap_pct"] = ((ohlcv["close"] - vwap) / ohlcv["close"]).clip(-0.1, 0.1) * 10
+
+    # --- OBV (hacim akışı) ---
+    obv = on_balance_volume(ohlcv)
+    obv_std = obv.diff().rolling(20).std().replace(0, float("nan"))
+    features["obv_slope_norm"] = (obv.diff(5) / (obv_std * np.sqrt(5))).clip(-5, 5).fillna(0)
+
+    # --- SuperTrend ---
+    st = supertrend(ohlcv)
+    features["supertrend_trend"] = st["supertrend_trend"]
+    features["supertrend_dist_pct"] = ((ohlcv["close"] - st["supertrend"]) / ohlcv["close"]).clip(-0.1, 0.1) * 10
+
+    # --- Ichimoku Bulutu ---
+    ichi = ichimoku_cloud(ohlcv)
+    cloud_top = ichi[["senkou_a", "senkou_b"]].max(axis=1)
+    cloud_bottom = ichi[["senkou_a", "senkou_b"]].min(axis=1)
+    cloud_span = (cloud_top - cloud_bottom).replace(0, float("nan"))
+    features["ichimoku_cloud_position"] = (((ohlcv["close"] - cloud_bottom) / cloud_span) * 2 - 1).clip(-3, 3)
+    features["ichimoku_tk_cross"] = np.where(ichi["tenkan"] > ichi["kijun"], 1.0, -1.0)
+
+    # --- Fibonacci Geri Çekilme ---
+    features["fib_retracement_position"] = fibonacci_retracement_position(ohlcv)
+
     features["close"] = ind["close"]
+    # int64 (ns epoch) olarak saklanır, datetime64 değil: DataFrame'den tek
+    # satır çekildiğinde (ör. `.iloc[-1]`, `latest_feature_vector`) pandas
+    # bir Series oluşturur ve datetime64 ile float64 kolonların karışımı
+    # zorla `object` dtype'a düşürür — bu da XGBoost'un katı dtype
+    # kontrolünü kırar. int64, float64 ile uyumlu şekilde yükseltilir.
+    features["timestamp"] = ohlcv["timestamp"].astype("int64").to_numpy()
     return features
 
 
