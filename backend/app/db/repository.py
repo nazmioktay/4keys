@@ -134,6 +134,72 @@ def record_feature_snapshot(symbol: str, timeframe: str, time, feature_row: pd.S
         logger.exception("feature snapshot persist failed for %s", symbol)
 
 
+def record_feature_snapshots_bulk(symbol: str, timeframe: str, frame: pd.DataFrame) -> int:
+    """`frame`'deki (bkz. `app.ml.features.build_features` çıktısı — "timestamp"
+    (int64 ns epoch) ve "close" ile FEATURE_SNAPSHOT_COLUMNS kolonlarını
+    içermeli) TÜM satırları tek seferde `feature_snapshots`'a yazar.
+
+    ML eğitimi zaten her seferinde Binance'ten geniş bir geçmiş (bkz.
+    `Settings.ml_train_lookback`) çektiği için, bu geçmişi ayrıca
+    `feature_snapshots`'a da yazmak LSTM/RL için gereken uzun/kesintisiz
+    zaman serisinin aylarca sürecek periyodik birikim yerine TEK SEFERDE
+    "backfill" edilmesini sağlar.
+
+    Zaten kayıtlı (time, symbol, timeframe) satırları sessizce atlanır
+    (ON CONFLICT DO NOTHING) — aynı geçmişi tekrar tekrar eğitmek/çağırmak
+    güvenlidir, yalnızca gerçekten yeni barlar eklenir. Kalıcılık bir yan
+    etkidir: DB kapalı/erişilemez olsa da eğitim akışını bozmaz."""
+    if not is_enabled() or frame.empty:
+        return 0
+    required = {"timestamp", "close", *FEATURE_SNAPSHOT_COLUMNS}
+    if not required.issubset(frame.columns):
+        return 0
+
+    rows = []
+    for record in frame[["timestamp", "close", *FEATURE_SNAPSHOT_COLUMNS]].to_dict("records"):
+        try:
+            rows.append(
+                {
+                    "time": pd.Timestamp(record["timestamp"]).to_pydatetime(),
+                    "symbol": symbol,
+                    "timeframe": timeframe,
+                    "close": float(record["close"]),
+                    **{col: float(record[col]) for col in FEATURE_SNAPSHOT_COLUMNS},
+                }
+            )
+        except (TypeError, ValueError):
+            continue
+    if not rows:
+        return 0
+
+    try:
+        with session_scope() as db:
+            table = FeatureSnapshot.__table__
+            dialect = db.bind.dialect.name if db.bind is not None else ""
+            if dialect == "postgresql":
+                from sqlalchemy.dialects.postgresql import insert as upsert_insert
+            elif dialect == "sqlite":
+                from sqlalchemy.dialects.sqlite import insert as upsert_insert
+            else:
+                upsert_insert = None
+
+            if upsert_insert is not None:
+                stmt = upsert_insert(table).values(rows)
+                stmt = stmt.on_conflict_do_nothing(index_elements=["time", "symbol", "timeframe"])
+                db.execute(stmt)
+            else:
+                for row in rows:
+                    try:
+                        db.add(FeatureSnapshot(**row))
+                        db.flush()
+                    except IntegrityError:
+                        db.rollback()
+        return len(rows)
+    except SQLAlchemyError:
+        logger.exception("bulk feature snapshot persist failed for %s", symbol)
+        return 0
+
+
 def get_feature_snapshots(symbol: str, timeframe: str, limit: int = 5000) -> pd.DataFrame:
     """Bir sembol için biriken ML özellik vektörlerini kronolojik sırayla
     (en eskiden en yeniye) döner — LSTM/RL eğitiminde kullanılacak zaman

@@ -136,6 +136,15 @@ olarak — "önce veri, sonra daha fazla özellik" sırası):**
   özelliklerin gerçek ayırt ediciliği otomatik olarak artacak.
 - `ALL_FEATURE_COLUMNS = FEATURE_COLUMNS + MACRO_FEATURE_COLUMNS` (39+11=50)
   — XGBoost'un artık gerçekte gördüğü tam girdi seti budur.
+- **`feature_snapshots` backfill** — ML eğitimi (`/ml/train`, `/ml/train-lstm`)
+  zaten geniş bir geçmiş (`ml_train_lookback`) çektiği için, artık bu
+  geçmişi eğittiği HER sembol için `feature_snapshots`'a da yazar
+  (`app.db.repository.record_feature_snapshots_bulk`, `app.ml.dataset._persist_feature_snapshots`)
+  — `feature_snapshot_symbols` ayarındaki kısıtlamadan bağımsızdır. Bu,
+  LSTM/RL için gereken uzun/kesintisiz zaman serisinin aylarca sürecek
+  periyodik birikim yerine **tek seferde** oluşmasını sağlar. Zaten
+  kayıtlı barlar `ON CONFLICT DO NOTHING` ile atlanır — aynı geçmişi
+  tekrar tekrar eğitmek güvenlidir.
 
 **Faz C — Reinforcement Learning (opsiyonel)** — henüz kurulmadı, rehberin
 kendisi de zorunlu değil diyor.

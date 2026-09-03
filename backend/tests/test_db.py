@@ -155,6 +155,44 @@ def test_feature_snapshot_deduplicates_on_conflict():
     assert count == 1
 
 
+def _feature_frame(n: int = 5, start: str = "2024-01-01T00:00:00Z", freq: str = "1h") -> pd.DataFrame:
+    from app.ml.features import FEATURE_COLUMNS
+
+    timestamps = pd.date_range(start, periods=n, freq=freq)
+    data = {"timestamp": timestamps.astype("int64"), "close": [100.0 + i for i in range(n)]}
+    data.update({col: [0.1] * n for col in FEATURE_COLUMNS})
+    return pd.DataFrame(data)
+
+
+def test_record_feature_snapshots_bulk_inserts_all_rows():
+    frame = _feature_frame(n=5)
+    inserted = db.record_feature_snapshots_bulk("BTC/USDT:USDT", "1h", frame)
+    assert inserted == 5
+
+    snapshots = db.get_feature_snapshots("BTC/USDT:USDT", "1h", limit=10)
+    assert len(snapshots) == 5
+    assert snapshots.iloc[0]["close"] == pytest.approx(100.0)
+    assert snapshots.iloc[-1]["close"] == pytest.approx(104.0)
+
+
+def test_record_feature_snapshots_bulk_is_idempotent_on_reinsert():
+    frame = _feature_frame(n=5)
+    db.record_feature_snapshots_bulk("BTC/USDT:USDT", "1h", frame)
+    db.record_feature_snapshots_bulk("BTC/USDT:USDT", "1h", frame)  # aynı geçmiş tekrar "eğitilirse"
+
+    from app.db.models import FeatureSnapshot
+    from app.db.session import session_scope
+
+    with session_scope() as s:
+        count = s.query(FeatureSnapshot).count()
+    assert count == 5  # yinelenenler ON CONFLICT DO NOTHING ile yutulmalı
+
+
+def test_record_feature_snapshots_bulk_noop_when_disabled(_db_disabled):
+    frame = _feature_frame(n=3)
+    assert db.record_feature_snapshots_bulk("BTC/USDT:USDT", "1h", frame) == 0
+
+
 def test_feature_snapshots_noop_when_disabled(_db_disabled):
     db.record_feature_snapshot("BTC/USDT:USDT", "4h", pd.Timestamp("2024-01-01T00:00:00Z"), _feature_row())
     assert db.get_feature_snapshots("BTC/USDT:USDT", "4h").empty
@@ -203,6 +241,43 @@ def test_scan_market_persists_feature_snapshots_for_configured_symbols():
     eth_snapshots = db.get_feature_snapshots("ETH/USDT:USDT", "4h", limit=10)
     assert len(btc_snapshots) == 1  # ayarlarda yalnızca BTC/USDT:USDT var
     assert len(eth_snapshots) == 0  # ETH ayarlarda değil, kaydedilmemeli
+
+
+def test_build_training_dataset_backfills_feature_snapshots_for_all_symbols():
+    """ML eğitimi (feature_snapshot_symbols kısıtlamasından BAĞIMSIZ olarak)
+    çektiği tüm sembollerin geçmişini feature_snapshots'a da yazmalı —
+    LSTM/RL birikimini tek seferde "backfill" eder (bkz. app.ml.dataset)."""
+    import numpy as np
+
+    from app.exchanges.base import Exchange
+    from app.ml.dataset import build_training_dataset
+
+    class _FakeExchange(Exchange):
+        def list_symbols(self, quote_currency, market_type):
+            return ["BTC/USDT:USDT", "ETH/USDT:USDT"]
+
+        def fetch_ohlcv(self, symbol, timeframe, limit, since=None):
+            n = max(limit, 220)
+            close = np.linspace(100, 200, n) + np.random.default_rng(0).normal(0, 0.5, n)
+            return pd.DataFrame(
+                {
+                    "timestamp": pd.date_range("2024-01-01", periods=n, freq="1h"),
+                    "open": close,
+                    "high": close + 1,
+                    "low": close - 1,
+                    "close": close,
+                    "volume": 1000.0,
+                }
+            )
+
+    build_training_dataset(_FakeExchange(), ["BTC/USDT:USDT", "ETH/USDT:USDT"], "1h", 220)
+
+    # ayarlarda yalnızca BTC/USDT:USDT olsa bile (bkz. feature_snapshot_symbols),
+    # eğitim backfill'i her iki sembolü de yazmalı
+    btc_snapshots = db.get_feature_snapshots("BTC/USDT:USDT", "1h", limit=1000)
+    eth_snapshots = db.get_feature_snapshots("ETH/USDT:USDT", "1h", limit=1000)
+    assert len(btc_snapshots) > 0
+    assert len(eth_snapshots) > 0
 
 
 def test_repository_never_raises_when_db_url_invalid(monkeypatch):

@@ -14,6 +14,23 @@ logger = logging.getLogger(__name__)
 LabelingMethod = Literal["threshold", "triple_barrier"]
 
 
+def _persist_feature_snapshots(symbol: str, timeframe: str, features: pd.DataFrame) -> None:
+    """ML eğitimi zaten Binance'ten geniş bir geçmiş çektiği için, bu
+    geçmişi `feature_snapshots`'a da yazarak LSTM/RL'nin ihtiyaç duyduğu
+    uzun zaman serisini periyodik birikim yerine tek seferde "backfill"
+    eder (bkz. `app.db.repository.record_feature_snapshots_bulk`).
+    DB kapalı/erişilemezse veya import başarısızsa sessizce atlanır —
+    eğitim akışının bir ön koşulu değildir."""
+    try:
+        from app.db.repository import record_feature_snapshots_bulk
+
+        valid = features.dropna(subset=FEATURE_COLUMNS)
+        if not valid.empty:
+            record_feature_snapshots_bulk(symbol, timeframe, valid)
+    except Exception:  # noqa: BLE001 - DB birikimi opsiyoneldir, eğitimi bozmamalı
+        logger.exception("feature snapshot backfill failed for %s", symbol)
+
+
 def _compute_labels(
     ohlcv: pd.DataFrame,
     labeling_method: LabelingMethod,
@@ -57,6 +74,7 @@ def _build_symbol_frames(
             if len(ohlcv) < 60:
                 continue
             features = build_features(ohlcv)
+            _persist_feature_snapshots(symbol, timeframe, features)
             features = merge_macro_features(features, macro_history)
             labels = _compute_labels(ohlcv, labeling_method, horizon, threshold_pct, take_profit_pct, stop_loss_pct)
             frame = features.copy()

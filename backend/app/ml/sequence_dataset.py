@@ -3,7 +3,7 @@ import logging
 import numpy as np
 from app.exchanges.base import Exchange
 
-from .dataset import LabelingMethod, _compute_labels
+from .dataset import LabelingMethod, _compute_labels, _persist_feature_snapshots
 from .features import FEATURE_COLUMNS, build_features
 
 logger = logging.getLogger(__name__)
@@ -48,6 +48,7 @@ def build_sequence_dataset(
             if len(ohlcv) < 60:
                 continue
             features = build_features(ohlcv)
+            _persist_feature_snapshots(symbol, timeframe, features)
             labels = _compute_labels(ohlcv, labeling_method, horizon, threshold_pct, take_profit_pct, stop_loss_pct)
             frame = features.copy()
             frame["label"] = labels
