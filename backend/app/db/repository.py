@@ -7,7 +7,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.ml.features import FEATURE_COLUMNS
 
-from .models import FeatureSnapshot, MacroSnapshot, OHLCVRaw, SignalRecord, TradeRecord
+from .models import FeatureSnapshot, MacroSnapshot, OHLCVRaw, OrderbookSnapshot, SignalRecord, TradeRecord
 from .session import is_enabled, session_scope
 
 # `feature_snapshots` tablosunun kolonları, ML modelinin kullandığı
@@ -28,6 +28,8 @@ MACRO_SNAPSHOT_COLUMNS = [
     "fed_funds_rate",
     "ecb_deposit_rate",
 ]
+
+ORDERBOOK_SNAPSHOT_COLUMNS = ["bid_volume", "ask_volume", "imbalance", "spread_pct"]
 
 logger = logging.getLogger(__name__)
 
@@ -160,7 +162,7 @@ def record_feature_snapshots_bulk(symbol: str, timeframe: str, frame: pd.DataFra
         try:
             rows.append(
                 {
-                    "time": pd.Timestamp(record["timestamp"]).to_pydatetime(),
+                    "time": pd.Timestamp(record["timestamp"], unit="ns").to_pydatetime(),
                     "symbol": symbol,
                     "timeframe": timeframe,
                     "close": float(record["close"]),
@@ -270,6 +272,78 @@ def get_macro_snapshots(limit: int = 500) -> pd.DataFrame:
     except SQLAlchemyError:
         logger.exception("failed to read macro snapshots")
         return pd.DataFrame(columns=["time", *MACRO_SNAPSHOT_COLUMNS])
+
+
+def record_orderbook_snapshot(symbol: str, values: dict) -> None:
+    """Bir sembolün emir defteri özetinin (bkz. `app.orderbook.data`) bir
+    anlık görüntüsünü `orderbook_snapshots` tablosuna kaydeder. Geçmişe
+    dönük emir defteri verisi yoktur — bu tablo yalnızca bugünden itibaren
+    periyodik toplamayla birikir (`macro_snapshots` ile aynı desen, ama
+    sembol bazında)."""
+    if not is_enabled():
+        return
+    try:
+        with session_scope() as db:
+            db.add(OrderbookSnapshot(symbol=symbol, **{col: values.get(col) for col in ORDERBOOK_SNAPSHOT_COLUMNS}))
+    except SQLAlchemyError:
+        logger.exception("orderbook snapshot persist failed for %s", symbol)
+
+
+def get_latest_orderbook_snapshot(symbol: str) -> dict | None:
+    if not is_enabled():
+        return None
+    try:
+        with session_scope() as db:
+            row = db.execute(
+                select(OrderbookSnapshot)
+                .where(OrderbookSnapshot.symbol == symbol)
+                .order_by(OrderbookSnapshot.time.desc())
+                .limit(1)
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            return {"time": row.time.isoformat(), "symbol": row.symbol, **{col: getattr(row, col) for col in ORDERBOOK_SNAPSHOT_COLUMNS}}
+    except SQLAlchemyError:
+        logger.exception("failed to read latest orderbook snapshot for %s", symbol)
+        return None
+
+
+def get_orderbook_snapshots(symbol: str, limit: int = 5000) -> pd.DataFrame:
+    if not is_enabled():
+        return pd.DataFrame(columns=["time", "symbol", *ORDERBOOK_SNAPSHOT_COLUMNS])
+    try:
+        with session_scope() as db:
+            rows = db.execute(
+                select(OrderbookSnapshot)
+                .where(OrderbookSnapshot.symbol == symbol)
+                .order_by(OrderbookSnapshot.time.desc())
+                .limit(limit)
+            ).scalars().all()
+            records = [
+                {"time": r.time, "symbol": r.symbol, **{col: getattr(r, col) for col in ORDERBOOK_SNAPSHOT_COLUMNS}}
+                for r in reversed(rows)
+            ]
+            return pd.DataFrame(records)
+    except SQLAlchemyError:
+        logger.exception("failed to read orderbook snapshots for %s", symbol)
+        return pd.DataFrame(columns=["time", "symbol", *ORDERBOOK_SNAPSHOT_COLUMNS])
+
+
+def get_all_orderbook_snapshots(limit: int = 200_000) -> pd.DataFrame:
+    """Tüm sembollerin emir defteri geçmişini (as-of merge için) döner."""
+    if not is_enabled():
+        return pd.DataFrame(columns=["time", "symbol", *ORDERBOOK_SNAPSHOT_COLUMNS])
+    try:
+        with session_scope() as db:
+            rows = db.execute(select(OrderbookSnapshot).order_by(OrderbookSnapshot.time.desc()).limit(limit)).scalars().all()
+            records = [
+                {"time": r.time, "symbol": r.symbol, **{col: getattr(r, col) for col in ORDERBOOK_SNAPSHOT_COLUMNS}}
+                for r in reversed(rows)
+            ]
+            return pd.DataFrame(records)
+    except SQLAlchemyError:
+        logger.exception("failed to read all orderbook snapshots")
+        return pd.DataFrame(columns=["time", "symbol", *ORDERBOOK_SNAPSHOT_COLUMNS])
 
 
 def get_recent_trades(limit: int = 50) -> list[dict]:

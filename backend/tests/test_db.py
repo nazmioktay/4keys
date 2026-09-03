@@ -158,7 +158,10 @@ def test_feature_snapshot_deduplicates_on_conflict():
 def _feature_frame(n: int = 5, start: str = "2024-01-01T00:00:00Z", freq: str = "1h") -> pd.DataFrame:
     from app.ml.features import FEATURE_COLUMNS
 
-    timestamps = pd.date_range(start, periods=n, freq=freq)
+    # build_features her zaman ns epoch üretir (bkz. app.ml.features) —
+    # fixture bunu birebir taklit etmeli (pandas'ın varsayılan
+    # çözünürlüğü "us"tur, "ns" değil).
+    timestamps = pd.date_range(start, periods=n, freq=freq).astype("datetime64[ns, UTC]")
     data = {"timestamp": timestamps.astype("int64"), "close": [100.0 + i for i in range(n)]}
     data.update({col: [0.1] * n for col in FEATURE_COLUMNS})
     return pd.DataFrame(data)

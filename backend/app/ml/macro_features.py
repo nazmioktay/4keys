@@ -98,13 +98,14 @@ def merge_macro_features(frame: pd.DataFrame, macro_history: pd.DataFrame) -> pd
     if macro_history.empty or "timestamp" not in frame.columns:
         return result
 
-    left = pd.DataFrame({"timestamp": pd.to_datetime(frame["timestamp"]).dt.tz_localize("UTC")})
+    left = pd.DataFrame({"timestamp": pd.to_datetime(frame["timestamp"], unit="ns", utc=True)})
     left["_order"] = range(len(left))
     left = left.sort_values("timestamp")
 
-    merged = pd.merge_asof(
-        left, macro_history.rename(columns={"time": "timestamp"}), on="timestamp", direction="backward"
-    )
+    right = macro_history.rename(columns={"time": "timestamp"}).copy()
+    right["timestamp"] = pd.to_datetime(right["timestamp"], utc=True).astype("datetime64[ns, UTC]")
+
+    merged = pd.merge_asof(left, right, on="timestamp", direction="backward")
     merged = merged.sort_values("_order").reset_index(drop=True)
 
     for raw_col, norm_col in _RAW_TO_NORM.items():

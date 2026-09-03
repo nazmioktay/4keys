@@ -117,6 +117,7 @@ class FeatureSnapshot(Base):
     ichimoku_cloud_position: Mapped[float | None] = mapped_column(Float, nullable=True)
     ichimoku_tk_cross: Mapped[float | None] = mapped_column(Float, nullable=True)
     fib_retracement_position: Mapped[float | None] = mapped_column(Float, nullable=True)
+    volume_zscore: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class MacroSnapshot(Base):
@@ -143,6 +144,25 @@ class MacroSnapshot(Base):
     dax: Mapped[float | None] = mapped_column(Float, nullable=True)
     fed_funds_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
     ecb_deposit_rate: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
+class OrderbookSnapshot(Base):
+    """Emir defterinin (order book) periyodik ANLIK görüntüsü (bkz.
+    `app.orderbook`). Borsalar geçmişe dönük emir defteri saklamaz/satmaz,
+    bu yüzden `macro_snapshots` ile aynı desende — periyodik toplama,
+    zamanla birikir — SEMBOL BAZINDA tutulur (makrodan farklı olarak
+    emir defteri sembole özgüdür)."""
+
+    __tablename__ = "orderbook_snapshots"
+    __table_args__ = (UniqueConstraint("time", "symbol", name="uq_orderbook_snapshot_time_symbol"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    time: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
+    symbol: Mapped[str] = mapped_column(String, index=True)
+    bid_volume: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ask_volume: Mapped[float | None] = mapped_column(Float, nullable=True)
+    imbalance: Mapped[float | None] = mapped_column(Float, nullable=True)
+    spread_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class TradeRecord(Base):

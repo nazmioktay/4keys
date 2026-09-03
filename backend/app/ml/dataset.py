@@ -8,6 +8,7 @@ from app.exchanges.base import Exchange
 from .features import ALL_FEATURE_COLUMNS, FEATURE_COLUMNS, build_features
 from .labeling import label_future_direction, triple_barrier_labels
 from .macro_features import load_macro_history, merge_macro_features
+from .orderbook_features import load_orderbook_history, merge_orderbook_features
 
 logger = logging.getLogger(__name__)
 
@@ -76,6 +77,7 @@ def _build_symbol_frames(
             features = build_features(ohlcv)
             _persist_feature_snapshots(symbol, timeframe, features)
             features = merge_macro_features(features, macro_history)
+            features = merge_orderbook_features(features, load_orderbook_history(symbol))
             labels = _compute_labels(ohlcv, labeling_method, horizon, threshold_pct, take_profit_pct, stop_loss_pct)
             frame = features.copy()
             frame["label"] = labels

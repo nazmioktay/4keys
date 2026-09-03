@@ -99,6 +99,37 @@ class BinanceExchange(Exchange):
         except Exception:  # noqa: BLE001 - makro veri opsiyoneldir, hata ana akışı bozmamalı
             return None
 
+    def fetch_order_book_metrics(self, symbol: str, depth: int = 20) -> dict | None:
+        """Emir defterinin (order book) ANLIK bir özetini döner — geçmişe
+        dönük emir defteri borsalarda saklanmaz/satılmaz, bu yüzden yalnızca
+        periyodik anlık görüntü (`app.orderbook.service`) olarak toplanabilir.
+        Kimlik doğrulama gerektirmez, herkese açık veridir.
+
+        Döner: {bid_volume, ask_volume, imbalance (-1..1), spread_pct} ya da
+        erişilemezse None.
+        """
+        try:
+            book = self._futures.fetch_order_book(symbol, limit=depth)
+            bids = book.get("bids") or []
+            asks = book.get("asks") or []
+            if not bids or not asks:
+                return None
+            bid_volume = float(sum(qty for _price, qty in bids))
+            ask_volume = float(sum(qty for _price, qty in asks))
+            total = bid_volume + ask_volume
+            imbalance = (bid_volume - ask_volume) / total if total > 0 else 0.0
+            best_bid, best_ask = bids[0][0], asks[0][0]
+            mid = (best_bid + best_ask) / 2
+            spread_pct = ((best_ask - best_bid) / mid * 100) if mid > 0 else 0.0
+            return {
+                "bid_volume": bid_volume,
+                "ask_volume": ask_volume,
+                "imbalance": imbalance,
+                "spread_pct": spread_pct,
+            }
+        except Exception:  # noqa: BLE001 - order book verisi opsiyoneldir, hata ana akışı bozmamalı
+            return None
+
     # ---- Kimlik doğrulamalı hesap/emir işlemleri ----
 
     def fetch_balance(self, market_type: str = "future") -> dict:

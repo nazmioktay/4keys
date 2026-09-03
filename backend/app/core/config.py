@@ -60,6 +60,7 @@ class Settings(BaseSettings):
     screener_refresh_seconds: int = 60
     engine_cycle_seconds: int = 300
     macro_refresh_seconds: int = 21600  # 6 saat — makro veriler (VIX, altın, faiz oranları vb.) günde birkaç kez yeterli
+    orderbook_refresh_seconds: int = 1800  # 30 dakika — emir defterinin ANLIK görüntüsü, geçmişi yoktur (bkz. app.orderbook)
 
     # --- Ücretsiz makro veri kaynakları (bkz. app.macro.data) ---
     # FRED (ABD Merkez Bankası) API anahtarı — ücretsiz, anında alınır:

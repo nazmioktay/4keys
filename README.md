@@ -145,6 +145,24 @@ olarak — "önce veri, sonra daha fazla özellik" sırası):**
   periyodik birikim yerine **tek seferde** oluşmasını sağlar. Zaten
   kayıtlı barlar `ON CONFLICT DO NOTHING` ile atlanır — aynı geçmişi
   tekrar tekrar eğitmek güvenlidir.
+- **Ham hacim büyüklüğü** — `volume_zscore` (`FEATURE_COLUMNS`, teknik):
+  hacmin log-dönüşümlü, kendi rolling ortalama/std'sine göre z-skoru.
+  `volume_ratio` (kısa vadeli MA'ya oran) farklı olarak, hacmin MUTLAK
+  büyüklüğündeki anormallikleri (ani hacim patlaması) daha geniş bir
+  pencerede yakalar.
+- **Emir defteri (order book) derinliği** — `app/orderbook/` (yeni paket,
+  `app.macro` ile aynı desen): `BinanceExchange.fetch_order_book_metrics`
+  (bid/ask hacmi, imbalance, spread %) periyodik olarak (varsayılan 30
+  dakikada bir, `feature_snapshot_symbols` sembolleri için)
+  `orderbook_snapshots` tablosuna kaydedilir. **Önemli kısıt**: borsalar
+  geçmişe dönük emir defteri saklamaz/satmaz — bu veri yalnızca
+  toplamaya BAŞLADIĞIMIZ andan itibaren birikir, geçmiş 10.000 muma
+  geriye dönük eklenemez. `ORDERBOOK_FEATURE_COLUMNS` (3 kolon:
+  `orderbook_imbalance`, `orderbook_spread_norm`, `orderbook_depth_norm`),
+  `app.ml.orderbook_features` ile (makro gibi) as-of merge edilir —
+  sembol bazında. `ALL_FEATURE_COLUMNS` artık 39 teknik + 11 makro + 3
+  order book = **53** kolon. Endpoint'ler: `GET/POST /orderbook/latest`,
+  `/orderbook/history`, `/orderbook/refresh`.
 
 **Faz C — Reinforcement Learning (opsiyonel)** — henüz kurulmadı, rehberin
 kendisi de zorunlu değil diyor.

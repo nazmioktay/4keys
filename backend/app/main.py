@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from app.api.routes import backtest, bank, bist, dca, engine, macro, ml, portfolio, scheduler, screener, security, strategy, trading
+from app.api.routes import backtest, bank, bist, dca, engine, macro, ml, orderbook, portfolio, scheduler, screener, security, strategy, trading
 from app.api.routes import db as db_routes
 from app.core.config import settings
 from app.db.session import init_db
@@ -72,6 +72,7 @@ app.include_router(db_routes.router)
 app.include_router(security.router)
 app.include_router(bist.router)
 app.include_router(macro.router)
+app.include_router(orderbook.router)
 
 
 @app.get("/health")

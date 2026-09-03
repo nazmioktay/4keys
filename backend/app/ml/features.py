@@ -66,6 +66,8 @@ FEATURE_COLUMNS = [
     "ichimoku_cloud_position",
     "ichimoku_tk_cross",
     "fib_retracement_position",
+    # --- Ham hacim büyüklüğü (oran değil, hacmin kendisinin anormalliği) ---
+    "volume_zscore",
 ]
 
 # Makro/piyasa bağlamı özellikleri (app.macro.service ile toplanan
@@ -88,8 +90,17 @@ MACRO_FEATURE_COLUMNS = [
     "macro_ecb_deposit_rate_norm",
 ]
 
-# Modelin gerçekten gördüğü tüm girdi kolonları (teknik + makro).
-ALL_FEATURE_COLUMNS = FEATURE_COLUMNS + MACRO_FEATURE_COLUMNS
+# Emir defteri (order book) özellikleri: geçmişi olmayan, bugünden
+# itibaren periyodik toplanan bir kaynak (bkz. app.orderbook,
+# app.ml.orderbook_features) — makrodan farklı olarak SEMBOL BAZINDA.
+ORDERBOOK_FEATURE_COLUMNS = [
+    "orderbook_imbalance",
+    "orderbook_spread_norm",
+    "orderbook_depth_norm",
+]
+
+# Modelin gerçekten gördüğü tüm girdi kolonları (teknik + makro + order book).
+ALL_FEATURE_COLUMNS = FEATURE_COLUMNS + MACRO_FEATURE_COLUMNS + ORDERBOOK_FEATURE_COLUMNS
 
 
 def build_features(ohlcv: pd.DataFrame) -> pd.DataFrame:
@@ -107,6 +118,19 @@ def build_features(ohlcv: pd.DataFrame) -> pd.DataFrame:
     features["ema_gap"] = ((ind["ema_fast"] - ind["ema_slow"]) / ind["close"]).clip(-0.1, 0.1) * 10
     features["momentum"] = (ind["momentum"] / 20).clip(-5, 5)
     features["volume_ratio"] = (ind["volume"] / ind["volume_sma"]).clip(0, 5)
+
+    # Ham hacim büyüklüğü: log-dönüşümle ölçeklenip kendi rolling
+    # ortalama/std'sine göre z-skorlanır — `volume_ratio` (kısa vadeli MA'ya
+    # oran) farklı olarak, hacmin MUTLAK büyüklüğündeki anormallikleri
+    # (ör. ani hacim patlaması) daha geniş bir pencerede yakalar. Ham
+    # sayı (ör. "150000") yerine yine ölçekten bağımsız bir değer taşınır.
+    log_volume = np.log1p(ind["volume"])
+    vol_mean = log_volume.rolling(50, min_periods=10).mean()
+    vol_std = log_volume.rolling(50, min_periods=10).std().replace(0, float("nan"))
+    # hacim (nadiren de olsa) uzun bir pencerede tamamen sabit kalırsa
+    # std=0/NaN olur — bu durumda "anormallik yok" anlamına gelen 0.0'a
+    # (nötr) düşülür, tüm satırların NaN olup elenmesi yerine.
+    features["volume_zscore"] = ((log_volume - vol_mean) / vol_std).clip(-5, 5).fillna(0.0)
 
     rolling_low = ind["low"].rolling(20).min()
     rolling_high = ind["high"].rolling(20).max()
@@ -206,12 +230,18 @@ def build_features(ohlcv: pd.DataFrame) -> pd.DataFrame:
     features["fib_retracement_position"] = fibonacci_retracement_position(ohlcv)
 
     features["close"] = ind["close"]
-    # int64 (ns epoch) olarak saklanır, datetime64 değil: DataFrame'den tek
-    # satır çekildiğinde (ör. `.iloc[-1]`, `latest_feature_vector`) pandas
-    # bir Series oluşturur ve datetime64 ile float64 kolonların karışımı
-    # zorla `object` dtype'a düşürür — bu da XGBoost'un katı dtype
-    # kontrolünü kırar. int64, float64 ile uyumlu şekilde yükseltilir.
-    features["timestamp"] = ohlcv["timestamp"].astype("int64").to_numpy()
+    # int64 (HER ZAMAN nanosaniye epoch, çözünürlükten bağımsız) olarak
+    # saklanır, datetime64 değil: DataFrame'den tek satır çekildiğinde
+    # (ör. `.iloc[-1]`, `latest_feature_vector`) pandas bir Series oluşturur
+    # ve datetime64 ile float64 kolonların karışımı zorla `object` dtype'a
+    # düşürür — bu da XGBoost'un katı dtype kontrolünü kırar. int64,
+    # float64 ile uyumlu şekilde yükseltilir. `astype("datetime64[ns]")` ile
+    # ÖNCE ns'e sabitlenir — pandas 3.x'te `pd.to_datetime(..., unit="ms")`
+    # varsayılan olarak `datetime64[ms]` üretir; doğrudan `.astype("int64")`
+    # çağrılsaydı ms epoch elde edilir ve geri dönüşte ns sanılırsa
+    # (`pd.Timestamp(value)`, unit belirtilmezse ns varsayar) 1970'e yakın
+    # yanlış zaman damgaları üretilirdi.
+    features["timestamp"] = ohlcv["timestamp"].astype("datetime64[ns]").astype("int64").to_numpy()
     return features
 
 

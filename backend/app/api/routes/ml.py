@@ -11,6 +11,7 @@ from app.ml.features import latest_feature_vector
 from app.ml.meta_label import DEFAULT_META_MODEL_PATH, MetaLabelModel
 from app.ml.lstm_model import DEFAULT_LSTM_MODEL_PATH, LSTMSignalModel
 from app.ml.macro_features import latest_macro_feature_row
+from app.ml.orderbook_features import latest_orderbook_feature_row
 from app.ml.model import DEFAULT_MODEL_PATH, Algorithm, SignalModel
 from app.ml.sequence_dataset import build_sequence_dataset
 from app.ml.train import train_lstm_signal_model, train_meta_label_model, train_signal_model_validated
@@ -300,6 +301,8 @@ def predict(symbol: str = Query(..., description="Örn: BTC/USDT:USDT")) -> Pred
     if feature_row is None:
         raise HTTPException(status_code=422, detail="Yeterli veri yok.")
     for col, value in latest_macro_feature_row().items():
+        feature_row[col] = value
+    for col, value in latest_orderbook_feature_row(symbol).items():
         feature_row[col] = value
 
     model = SignalModel.load_from()
