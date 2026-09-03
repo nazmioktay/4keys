@@ -2,12 +2,16 @@ import logging
 from dataclasses import dataclass
 from typing import Literal
 
+import numpy as np
+
 from app.core.config import settings
 from app.exchanges.base import Exchange
 
 from .dataset import LabelingMethod, build_training_dataset, build_training_dataset_with_time
+from .lstm_model import LSTMSignalModel, LSTMTrainingReport
 from .meta_label import MetaLabelModel, build_meta_dataset
 from .model import Algorithm, SignalModel
+from .sequence_dataset import build_sequence_dataset
 from .validation import OutOfSampleReport, WalkForwardReport, evaluate_out_of_sample, run_walk_forward_validation, split_out_of_sample
 
 logger = logging.getLogger(__name__)
@@ -128,6 +132,87 @@ def train_signal_model_validated(
         oos_report.holdout_rows,
     )
     return TrainingResult(model=model, rows_used=len(X_train), walk_forward=wf_report, out_of_sample=oos_report)
+
+
+@dataclass
+class LSTMTrainingResult:
+    model: LSTMSignalModel
+    rows_used: int
+    training: LSTMTrainingReport
+    out_of_sample: OutOfSampleReport
+
+
+def train_lstm_signal_model(
+    exchange: Exchange,
+    symbols: list[str],
+    timeframe: str | None = None,
+    lookback: int | None = None,
+    seq_len: int = 20,
+    horizon: int = 5,
+    threshold_pct: float = 1.0,
+    labeling_method: LabelingMethod = "threshold",
+    take_profit_pct: float = 2.0,
+    stop_loss_pct: float = 2.0,
+    holdout_frac: float = 0.2,
+    epochs: int = 30,
+) -> LSTMTrainingResult:
+    """LSTM (Faz B) modelini kayan pencereli sekans veri setiyle eğitir
+    (bkz. `app.ml.sequence_dataset.build_sequence_dataset`).
+
+    XGBoost'un `train_signal_model_validated`'ı gibi, kronolojik olarak en
+    yeni `holdout_frac` dilimi (varsayılan son %20) fit() sırasında modele
+    HİÇBİR ZAMAN gösterilmez — yalnızca out-of-sample doğrulama için
+    kullanılır. Walk-forward CV, LSTM'in eğitim maliyeti (her fold için
+    sıfırdan sinir ağı eğitimi) nedeniyle burada uygulanmaz; bunun yerine
+    holdout + eğitim geçmişindeki (loss/accuracy) yakınsama izlenir.
+    """
+    X, y, time_frac = build_sequence_dataset(
+        exchange,
+        symbols,
+        timeframe or settings.candle_timeframe,
+        lookback or settings.candle_lookback,
+        seq_len=seq_len,
+        horizon=horizon,
+        threshold_pct=threshold_pct,
+        labeling_method=labeling_method,
+        take_profit_pct=take_profit_pct,
+        stop_loss_pct=stop_loss_pct,
+    )
+
+    if len(X) < 60:
+        raise ValueError(
+            f"LSTM eğitimi için yeterli veri yok ({len(X)} pencere). Daha fazla sembol, daha uzun geçmiş veya daha kısa seq_len deneyin."
+        )
+
+    cutoff = 1.0 - holdout_frac
+    train_mask = time_frac <= cutoff
+    X_train, y_train = X[train_mask], y[train_mask]
+    X_holdout, y_holdout = X[~train_mask], y[~train_mask]
+
+    model = LSTMSignalModel(seq_len=seq_len)
+    training_report = model.fit(X_train, y_train, epochs=epochs)
+
+    if len(X_holdout) > 0:
+        pred, _ = model.predict_batch(X_holdout)
+        accuracy = float((pred == y_holdout).mean())
+        # sınıf başına dengeli doğruluk (balanced accuracy) — basit ortalama
+        classes = np.unique(y_holdout)
+        per_class_acc = [float((pred[y_holdout == c] == c).mean()) for c in classes if (y_holdout == c).sum() > 0]
+        balanced_accuracy = float(np.mean(per_class_acc)) if per_class_acc else 0.0
+        oos_report = OutOfSampleReport(holdout_rows=len(X_holdout), accuracy=accuracy, balanced_accuracy=balanced_accuracy)
+    else:
+        oos_report = OutOfSampleReport(0, 0.0, 0.0)
+
+    model.save()
+    logger.info(
+        "LSTM model trained on %d pencere; train_loss=%.4f train_acc=%.3f; oos_acc=%.3f (holdout=%d pencere)",
+        len(X_train),
+        training_report.final_train_loss,
+        training_report.final_train_accuracy,
+        oos_report.accuracy,
+        oos_report.holdout_rows,
+    )
+    return LSTMTrainingResult(model=model, rows_used=len(X_train), training=training_report, out_of_sample=oos_report)
 
 
 def train_meta_label_model(

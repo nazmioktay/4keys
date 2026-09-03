@@ -65,9 +65,32 @@ eklenmemiş bir katmandır — bu bilerek bir sonraki adıma bırakılmıştır.
 **Faz A — XGBoost (rehberin önerdiği ilk model)** ✅
 `app/ml/model.py::SignalModel`'in varsayılan algoritması artık **XGBoost**
 (gradient boosted karar ağaçları) — eski MLP sinir ağı `algorithm="mlp"`
-ile karşılaştırma amaçlı hâlâ seçilebilir. LSTM (Faz B) ve Reinforcement
-Learning (Faz C, opsiyonel) rehberin de önerdiği gibi bilinçli olarak
-bir sonraki adıma bırakılmıştır — Faz A stabilleşmeden Faz B'ye geçilmez.
+ile karşılaştırma amaçlı hâlâ seçilebilir.
+
+**Faz B — LSTM** ✅ (rehberin "Faz A stabilleşmeden geçilmez" kuralı
+kullanıcı kararıyla bilinçli olarak atlanarak, kod/altyapı hazırlığı
+için erken kuruldu)
+`app/ml/lstm_model.py::LSTMSignalModel` — çok katmanlı, dropout'lu bir
+LSTM (Long Short-Term Memory) sinir ağı. XGBoost her barı BAĞIMSIZ bir
+satır olarak görürken, LSTM son `seq_len` barın 24 özellikli vektörünü
+SIRAYLA okuyup önceki adımlardan öğrendiğini bir gizli duruma taşır —
+rehberin "Güçlü olduğu alan: Sekans ve zaman örüntüleri" satırının
+karşılığı.
+- `app/ml/sequence_dataset.py::build_sequence_dataset` — kayan pencereli
+  (sliding window) veri seti kurar; her pencere yalnızca KENDİ sembolünün
+  kesintisiz kronolojik serisinden gelir, semboller arası sızıntı olmaz.
+- Overfitting koruması: LSTM katmanları arası **dropout** + Adam'ın
+  **L2 regularizasyonu** (`weight_decay`) + kronolojik son %20'lik
+  **out-of-sample holdout** (fit() sırasında modele hiç gösterilmez) —
+  rehber "2.4 Overfitting"in LSTM'e özgü önerileriyle uyumlu. Walk-forward
+  CV, her fold için sıfırdan sinir ağı eğitmenin maliyeti nedeniyle burada
+  uygulanmadı (XGBoost'tan farklı olarak).
+- `POST /ml/train-lstm` — `seq_len`, `epochs` gibi parametrelerle eğitir,
+  train loss/accuracy ve out-of-sample doğruluğunu döner.
+- `GET /ml/predict-lstm?symbol=...` — en son `seq_len` bardan tahmin üretir.
+
+**Faz C — Reinforcement Learning (opsiyonel)** — henüz kurulmadı, rehberin
+kendisi de zorunlu değil diyor.
 
 **Overfitting koruması** (rehber "2.4 Overfitting"):
 - `app/ml/validation.py::walk_forward_splits` — **Walk-Forward Validation**:
@@ -120,6 +143,8 @@ docker compose up
 | `GET /ml/explain?symbol=...` | Eğitilmiş XGBoost modelinin SHAP özellik önemlerini döner |
 | `POST /ml/train-meta` | Meta-label modelini eğitir (önce `/ml/train` çağrılmış olmalı) |
 | `GET /ml/predict?symbol=BTC/USDT:USDT` | Yön + kalibre güven tahmini (meta model varsa `meta_act`/`meta_confidence` de döner) |
+| `POST /ml/train-lstm` | LSTM (Faz B) modelini sekans veri setiyle eğitir (`seq_len`, `epochs` vb.) |
+| `GET /ml/predict-lstm?symbol=BTC/USDT:USDT` | LSTM ile yön + güven tahmini |
 | `POST /engine/run-cycle` | Screener top listesi üzerinde bir karar döngüsü çalıştırır (paper-trading) |
 | `GET /engine/status` | Açık paper pozisyonlar ve kapanan işlem geçmişi |
 | `POST /dca/optimize` | Verilen sembol/sermaye için en iyi DCA parametre kombinasyonlarını bulur |
@@ -587,7 +612,7 @@ da scraping riskini kabul etmek gerekecek; kullanıcıyla ayrıca karar verilece
 - [x] Screener + motorları periyodik/zamanlanmış bir job'a bağlama (APScheduler, FastAPI lifespan)
 - [x] ML metodolojisi yükseltmesi: triple-barrier etiketleme + olasılık kalibrasyonu + meta-labeling ("Kripto Bot Tam Rehber" entegrasyonu)
 - [x] XGBoost (Faz A) — birincil model + walk-forward/purged CV + out-of-sample holdout + SHAP açıklanabilirlik
-- [ ] LSTM (Faz B) — Faz A stabil/kârlı çalışmadan önerilmez, rehbere göre bilinçli olarak ertelendi
+- [x] LSTM (Faz B) — sekans/zaman serisi modeli, dropout + L2 + out-of-sample holdout ile
 - [ ] Reinforcement Learning (Faz C, opsiyonel)
 - [x] Kalıcı veritabanı katmanı (TimescaleDB/PostgreSQL, opsiyonel) + Docker Compose
 - [x] Güvenlik protokolü sertleştirme: kill switch (manuel+otomatik), sabit kaldıraç tavanı, API anahtarı çekim izni kontrolü, sır tarama betiği

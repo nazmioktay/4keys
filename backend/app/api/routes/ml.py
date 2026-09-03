@@ -9,8 +9,10 @@ from app.exchanges import get_exchange
 from app.ml.dataset import LabelingMethod
 from app.ml.features import latest_feature_vector
 from app.ml.meta_label import DEFAULT_META_MODEL_PATH, MetaLabelModel
+from app.ml.lstm_model import DEFAULT_LSTM_MODEL_PATH, LSTMSignalModel
 from app.ml.model import DEFAULT_MODEL_PATH, Algorithm, SignalModel
-from app.ml.train import train_meta_label_model, train_signal_model_validated
+from app.ml.sequence_dataset import build_sequence_dataset
+from app.ml.train import train_lstm_signal_model, train_meta_label_model, train_signal_model_validated
 from app.screener.scanner import scan_market, top_long, top_short
 
 router = APIRouter(prefix="/ml", tags=["ml"])
@@ -60,6 +62,36 @@ class ExplainResponse(BaseModel):
     symbols_used: int
     rows_explained: int
     importances: list[ShapImportance]
+
+
+class TrainLSTMRequest(BaseModel):
+    symbols: list[str] | None = None  # None -> screener top long+short kullanılır
+    seq_len: int = 20
+    horizon: int = 5
+    threshold_pct: float = 1.0
+    labeling_method: LabelingMethod = "threshold"
+    take_profit_pct: float = 2.0
+    stop_loss_pct: float = 2.0
+    holdout_frac: float = 0.2
+    epochs: int = 30
+
+
+class TrainLSTMResponse(BaseModel):
+    rows_used: int
+    symbols_used: int
+    seq_len: int
+    epochs_run: int
+    final_train_loss: float
+    final_train_accuracy: float
+    out_of_sample_rows: int
+    out_of_sample_accuracy: float
+    out_of_sample_balanced_accuracy: float
+
+
+class PredictLSTMResponse(BaseModel):
+    symbol: str
+    direction: str
+    confidence: float
 
 
 class TrainMetaRequest(BaseModel):
@@ -162,6 +194,66 @@ def explain(symbol: str | None = Query(None, description="Boş bırakılırsa sc
         rows_explained=min(len(X), 200),
         importances=[ShapImportance(feature=row.feature, mean_abs_shap=row.mean_abs_shap) for row in importance.itertuples()],
     )
+
+
+@router.post("/train-lstm", response_model=TrainLSTMResponse)
+def train_lstm(payload: TrainLSTMRequest) -> TrainLSTMResponse:
+    """LSTM modelini eğitir (rehber Faz B). XGBoost'un (Faz A) tekil bar
+    yerine, son `seq_len` barın özellik sekansını sırayla görür.
+
+    Rehber "Faz A stabil/kârlı çalışmadan Faz B'ye geçilmez" der — bu
+    endpoint bilinçli olarak bu kontrolü ZORUNLU KILMAZ (kullanıcı kararı),
+    ama out-of-sample metrikleri (hiç görülmemiş son %20 veri üzerinde)
+    modelin gerçekten mi öğrendiğini görünür kılar."""
+    exchange = get_exchange(settings.exchange_id)
+    symbols = _resolve_symbols(exchange, payload.symbols)
+    if not symbols:
+        raise HTTPException(status_code=400, detail="Eğitim için sembol bulunamadı.")
+
+    try:
+        result = train_lstm_signal_model(
+            exchange,
+            symbols,
+            seq_len=payload.seq_len,
+            horizon=payload.horizon,
+            threshold_pct=payload.threshold_pct,
+            labeling_method=payload.labeling_method,
+            take_profit_pct=payload.take_profit_pct,
+            stop_loss_pct=payload.stop_loss_pct,
+            holdout_frac=payload.holdout_frac,
+            epochs=payload.epochs,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    oos = result.out_of_sample
+    return TrainLSTMResponse(
+        rows_used=result.rows_used,
+        symbols_used=len(symbols),
+        seq_len=payload.seq_len,
+        epochs_run=result.training.epochs_run,
+        final_train_loss=result.training.final_train_loss,
+        final_train_accuracy=result.training.final_train_accuracy,
+        out_of_sample_rows=oos.holdout_rows,
+        out_of_sample_accuracy=oos.accuracy,
+        out_of_sample_balanced_accuracy=oos.balanced_accuracy,
+    )
+
+
+@router.get("/predict-lstm", response_model=PredictLSTMResponse)
+def predict_lstm(symbol: str = Query(..., description="Örn: BTC/USDT:USDT")) -> PredictLSTMResponse:
+    if not Path(DEFAULT_LSTM_MODEL_PATH).exists():
+        raise HTTPException(status_code=409, detail="LSTM modeli henüz eğitilmedi. Önce /ml/train-lstm çağırın.")
+
+    exchange = get_exchange(settings.exchange_id)
+    model = LSTMSignalModel.load_from()
+
+    X, _y, _t = build_sequence_dataset(exchange, [symbol], settings.candle_timeframe, settings.candle_lookback, seq_len=model.seq_len)
+    if len(X) == 0:
+        raise HTTPException(status_code=422, detail="Tahmin için yeterli veri yok (seq_len'e ulaşmıyor).")
+
+    prediction = model.predict(X[-1])
+    return PredictLSTMResponse(symbol=symbol, direction=prediction.direction, confidence=prediction.confidence)
 
 
 @router.post("/train-meta", response_model=TrainResponse)
