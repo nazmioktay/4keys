@@ -67,9 +67,19 @@ eklenmemiş bir katmandır — bu bilerek bir sonraki adıma bırakılmıştır.
 (gradient boosted karar ağaçları) — eski MLP sinir ağı `algorithm="mlp"`
 ile karşılaştırma amaçlı hâlâ seçilebilir.
 
-**Faz B — LSTM** ✅ (rehberin "Faz A stabilleşmeden geçilmez" kuralı
+**Faz B — LSTM** ⚠️ Altyapı kuruldu, ama **canlı sonuçlar overfit** —
+kullanıma alınmadı (rehberin "Faz A stabilleşmeden geçilmez" kuralı
 kullanıcı kararıyla bilinçli olarak atlanarak, kod/altyapı hazırlığı
 için erken kuruldu)
+
+Production'da (`app.acromer.com`, 2026-09-03) BTC/USDT.P + top screener
+sembolleriyle (20 sembol, 1160 pencere) yapılan ilk canlı eğitim:
+`final_train_accuracy=%76.2` ama `out_of_sample_accuracy=%28.9`
+(3 sınıflı rastgele tahminden -%33- bile kötü) — klasik overfitting.
+Karar: **LSTM şimdilik rafta**, `feature_snapshots` tablosunda yeterli
+geçmiş birikene kadar ve/veya daha fazla sembol+geçmiş ile tekrar
+denenene kadar `/ml/predict-lstm` sonuçlarına güvenilmemeli. Odak
+tekrar Faz A (XGBoost)'a döndü.
 `app/ml/lstm_model.py::LSTMSignalModel` — çok katmanlı, dropout'lu bir
 LSTM (Long Short-Term Memory) sinir ağı. XGBoost her barı BAĞIMSIZ bir
 satır olarak görürken, LSTM son `seq_len` barın 24 özellikli vektörünü
@@ -612,7 +622,7 @@ da scraping riskini kabul etmek gerekecek; kullanıcıyla ayrıca karar verilece
 - [x] Screener + motorları periyodik/zamanlanmış bir job'a bağlama (APScheduler, FastAPI lifespan)
 - [x] ML metodolojisi yükseltmesi: triple-barrier etiketleme + olasılık kalibrasyonu + meta-labeling ("Kripto Bot Tam Rehber" entegrasyonu)
 - [x] XGBoost (Faz A) — birincil model + walk-forward/purged CV + out-of-sample holdout + SHAP açıklanabilirlik
-- [x] LSTM (Faz B) — sekans/zaman serisi modeli, dropout + L2 + out-of-sample holdout ile
+- [~] LSTM (Faz B) — altyapı kuruldu (dropout + L2 + out-of-sample holdout ile), ancak ilk canlı sonuç overfit çıktı (bkz. yukarıdaki not); kullanıma alınmadı, rafta
 - [ ] Reinforcement Learning (Faz C, opsiyonel)
 - [x] Kalıcı veritabanı katmanı (TimescaleDB/PostgreSQL, opsiyonel) + Docker Compose
 - [x] Güvenlik protokolü sertleştirme: kill switch (manuel+otomatik), sabit kaldıraç tavanı, API anahtarı çekim izni kontrolü, sır tarama betiği
