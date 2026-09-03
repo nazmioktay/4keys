@@ -18,7 +18,7 @@ class Settings(BaseSettings):
     # yaşanan overfitting sorununu (bkz. README "Faz B — LSTM" notu) daha
     # fazla satırla azaltmak için.
     ml_train_timeframe: str = "1h"
-    ml_train_lookback: int = 1500
+    ml_train_lookback: int = 10000
 
     # --- Feature snapshot biriktirme (LSTM/RL için ileride kullanılacak
     # zaman serisi veri seti) --- Virgülle ayrılmış sembol listesi; her

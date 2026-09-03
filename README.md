@@ -107,10 +107,12 @@ olarak — "önce veri, sonra daha fazla özellik" sırası):**
   (1000 mum) aşarsa otomatik olarak birden fazla istekle birleştiriyor —
   ücretsiz olarak aylar/yıllar süren geçmiş veri çekilebiliyor.
 - `Settings.ml_train_timeframe` (varsayılan `1h`) ve `ml_train_lookback`
-  (varsayılan `1500`) — screener'ın canlı görüntülediği `candle_timeframe`
+  (varsayılan `10000`) — screener'ın canlı görüntülediği `candle_timeframe`
   (`4h`) / `candle_lookback`'ten **bilinçli olarak ayrı** tutulur: screener
   4h'de kalırken, ML eğitimi artık daha ince taneli ve çok daha derin
-  (~1500 saat ≈ 62 gün, ~20 sembolle 10.000+ satır) bir geçmişle çalışır.
+  (~10.000 saat ≈ 416 gün / ~1.14 yıl, sembol başına ~10.000 mum) bir
+  geçmişle çalışır — pagination (`BinanceExchange.fetch_ohlcv`) sayesinde
+  tek istek sınırı (1000) aşılarak ücretsiz şekilde çekilir.
 - `FEATURE_COLUMNS` 24'ten **39 teknik özelliğe** çıkarıldı: ham OHLC mum
   yapısı (`candle_body_pct`, `candle_upper_wick_pct`, `candle_lower_wick_pct`,
   `true_range_pct` — ham fiyat değil, ölçeklenmiş oranlar) ve kullanıcının
