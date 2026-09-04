@@ -156,6 +156,63 @@ def test_close_forces_full_immediate_close_ignoring_exit_tranches():
     assert portfolio.get("BTC/USDT") is None
 
 
+def test_propose_open_scales_size_by_confidence():
+    rules = RiskRules(max_symbol_exposure_pct=100, max_total_exposure_pct=100, confidence_scaling_min_confidence=0.6, confidence_scaling_min_scale=0.5)
+    portfolio = PortfolioManager(starting_equity=1000, rules=rules)
+
+    low = portfolio.propose_open("BTC/USDT", "long", 100, 97, confidence=0.6)
+    high = portfolio.propose_open("BTC/USDT", "long", 100, 97, confidence=1.0)
+    mid = portfolio.propose_open("BTC/USDT", "long", 100, 97, confidence=0.8)
+
+    assert low.size_quote == pytest.approx(high.size_quote * 0.5)
+    assert low.size_quote < mid.size_quote < high.size_quote
+
+
+def test_propose_open_confidence_scaling_disabled_ignores_confidence():
+    rules = RiskRules(max_symbol_exposure_pct=100, max_total_exposure_pct=100, confidence_scaling_enabled=False)
+    portfolio = PortfolioManager(starting_equity=1000, rules=rules)
+
+    low = portfolio.propose_open("BTC/USDT", "long", 100, 97, confidence=0.6)
+    high = portfolio.propose_open("BTC/USDT", "long", 100, 97, confidence=1.0)
+    assert low.size_quote == pytest.approx(high.size_quote)
+
+
+def test_propose_open_vix_regime_filter_blocks_above_threshold():
+    rules = RiskRules(
+        max_symbol_exposure_pct=100, max_total_exposure_pct=100, vix_regime_filter_enabled=True, vix_zscore_block_threshold=2.5
+    )
+    portfolio = PortfolioManager(starting_equity=1000, rules=rules)
+
+    decision = portfolio.propose_open("BTC/USDT", "long", 100, 97, vix_zscore=3.0)
+    assert decision.allowed is False
+    assert decision.size_quote == 0
+
+
+def test_propose_open_vix_regime_filter_halves_size_above_reduce_threshold():
+    rules = RiskRules(
+        max_symbol_exposure_pct=100,
+        max_total_exposure_pct=100,
+        vix_regime_filter_enabled=True,
+        vix_zscore_reduce_threshold=1.5,
+        vix_zscore_block_threshold=2.5,
+        confidence_scaling_enabled=False,
+    )
+    portfolio = PortfolioManager(starting_equity=1000, rules=rules)
+
+    normal = portfolio.propose_open("BTC/USDT", "long", 100, 97, vix_zscore=0.0)
+    stressed = portfolio.propose_open("BTC/USDT", "long", 100, 97, vix_zscore=2.0)
+    assert stressed.size_quote == pytest.approx(normal.size_quote * 0.5)
+
+
+def test_propose_open_vix_regime_filter_disabled_by_default():
+    rules = RiskRules(max_symbol_exposure_pct=100, max_total_exposure_pct=100, confidence_scaling_enabled=False)
+    portfolio = PortfolioManager(starting_equity=1000, rules=rules)
+
+    decision = portfolio.propose_open("BTC/USDT", "long", 100, 97, vix_zscore=10.0)  # aşırı yüksek olsa da filtre kapalı
+    assert decision.allowed is True
+    assert decision.size_quote > 0
+
+
 def test_pnl_summary_totals_match_closed_history():
     portfolio = PortfolioManager(starting_equity=1000, rules=RiskRules(entry_tranche_weights=[1.0]))
     portfolio.open("BTC/USDT", "long", entry_price=100, size_quote=1000)

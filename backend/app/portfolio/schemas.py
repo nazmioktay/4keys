@@ -47,6 +47,31 @@ class RiskRules(BaseModel):
         description="Kapanış sinyali geldiğinde pozisyonun ne kadarının her dilimde satılacağı (toplamı ~1.0 olmalı). Son dilim, yuvarlama artığı kalmaması için pozisyonun TAMAMINI kapatır.",
     )
 
+    # --- Confidence-weighted boyutlandırma ---
+    # Kelly/fixed_risk'in önerdiği boyut, modelin O ANKİ tahmininin
+    # güvenine göre ek olarak ölçeklenir — yalnızca "kazanma oranı"
+    # geçmişine değil, "bu spesifik sinyal ne kadar güçlü" bilgisine de
+    # duyarlı olmak için (rehberin "5+6: karar doğruluğunu artırma"
+    # önerilerinden biri).
+    confidence_scaling_enabled: bool = Field(
+        True, description="Açık ise pozisyon boyutu, tahminin confidence'ına göre (confidence_scaling_min_scale..1.0 arası) ek olarak ölçeklenir."
+    )
+    confidence_scaling_min_confidence: float = Field(
+        0.6, ge=0, le=1, description="Bu confidence'ta (ve altında) ölçek confidence_scaling_min_scale'e sabitlenir; genelde open_confidence eşiğiyle aynı tutulmalı."
+    )
+    confidence_scaling_min_scale: float = Field(
+        0.5, gt=0, le=1, description="confidence_scaling_min_confidence'taki (veya altındaki) ölçek — 1.0 confidence'ta ölçek her zaman 1.0'dır."
+    )
+
+    # --- Piyasa rejimi filtresi (VIX bazlı, opsiyonel) ---
+    # Ekstrem piyasa stresi anlarında (VIX kendi geçmişine göre çok
+    # yüksekse) yeni pozisyon açmayı kısıtlar/engeller — modelin normal
+    # piyasa koşullarında öğrendiği örüntülerin kriz anlarında güvenilmez
+    # olabileceği varsayımıyla.
+    vix_regime_filter_enabled: bool = Field(False, description="Açık ise VIX z-skoru eşiği aşıldığında yeni pozisyon açma kısıtlanır/engellenir.")
+    vix_zscore_block_threshold: float = Field(2.5, gt=0, description="VIX z-skoru (macro_vix_norm) bu değeri aşarsa yeni pozisyon TAMAMEN engellenir.")
+    vix_zscore_reduce_threshold: float = Field(1.5, gt=0, description="VIX z-skoru bu değeri aşarsa (block eşiğine kadar) pozisyon boyutu yarıya indirilir.")
+
     @field_validator("entry_tranche_weights", "exit_tranche_weights")
     @classmethod
     def _validate_tranche_weights(cls, value: list[float]) -> list[float]:

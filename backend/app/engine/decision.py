@@ -138,7 +138,7 @@ class DecisionEngine:
 
         return Action(symbol, "hold", "pozisyon açık, sinyal değişmedi", price, prediction.confidence)
 
-    def _open(self, symbol: str, direction: str, price: float) -> Action | None:
+    def _open(self, symbol: str, direction: str, price: float, confidence: float | None = None) -> Action | None:
         if kill_switch.is_active():
             return Action(symbol, "blocked", f"kill switch aktif: {kill_switch.status().reason}", price, 0.0)
 
@@ -151,7 +151,13 @@ class DecisionEngine:
             if direction == "long"
             else price * (1 + self.assumed_stop_loss_pct / 100)
         )
-        decision = self.portfolio.propose_open(symbol, direction, price, stop_loss_price)
+        vix_zscore = None
+        if self.portfolio.rules.vix_regime_filter_enabled:
+            vix_zscore = latest_macro_feature_row().get("macro_vix_norm")
+
+        decision = self.portfolio.propose_open(
+            symbol, direction, price, stop_loss_price, confidence=confidence, vix_zscore=vix_zscore
+        )
         if not decision.allowed or decision.size_quote <= 0:
             reason = "; ".join(decision.reasons) or "risk kuralları nedeniyle reddedildi"
             return Action(symbol, "blocked", reason, price, 0.0)
@@ -161,10 +167,10 @@ class DecisionEngine:
 
     def apply(self, action: Action) -> Action:
         if action.type == "open_long":
-            blocked = self._open(action.symbol, "long", action.price)
+            blocked = self._open(action.symbol, "long", action.price, action.confidence)
             return blocked or action
         if action.type == "open_short":
-            blocked = self._open(action.symbol, "short", action.price)
+            blocked = self._open(action.symbol, "short", action.price, action.confidence)
             return blocked or action
         if action.type == "add_entry_tranche":
             if self.portfolio is not None:

@@ -143,6 +143,7 @@ def test_run_cycle_sizes_new_position_with_kelly():
         max_symbol_exposure_pct=100.0,
         max_total_exposure_pct=100.0,
         entry_tranche_weights=[1.0],  # bu test saf Kelly boyutlandırmasını ölçüyor, kademeli alımı değil
+        confidence_scaling_enabled=False,  # ve confidence-weighted ölçeklemeyi değil
     )
     portfolio = PortfolioManager(starting_equity=1000, rules=rules)
     # Kelly'nin devreye girmesi için sisteme yeterli (ve karışık) bir canlı

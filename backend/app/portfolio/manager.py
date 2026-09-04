@@ -95,10 +95,46 @@ class PortfolioManager:
         entry_price: float,
         stop_loss_price: float,
         kelly_stats_override: TradeStats | None = None,
+        confidence: float | None = None,
+        vix_zscore: float | None = None,
     ) -> RiskDecision:
         size_quote = self._size_new_position(symbol, direction, entry_price, stop_loss_price, kelly_stats_override)
+        size_quote *= self._confidence_scale(confidence)
+
+        regime_scale, regime_reason = self._regime_scale(vix_zscore)
+        size_quote *= regime_scale
+
         exposures = [PositionExposure(symbol=p.symbol, size_quote=p.size_quote) for p in self.positions.values()]
-        return evaluate_risk(self.equity, exposures, self.realized_pnl_session, symbol, size_quote, self.rules)
+        decision = evaluate_risk(self.equity, exposures, self.realized_pnl_session, symbol, size_quote, self.rules)
+        if regime_reason:
+            decision = RiskDecision(allowed=decision.allowed and regime_scale > 0, size_quote=decision.size_quote, reasons=[*decision.reasons, regime_reason])
+        return decision
+
+    def _confidence_scale(self, confidence: float | None) -> float:
+        """Boyutu tahminin güvenine göre ölçekler: `confidence_scaling_min_confidence`
+        (veya altı) -> `confidence_scaling_min_scale`; `1.0` confidence -> `1.0`.
+        Aradaki değerler doğrusal enterpole edilir."""
+        if not self.rules.confidence_scaling_enabled or confidence is None:
+            return 1.0
+        min_conf = self.rules.confidence_scaling_min_confidence
+        min_scale = self.rules.confidence_scaling_min_scale
+        if confidence <= min_conf:
+            return min_scale
+        if confidence >= 1.0:
+            return 1.0
+        span = 1.0 - min_conf
+        return min_scale + (confidence - min_conf) / span * (1.0 - min_scale) if span > 0 else 1.0
+
+    def _regime_scale(self, vix_zscore: float | None) -> tuple[float, str | None]:
+        """VIX rejim filtresi: aşırı stres anlarında boyutu küçültür veya
+        tamamen engeller (bkz. `RiskRules` alan açıklamaları)."""
+        if not self.rules.vix_regime_filter_enabled or vix_zscore is None:
+            return 1.0, None
+        if vix_zscore >= self.rules.vix_zscore_block_threshold:
+            return 0.0, f"VIX rejim filtresi: z-skoru {vix_zscore:.2f} >= engelleme eşiği {self.rules.vix_zscore_block_threshold}"
+        if vix_zscore >= self.rules.vix_zscore_reduce_threshold:
+            return 0.5, f"VIX rejim filtresi: z-skoru {vix_zscore:.2f} >= küçültme eşiği {self.rules.vix_zscore_reduce_threshold}, boyut yarıya indirildi"
+        return 1.0, None
 
     def _size_new_position(
         self,

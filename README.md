@@ -397,6 +397,24 @@ docker compose up
 | `POST /portfolio/kelly-size` | Çeyrek/yarım/tam Kelly'ye göre bağımsız pozisyon boyutu hesaplar |
 | `POST /portfolio/risk-check` | Durumsuz "ne olurdu" risk kontrolü (paylaşılan portföyü etkilemez) |
 
+**Confidence-weighted boyutlandırma + VIX rejim filtresi (2026-09):**
+- `RiskRules.confidence_scaling_enabled` (varsayılan **True**) — Kelly/fixed_risk'in
+  önerdiği boyut, artık yalnızca geçmiş kazanma oranına değil, O ANKİ
+  tahminin `confidence`'ına da duyarlı: `confidence_scaling_min_confidence`
+  (varsayılan 0.6, genelde `open_confidence` eşiğiyle aynı tutulmalı) ve
+  altında ölçek `confidence_scaling_min_scale`'e (varsayılan 0.5) sabitlenir;
+  `1.0` confidence'ta ölçek her zaman `1.0`'dır, arası doğrusal enterpole edilir.
+- `RiskRules.vix_regime_filter_enabled` (varsayılan **False**, opt-in) —
+  açılırsa, VIX'in kendi geçmişine göre z-skoru (`macro_vix_norm`,
+  `app.ml.macro_features`) `vix_zscore_reduce_threshold`'u (varsayılan 1.5)
+  aşarsa boyut yarıya iner, `vix_zscore_block_threshold`'u (varsayılan 2.5)
+  aşarsa yeni pozisyon TAMAMEN engellenir — "modelin normal piyasa
+  koşullarında öğrendiği örüntüler kriz anlarında güvenilmez olabilir"
+  varsayımıyla. `Action.reason`'da (`blocked` durumunda) neden açıkça
+  belirtilir.
+- İkisi de `DecisionEngine._open` → `PortfolioManager.propose_open`
+  üzerinden otomatik uygulanır; `PUT /portfolio/rules` ile parametrik.
+
 **Kademeli (aşamalı) alım/satım (2026-09):**
 - `RiskRules.entry_tranche_weights` (varsayılan `[0.5, 0.5]`) / `exit_tranche_weights`
   (varsayılan `[0.5, 0.5]`) — parametrik, `PUT /portfolio/rules` ile
@@ -826,3 +844,12 @@ da scraping riskini kabul etmek gerekecek; kullanıcıyla ayrıca karar verilece
 - [x] Ücretsiz makro/piyasa bağlamı verileri (TOTAL, BTC dominansı, funding rate, VIX, altın, dünya endeksleri, Fed/ECB faiz oranları)
 - [ ] BTC likidasyon heatmap'i + BTC ETF akışları — ücretsiz/güvenilir kaynak yok, Faz 2'ye ertelendi
 - [ ] Çoklu zaman dilimi mimarisi (4h karar / 1D yön / 1h destek)
+- [~] RL hazırlığı (ortam + veri pipeline'ı + rastgele referans) — gerçek ajan (PPO/DQN) henüz eğitilmedi
+- [x] Prometheus + Grafana izlenebilirlik (hazır dashboard, otomatik provizyon)
+- [x] Backtest Monte Carlo bootstrap (işlem sırası/örneklemesinin "şans" payını ölçer)
+- [x] Confidence-weighted pozisyon boyutlandırma (tahminin güvenine göre ek ölçekleme)
+- [x] VIX rejim filtresi (opsiyonel — aşırı piyasa stresinde boyut küçültme/engelleme)
+- [ ] Sembol-çapraz doğrulama (bir grup sembolde eğitip hiç görmediği sembollerde test etme) — henüz yapılmadı
+- [ ] Meta-labeling/karar eşiklerinin (`open_confidence`/`close_confidence`) backtestle optimizasyonu — ML karar motoruna özel bir backtest harness'i gerektiriyor, henüz yok (`/backtest` modülü şu an yalnızca DCA/JSON-strateji motorlarını destekliyor)
+- [ ] `/ml/sweep-lookback` sonuçlarının periyodik/otomatik izlenmesi — henüz yok, elle çalıştırılıyor
+- [ ] Ensemble (XGBoost + LSTM + RL oy birliği) — LSTM ve RL henüz üretime hazır olmadığından ertelendi
