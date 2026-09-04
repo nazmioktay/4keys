@@ -24,6 +24,7 @@ from app.ml.train import (
     train_meta_label_model,
     train_patchtst_signal_model,
     train_signal_model_validated,
+    train_signal_models_by_regime,
 )
 from app.screener.scanner import scan_market, top_long, top_short
 
@@ -580,6 +581,80 @@ def sweep_labeling_lstm_route(payload: SweepLabelingRequest) -> SweepLabelingRes
         patience=payload.patience,
     )
     return SweepLabelingResponse(symbols_used=len(symbols), points=[SweepLabelingPoint(**p.__dict__) for p in points])
+
+
+class TrainRegimeRequest(BaseModel):
+    symbols: list[str] | None = None
+    n_regimes: int = 3
+    lookback: int | None = None
+    horizon: int = 5
+    threshold_pct: float = 1.0
+    labeling_method: LabelingMethod = "threshold"
+    take_profit_pct: float = 2.0
+    stop_loss_pct: float = 2.0
+    holdout_frac: float = 0.2
+    walk_forward_splits: int = 5
+
+
+class RegimeTrainingPoint(BaseModel):
+    regime: int
+    samples: int
+    rows_used: int
+    mean_volatility: float
+    mean_trend: float
+    walk_forward_mean_accuracy: float
+    walk_forward_mean_balanced_accuracy: float
+    overfit_gap: float
+    out_of_sample_rows: int
+    out_of_sample_accuracy: float
+    out_of_sample_balanced_accuracy: float
+    error: str | None = None
+
+
+class TrainRegimeResponse(BaseModel):
+    symbols_used: int
+    n_regimes: int
+    regimes: list[RegimeTrainingPoint]
+
+
+@router.post("/train-regime", response_model=TrainRegimeResponse)
+def train_regime(payload: TrainRegimeRequest) -> TrainRegimeResponse:
+    """Hibrit rejim+ML (kullanıcı önerisi): piyasayı volatilite/trend
+    uzayında GMM ile `n_regimes` rejime ayırır (bkz. `app.ml.regime` —
+    tam Markov-Switching yerine, yeni bir bağımlılık gerektirmeyen bir
+    yaklaşım) ve HER REJİM İÇİN AYRI bir XGBoost modeli eğitir.
+
+    Amaç: tek bir global modelin (`/ml/train`) mi, yoksa rejime özel
+    uzmanlaşmış modellerin mi daha iyi genellediğini KARŞILAŞTIRMAK için
+    veri sağlamak — otomatik "en iyi"yi seçmez, canlı karar motoruna
+    HENÜZ bağlanmadı (bkz. README roadmap)."""
+    exchange = get_exchange(settings.exchange_id)
+    symbols = _resolve_symbols(exchange, payload.symbols)
+    if not symbols:
+        raise HTTPException(status_code=400, detail="Eğitim için sembol bulunamadı.")
+
+    try:
+        _regime_model, results = train_signal_models_by_regime(
+            exchange,
+            symbols,
+            n_regimes=payload.n_regimes,
+            lookback=payload.lookback,
+            horizon=payload.horizon,
+            threshold_pct=payload.threshold_pct,
+            labeling_method=payload.labeling_method,
+            take_profit_pct=payload.take_profit_pct,
+            stop_loss_pct=payload.stop_loss_pct,
+            holdout_frac=payload.holdout_frac,
+            walk_forward_splits=payload.walk_forward_splits,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return TrainRegimeResponse(
+        symbols_used=len(symbols),
+        n_regimes=payload.n_regimes,
+        regimes=[RegimeTrainingPoint(**r.__dict__) for r in results],
+    )
 
 
 @router.get("/predict", response_model=PredictResponse)

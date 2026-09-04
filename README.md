@@ -288,6 +288,8 @@ docker compose up
 | `GET /ml/predict-lstm?symbol=BTC/USDT:USDT` | LSTM ile yön + güven tahmini |
 | `POST /ml/train-patchtst` | PatchTST'ten esinlenilmiş patch-tabanlı Transformer'ı sekans veri setiyle eğitir (LSTM'e alternatif) |
 | `GET /ml/predict-patchtst?symbol=BTC/USDT:USDT` | PatchTST ile yön + güven tahmini |
+| `POST /ml/train-regime` | Hibrit rejim+ML: GMM ile piyasayı rejimlere ayırıp her rejim için ayrı bir XGBoost modeli eğitir, karşılaştırma verisi döner |
+| `GET /rl/hurst-execution-timing?symbol=BTC/USDT:USDT` | Hurst-tabanlı işlem zamanlaması hipotez testi (canlı strateji değil, tarihsel gözlem) |
 | `POST /engine/run-cycle` | Screener top listesi üzerinde bir karar döngüsü çalıştırır (paper-trading) |
 | `GET /engine/status` | Açık paper pozisyonlar ve kapanan işlem geçmişi |
 | `POST /dca/optimize` | Verilen sembol/sermaye için en iyi DCA parametre kombinasyonlarını bulur |
@@ -854,6 +856,7 @@ da scraping riskini kabul etmek gerekecek; kullanıcıyla ayrıca karar verilece
 - [x] RL yönü netleştirildi: doğrudan alım-satım sinyali üretmek yerine (ödül tasarımının zorluğu nedeniyle riskli) daha odaklı kullanımlar değerlendirildi (optimal execution, model-tabanlı RL, hiyerarşik RL). Optimal execution (emri parçalara bölerek piyasa etkisini azaltma) seçildi ama BİLİNÇLİ OLARAK klasik haliyle uygulanmadı: order-book derinliği verimiz yok ve işlem boyutlarımız (çeyrek Kelly) BTC/USDT likiditesine göre ihmal edilebilir — piyasa etkisi modeli olmadan "bölmek daha iyi" sonucu yapay/yanıltıcı olurdu
 - [x] Bunun yerine `app/rl/execution_timing.py`: Hurst üsteline dayalı, ölçülebilir bir hipotez test ediliyor — sinyal anında H<0.5 (ortalamaya-dönüş) iken sabit bir gecikmeyle (look-ahead yanlılığından kaçınmak için veriye göre optimize edilmez) yürütmek, H>0.5 (trend-devamlılığı) durumuna göre ortalama olarak daha ucuz mu? `GET /rl/hurst-execution-timing` — canlı bir ajan/strateji DEĞİL, tarihsel bir gözlem/hipotez testi
 - [ ] Model-tabanlı RL (piyasa simülatörü öğrenip onda eğitme) ve hiyerarşik RL (portföy dağılımı + varlık-bazlı zamanlama) — kullanıcı önerdi, kapsamları (ayrı bir simülatör bileşeni; çoklu-varlık portföy optimizasyonu) şu anki tek-sembol (BTC-only) odağın ötesinde, backlog'da
+- [x] Hibrit rejim+ML (kullanıcı önerisi: Markov Regime-Switching): `app/ml/regime.py` — tam bir Markov-Switching modeli (`statsmodels`) YENİ bir bağımlılık gerektirdiğinden, kullanıcının onayıyla bunun yerine scikit-learn'ün zaten kurulu `GaussianMixture`'ı kullanılıyor. Piyasa volatilite+trend uzayında `n_regimes` kümeye ayrılır (0=en düşük volatilite, yorumlanabilirlik için sıralı), rejimler sembole değil piyasaya özgü olduğundan semboller arası havuzlanmış (pooled) tek bir paylaşılan model eğitilir (kayan pencereli özellikler semboller BİRLEŞTİRİLMEDEN önce hesaplanır, sızıntı olmaz). `POST /ml/train-regime`: her rejim için AYRI bir XGBoost modeli eğitip out-of-sample sonuçlarını karşılaştırmayı sağlar — canlı karar motoruna HENÜZ bağlanmadı, önce "rejime ayırmak tek global modelden daha mı iyi?" sorusuna offline veri sağlamak amaçlanıyor
 - [x] Prometheus + Grafana izlenebilirlik (hazır dashboard, otomatik provizyon)
 - [x] Backtest Monte Carlo bootstrap (işlem sırası/örneklemesinin "şans" payını ölçer)
 - [x] Confidence-weighted pozisyon boyutlandırma (tahminin güvenine göre ek ölçekleme)

@@ -11,8 +11,9 @@ from .dataset import LabelingMethod, build_training_dataset, build_training_data
 from .features import ALL_FEATURE_COLUMNS
 from .lstm_model import LSTMSignalModel, LSTMTrainingReport
 from .meta_label import MetaLabelModel, build_meta_dataset
-from .model import Algorithm, SignalModel
+from .model import DEFAULT_MODEL_PATH, Algorithm, SignalModel
 from .patchtst_model import PatchTSTSignalModel, PatchTSTTrainingReport
+from .regime import RegimeModel, build_regime_labeled_dataset, fit_regime_model
 from .sequence_dataset import build_sequence_dataset
 from .validation import OutOfSampleReport, WalkForwardReport, evaluate_out_of_sample, run_walk_forward_validation, split_out_of_sample
 
@@ -549,6 +550,151 @@ def sweep_labeling_lstm(
                     )
                 )
     return results
+
+
+@dataclass
+class RegimeTrainingResult:
+    regime: int
+    samples: int
+    rows_used: int
+    mean_volatility: float
+    mean_trend: float
+    walk_forward_mean_accuracy: float
+    walk_forward_mean_balanced_accuracy: float
+    overfit_gap: float
+    out_of_sample_rows: int
+    out_of_sample_accuracy: float
+    out_of_sample_balanced_accuracy: float
+    error: str | None = None
+
+
+def train_signal_models_by_regime(
+    exchange: Exchange,
+    symbols: list[str],
+    n_regimes: int = 3,
+    timeframe: str | None = None,
+    lookback: int | None = None,
+    horizon: int = 5,
+    threshold_pct: float = 1.0,
+    labeling_method: LabelingMethod = "threshold",
+    take_profit_pct: float = 2.0,
+    stop_loss_pct: float = 2.0,
+    holdout_frac: float = 0.2,
+    walk_forward_splits: int = 5,
+    persist: bool = True,
+) -> tuple[RegimeModel, list[RegimeTrainingResult]]:
+    """Hibrit rejim+ML yaklaşımı (kullanıcı önerisi): önce piyasa rejimini
+    (volatilite+trend uzayında GMM ile, bkz. `app.ml.regime`) tespit eden
+    paylaşılan bir model eğitilir; ardından HER REJİM İÇİN AYRI bir
+    XGBoost modeli eğitilir (yalnızca o rejime ait satırlarla) —
+    "her rejimde uzmanlaşma" fikri.
+
+    Tek bir global XGBoost modeliyle (`train_signal_model_validated`)
+    AYNI overfitting korumaları (walk-forward + out-of-sample holdout)
+    her rejim için AYRI AYRI uygulanır. Bir rejimin örnek sayısı
+    yetersizse (`<60`) o rejim `error` alanıyla işaretlenir, diğer
+    rejimlerin eğitimi durmaz.
+
+    `persist=True` ise rejim modeli (`RegimeModel.save`) ve her rejimin
+    XGBoost modeli ayrı dosyalara (`model_regime_<r>.joblib`) kaydedilir
+    — canlı karar motoruna henüz BAĞLANMADI (bkz. README); bu fonksiyon
+    şimdilik yalnızca "rejime göre ayırmak tek global modelden daha mı
+    iyi?" sorusuna OFFLINE veri sağlar.
+    """
+    regime_model, summaries = fit_regime_model(
+        exchange, symbols, timeframe or settings.ml_train_timeframe, lookback or settings.ml_train_lookback, n_regimes=n_regimes
+    )
+    X, y, regime, time_frac = build_regime_labeled_dataset(
+        exchange,
+        symbols,
+        timeframe or settings.ml_train_timeframe,
+        lookback or settings.ml_train_lookback,
+        regime_model,
+        horizon=horizon,
+        threshold_pct=threshold_pct,
+        labeling_method=labeling_method,
+        take_profit_pct=take_profit_pct,
+        stop_loss_pct=stop_loss_pct,
+    )
+
+    results: list[RegimeTrainingResult] = []
+    for summary in summaries:
+        r = summary.regime
+        mask = (regime == r).to_numpy()
+        X_r, y_r, time_frac_r = X.loc[mask].reset_index(drop=True), y.loc[mask].reset_index(drop=True), time_frac.loc[mask].reset_index(drop=True)
+
+        if len(X_r) < 60:
+            results.append(
+                RegimeTrainingResult(
+                    regime=r,
+                    samples=summary.samples,
+                    rows_used=len(X_r),
+                    mean_volatility=summary.mean_volatility,
+                    mean_trend=summary.mean_trend,
+                    walk_forward_mean_accuracy=0.0,
+                    walk_forward_mean_balanced_accuracy=0.0,
+                    overfit_gap=0.0,
+                    out_of_sample_rows=0,
+                    out_of_sample_accuracy=0.0,
+                    out_of_sample_balanced_accuracy=0.0,
+                    error=f"yetersiz veri ({len(X_r)} satır)",
+                )
+            )
+            continue
+
+        try:
+            X_train, y_train, X_holdout, y_holdout = split_out_of_sample(X_r, y_r, time_frac_r, holdout_frac)
+            train_time_frac = time_frac_r[X_train.index]
+
+            def _factory() -> SignalModel:
+                return SignalModel()
+
+            wf_report = run_walk_forward_validation(X_train, y_train, train_time_frac, _factory, n_splits=walk_forward_splits)
+
+            model = _factory()
+            model.fit(X_train, y_train)
+            oos_report = evaluate_out_of_sample(model, X_holdout, y_holdout) if len(X_holdout) > 0 else OutOfSampleReport(0, 0.0, 0.0)
+
+            if persist:
+                model.save(DEFAULT_MODEL_PATH.parent / f"model_regime_{r}.joblib")
+
+            results.append(
+                RegimeTrainingResult(
+                    regime=r,
+                    samples=summary.samples,
+                    rows_used=len(X_train),
+                    mean_volatility=summary.mean_volatility,
+                    mean_trend=summary.mean_trend,
+                    walk_forward_mean_accuracy=wf_report.mean_accuracy,
+                    walk_forward_mean_balanced_accuracy=wf_report.mean_balanced_accuracy,
+                    overfit_gap=wf_report.overfit_gap,
+                    out_of_sample_rows=oos_report.holdout_rows,
+                    out_of_sample_accuracy=oos_report.accuracy,
+                    out_of_sample_balanced_accuracy=oos_report.balanced_accuracy,
+                )
+            )
+        except ValueError as exc:
+            results.append(
+                RegimeTrainingResult(
+                    regime=r,
+                    samples=summary.samples,
+                    rows_used=len(X_r),
+                    mean_volatility=summary.mean_volatility,
+                    mean_trend=summary.mean_trend,
+                    walk_forward_mean_accuracy=0.0,
+                    walk_forward_mean_balanced_accuracy=0.0,
+                    overfit_gap=0.0,
+                    out_of_sample_rows=0,
+                    out_of_sample_accuracy=0.0,
+                    out_of_sample_balanced_accuracy=0.0,
+                    error=str(exc),
+                )
+            )
+
+    if persist:
+        regime_model.save()
+
+    return regime_model, results
 
 
 def train_meta_label_model(
