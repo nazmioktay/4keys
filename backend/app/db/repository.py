@@ -404,7 +404,16 @@ def get_ohlcv(symbol: str, timeframe: str, limit: int) -> pd.DataFrame:
             )
             records = [
                 {
-                    "timestamp": r.time,
+                    # `OHLCVRaw.time` (DateTime(timezone=True)) tz-aware bir
+                    # datetime döner — borsadan gelen (`Exchange.fetch_ohlcv`)
+                    # zaman damgaları HER ZAMAN tz-naive'dir; bu uyumsuzluk
+                    # `build_features()`'ın `.astype("datetime64[ns]")`
+                    # dönüşümünü patlatıyordu (bkz. session notu — bu, ilk
+                    # önbellek-sıcak okumada TÜM sembollerin sessizce
+                    # "yeterli veri yok"a düşmesine yol açan gerçek bir
+                    # regresyondu). Değer zaten UTC anlık değeri olduğundan
+                    # `tzinfo`'yu YALNIZCA düşürmek (dönüştürmeden) doğru.
+                    "timestamp": r.time.replace(tzinfo=None) if r.time.tzinfo is not None else r.time,
                     "open": r.open,
                     "high": r.high,
                     "low": r.low,
