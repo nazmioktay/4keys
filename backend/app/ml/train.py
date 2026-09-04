@@ -168,6 +168,7 @@ def _train_sequence_model(
     patience: int,
     feature_columns: list[str] | None,
     model_kind: str,
+    persist: bool = True,
 ):
     """LSTM/PatchTST gibi sekans modellerinin ortak eğitim iskeleti —
     veri kurma, holdout/doğrulama bölme, erken durdurma ile fit ve
@@ -241,7 +242,8 @@ def _train_sequence_model(
     else:
         oos_report = OutOfSampleReport(0, 0.0, 0.0)
 
-    model.save()
+    if persist:
+        model.save()
     logger.info(
         "%s model trained on %d pencere; train_loss=%.4f train_acc=%.3f; oos_acc=%.3f (holdout=%d pencere)",
         model_kind,
@@ -273,9 +275,12 @@ def train_lstm_signal_model(
     num_layers: int = 2,
     dropout: float = 0.3,
     feature_columns: list[str] | None = None,
+    persist: bool = True,
 ) -> LSTMTrainingResult:
     """LSTM (Faz B) modelini kayan pencereli sekans veri setiyle eğitir —
-    bkz. `_train_sequence_model` (ortak iskelet)."""
+    bkz. `_train_sequence_model` (ortak iskelet). `persist=False`,
+    üretim modelini DEĞİŞTİRMEDEN deneme yapmak için (bkz.
+    `sweep_labeling_lstm`)."""
     model = LSTMSignalModel(seq_len=seq_len, hidden_size=hidden_size, num_layers=num_layers, dropout=dropout)
     model, rows_used, training_report, oos_report = _train_sequence_model(
         model,
@@ -295,6 +300,7 @@ def train_lstm_signal_model(
         patience,
         feature_columns,
         "LSTM",
+        persist=persist,
     )
     return LSTMTrainingResult(model=model, rows_used=rows_used, training=training_report, out_of_sample=oos_report)
 
@@ -447,6 +453,92 @@ def sweep_lookback_values(
                     error=str(exc),
                 )
             )
+    return results
+
+
+@dataclass
+class LabelingSweepPoint:
+    horizon: int
+    threshold_pct: float
+    rows_used: int
+    final_train_accuracy: float
+    out_of_sample_rows: int
+    out_of_sample_accuracy: float
+    out_of_sample_balanced_accuracy: float
+    error: str | None = None
+
+
+def sweep_labeling_lstm(
+    exchange: Exchange,
+    symbols: list[str],
+    horizon_values: list[int],
+    threshold_pct_values: list[float],
+    timeframe: str | None = None,
+    lookback: int | None = None,
+    seq_len: int = 20,
+    holdout_frac: float = 0.2,
+    val_frac: float = 0.15,
+    epochs: int = 30,
+    patience: int = 5,
+) -> list[LabelingSweepPoint]:
+    """Farklı (`horizon`, `threshold_pct`) kombinasyonlarıyla LSTM'i art
+    arda eğitip out-of-sample sonuçlarını döner (üretim modelini
+    DEĞİŞTİRMEZ, `persist=False`).
+
+    Neden: BTC-only sınamalarda lookback artırma, model kapasitesini
+    değiştirme VE mimari değiştirme (LSTM->PatchTST) hiçbiri
+    ~%38-39 balanced_accuracy tavanını aşamadı — dört bağımsız denemenin
+    aynı noktada tıkanması, sınırlayıcı faktörün muhtemelen etiketleme
+    (sabit `horizon`/`threshold_pct` piyasa gürültüsüne göre kötü
+    kalibre olabilir) olduğuna işaret ediyor. Bu tarama o hipotezi
+    doğrudan test eder.
+
+    Her kombinasyon bağımsız değerlendirilir; biri başarısız olursa
+    `error` alanıyla işaretlenir, taramanın geri kalanı durmaz.
+    """
+    results: list[LabelingSweepPoint] = []
+    for horizon in horizon_values:
+        for threshold_pct in threshold_pct_values:
+            try:
+                result = train_lstm_signal_model(
+                    exchange,
+                    symbols,
+                    timeframe=timeframe,
+                    lookback=lookback,
+                    seq_len=seq_len,
+                    horizon=horizon,
+                    threshold_pct=threshold_pct,
+                    holdout_frac=holdout_frac,
+                    val_frac=val_frac,
+                    epochs=epochs,
+                    patience=patience,
+                    persist=False,
+                )
+                oos = result.out_of_sample
+                results.append(
+                    LabelingSweepPoint(
+                        horizon=horizon,
+                        threshold_pct=threshold_pct,
+                        rows_used=result.rows_used,
+                        final_train_accuracy=result.training.final_train_accuracy,
+                        out_of_sample_rows=oos.holdout_rows,
+                        out_of_sample_accuracy=oos.accuracy,
+                        out_of_sample_balanced_accuracy=oos.balanced_accuracy,
+                    )
+                )
+            except ValueError as exc:
+                results.append(
+                    LabelingSweepPoint(
+                        horizon=horizon,
+                        threshold_pct=threshold_pct,
+                        rows_used=0,
+                        final_train_accuracy=0.0,
+                        out_of_sample_rows=0,
+                        out_of_sample_accuracy=0.0,
+                        out_of_sample_balanced_accuracy=0.0,
+                        error=str(exc),
+                    )
+                )
     return results
 
 

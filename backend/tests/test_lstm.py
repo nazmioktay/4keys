@@ -5,7 +5,7 @@ import pytest
 from app.exchanges.base import Exchange
 from app.ml.lstm_model import LSTMSignalModel
 from app.ml.sequence_dataset import build_sequence_dataset
-from app.ml.train import train_lstm_signal_model
+from app.ml.train import sweep_labeling_lstm, train_lstm_signal_model
 
 
 class _TrendExchange(Exchange):
@@ -168,3 +168,37 @@ def test_train_lstm_signal_model_raises_on_insufficient_data():
     # üretmek için seq_len'i buna göre büyük tutuyoruz.
     with pytest.raises(ValueError):
         train_lstm_signal_model(exchange, ["UPUSDT"], seq_len=330, lookback=400, epochs=1)
+
+
+def test_train_lstm_signal_model_persist_false_does_not_save(monkeypatch):
+    save_calls = []
+    monkeypatch.setattr(LSTMSignalModel, "save", lambda self, *a, **kw: save_calls.append(1))
+
+    exchange = _TrendExchange(seed=8)
+    train_lstm_signal_model(
+        exchange, ["UPUSDT", "DOWNUSDT"], seq_len=10, timeframe="4h", lookback=400, epochs=2, persist=False
+    )
+    assert save_calls == []
+
+
+def test_sweep_labeling_lstm_covers_full_grid_and_tolerates_failures():
+    exchange = _TrendExchange(seed=9)
+    points = sweep_labeling_lstm(
+        exchange,
+        ["UPUSDT", "DOWNUSDT"],
+        horizon_values=[5, 395],  # 395 -> yetersiz veri (etiket ufku neredeyse tüm seriyi yer), error alanıyla işaretlenmeli
+        threshold_pct_values=[0.5, 1.5],
+        timeframe="4h",
+        lookback=400,
+        seq_len=10,
+        epochs=2,
+    )
+
+    assert len(points) == 4  # 2 horizon x 2 threshold
+    ok_points = [p for p in points if p.error is None]
+    error_points = [p for p in points if p.error is not None]
+    assert len(ok_points) == 2  # yalnızca horizon=5 olanlar başarılı olmalı
+    assert len(error_points) == 2
+    for p in ok_points:
+        assert p.rows_used > 0
+        assert 0.0 <= p.out_of_sample_balanced_accuracy <= 1.0

@@ -17,6 +17,7 @@ from app.ml.patchtst_model import DEFAULT_PATCHTST_MODEL_PATH, PatchTSTSignalMod
 from app.ml.sequence_dataset import build_sequence_dataset
 from app.ml.symbol_selection import select_training_symbols
 from app.ml.train import (
+    sweep_labeling_lstm,
     sweep_lookback_values,
     train_lstm_signal_model,
     train_meta_label_model,
@@ -514,6 +515,66 @@ def sweep_lookback(payload: SweepLookbackRequest) -> SweepLookbackResponse:
         walk_forward_splits=payload.walk_forward_splits,
     )
     return SweepLookbackResponse(symbols_used=len(symbols), points=[SweepLookbackPoint(**p.__dict__) for p in points])
+
+
+class SweepLabelingRequest(BaseModel):
+    symbols: list[str] | None = None
+    lookback: int | None = None
+    horizon_values: list[int] = [3, 5, 10, 15]
+    threshold_pct_values: list[float] = [0.5, 1.0, 1.5, 2.0]
+    seq_len: int = 20
+    holdout_frac: float = 0.2
+    val_frac: float = 0.15
+    epochs: int = 30
+    patience: int = 5
+
+
+class SweepLabelingPoint(BaseModel):
+    horizon: int
+    threshold_pct: float
+    rows_used: int
+    final_train_accuracy: float
+    out_of_sample_rows: int
+    out_of_sample_accuracy: float
+    out_of_sample_balanced_accuracy: float
+    error: str | None = None
+
+
+class SweepLabelingResponse(BaseModel):
+    symbols_used: int
+    points: list[SweepLabelingPoint]
+
+
+@router.post("/sweep-labeling-lstm", response_model=SweepLabelingResponse)
+def sweep_labeling_lstm_route(payload: SweepLabelingRequest) -> SweepLabelingResponse:
+    """Farklı (`horizon`, `threshold_pct`) kombinasyonlarıyla LSTM'i art
+    arda eğitip out-of-sample sonuçlarını döner — LSTM/PatchTST'in
+    lookback/kapasite/mimari değişikliklerine rağmen aynı balanced_accuracy
+    tavanına takılı kalması üzerine, etiketleme kalibrasyonunun sınırlayıcı
+    faktör olup olmadığını test etmek için (bkz.
+    `app.ml.train.sweep_labeling_lstm` docstring'i).
+
+    UYARI: `len(horizon_values) * len(threshold_pct_values)` kadar sıfırdan
+    eğitim yapılır — varsayılan ızgarada (4x4=16) birkaç dakika sürebilir.
+    Production LSTM modelini DEĞİŞTİRMEZ (`persist=False`)."""
+    exchange = get_exchange(settings.exchange_id)
+    symbols = _resolve_symbols(exchange, payload.symbols)
+    if not symbols:
+        raise HTTPException(status_code=400, detail="Eğitim için sembol bulunamadı.")
+
+    points = sweep_labeling_lstm(
+        exchange,
+        symbols,
+        payload.horizon_values,
+        payload.threshold_pct_values,
+        lookback=payload.lookback,
+        seq_len=payload.seq_len,
+        holdout_frac=payload.holdout_frac,
+        val_frac=payload.val_frac,
+        epochs=payload.epochs,
+        patience=payload.patience,
+    )
+    return SweepLabelingResponse(symbols_used=len(symbols), points=[SweepLabelingPoint(**p.__dict__) for p in points])
 
 
 @router.get("/predict", response_model=PredictResponse)
