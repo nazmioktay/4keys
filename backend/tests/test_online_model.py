@@ -92,6 +92,44 @@ def test_train_online_signal_model_end_to_end():
     assert 0.0 <= report.overall_accuracy <= 1.0
 
 
+def test_train_online_signal_model_writes_disabled_status_when_rejected(tmp_path, monkeypatch):
+    from app.core.config import settings
+    from app.ml import train as train_module
+    from app.ml.model_status import is_model_enabled
+
+    status_target = tmp_path / "online_model.joblib"
+    monkeypatch.setattr(train_module, "DEFAULT_ONLINE_MODEL_PATH", status_target)
+    monkeypatch.setattr(settings, "ml_min_balanced_accuracy", 1.01)  # her zaman reddedilsin
+
+    exchange = _TrendExchange(seed=6)
+    _model, report = train_online_signal_model(
+        exchange, ["UPUSDT"], timeframe="4h", lookback=400, n_models=3, window_size=100
+    )
+
+    assert report.accepted is False
+    assert is_model_enabled(status_target) is False
+
+
+def test_train_online_signal_model_writes_enabled_status_when_accepted(tmp_path, monkeypatch):
+    from app.core.config import settings
+    from app.ml import train as train_module
+    from app.ml.model_status import is_model_enabled
+
+    status_target = tmp_path / "online_model.joblib"
+    status_target.write_text("placeholder")  # is_model_enabled dosya varlığını da kontrol eder
+    monkeypatch.setattr(train_module, "DEFAULT_ONLINE_MODEL_PATH", status_target)
+    monkeypatch.setattr(settings, "ml_min_balanced_accuracy", 0.0)  # her zaman kabul edilsin
+    monkeypatch.setattr(OnlineSignalModel, "save", lambda self, *a, **kw: None)
+
+    exchange = _TrendExchange(seed=7)
+    _model, report = train_online_signal_model(
+        exchange, ["UPUSDT"], timeframe="4h", lookback=400, n_models=3, window_size=100
+    )
+
+    assert report.accepted is True
+    assert is_model_enabled(status_target) is True
+
+
 def test_train_online_signal_model_raises_on_insufficient_data():
     class _TinyExchange(Exchange):
         def list_symbols(self, quote_currency, market_type):

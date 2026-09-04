@@ -3,6 +3,7 @@ from app.exchanges import get_exchange
 from app.ml.lstm_model import DEFAULT_LSTM_MODEL_PATH, LSTMSignalModel
 from app.ml.meta_label import DEFAULT_META_MODEL_PATH, MetaLabelModel
 from app.ml.model import DEFAULT_MODEL_PATH, SignalModel
+from app.ml.model_status import is_model_enabled
 from app.ml.online_model import DEFAULT_ONLINE_MODEL_PATH, OnlineSignalModel
 from app.portfolio.shared import get_portfolio
 from app.screener.scanner import top_long, top_short
@@ -38,18 +39,18 @@ def run_cycle_once() -> list[Action]:
     exchange = get_exchange(settings.exchange_id)
     model = SignalModel.load_from()
     meta_model = MetaLabelModel.load_from() if DEFAULT_META_MODEL_PATH.exists() else None
-    # Opt-in: LSTM'in canlı karar motoruna (ensemble olarak) katılması,
-    # kullanıcının açıkça `ensemble_lstm_enabled=True` yapmasını gerektirir
-    # — LSTM kalitesi (bkz. README "Faz B" notu) sembol/zaman dilimine göre
-    # değişebilir, varsayılan olarak yalnızca XGBoost karar verir.
+    # LSTM/online modelinin canlı karar motoruna (ensemble olarak) katılması
+    # ARTIK statik bir ayar bayrağıyla (`FOURKEYS_ENSEMBLE_LSTM_ENABLED` vb.)
+    # DEĞİL, en son eğitimin kalite kapısından geçip geçmediğine göre OTOMATİK
+    # belirlenir (bkz. `app.ml.model_status` — `Settings.ml_min_balanced_accuracy`,
+    # varsayılan 0.37). Bir model eşiği geçtiği eğitimden sonra otomatik
+    # devreye girer; bir sonraki eğitiminde eşiğin altında kalırsa (eski
+    # dosyası hâlâ diskte olsa bile) otomatik devre dışı kalır.
     lstm_model = (
-        LSTMSignalModel.load_from() if settings.ensemble_lstm_enabled and DEFAULT_LSTM_MODEL_PATH.exists() else None
+        LSTMSignalModel.load_from() if is_model_enabled(DEFAULT_LSTM_MODEL_PATH) else None
     )
-    # Opt-in: online model (river ARF) prequential değerlendirmede BTC-only
-    # veride overall_balanced_accuracy ~%49.7 gösterdi (bkz. README) —
-    # yine de sembol/zaman dilimine göre değişebileceğinden varsayılan kapalı.
     online_model = (
-        OnlineSignalModel.load_from() if settings.ensemble_online_enabled and DEFAULT_ONLINE_MODEL_PATH.exists() else None
+        OnlineSignalModel.load_from() if is_model_enabled(DEFAULT_ONLINE_MODEL_PATH) else None
     )
 
     results = get_scan_results()

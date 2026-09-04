@@ -163,11 +163,13 @@ def _auto_retrain_symbols() -> list[str] | None:
 
 
 def job_auto_retrain_lstm() -> None:
-    """Periyodik iş: LSTM'i otomatik yeniden eğitir — YALNIZCA `ensemble_lstm_enabled`
-    açıksa VEYA model daha önce en az bir kez elle eğitilmişse (disk'te
-    dosyası varsa) çalışır; hiç kullanılmayan bir modeli sıfırdan eğitmeye
-    BAŞLAMAZ. Aralık `compute_auto_retrain_interval_seconds()` ile AYNI
-    (bkz. `Settings.ml_auto_retrain_seconds`).
+    """Periyodik iş: LSTM'i otomatik yeniden eğitir — YALNIZCA model daha
+    önce en az bir kez elle eğitilmişse (disk'te dosyası varsa) çalışır;
+    hiç kullanılmayan bir modeli sıfırdan eğitmeye BAŞLAMAZ. Canlı karar
+    motorunda kullanılıp kullanılmayacağı (`app.ml.model_status`) HER
+    eğitim sonunda otomatik olarak yeniden belirlenir — statik bir "açık/
+    kapalı" bayrağı YOKTUR. Aralık `compute_auto_retrain_interval_seconds()`
+    ile AYNI (bkz. `Settings.ml_auto_retrain_seconds`).
 
     Bilinen risk (README'de de belgeli): ağır eğitim işleri şu an ayrı bir
     process'te DEĞİL, aynı uzun ömürlü uvicorn process'i içinde çalışıyor —
@@ -175,8 +177,8 @@ def job_auto_retrain_lstm() -> None:
     tekrarlanan LSTM eğitimleri kümülatif bellek artışına yol açabilir. Bu
     job'un periyodu (varsayılan ~20 gün) bunu pratikte seyrek kılar, ama
     kesin çözüm ayrı bir eğitim process'i/worker'ı (henüz yapılmadı)."""
-    if not (settings.ensemble_lstm_enabled or DEFAULT_LSTM_MODEL_PATH.exists()):
-        status.record(AUTO_RETRAIN_LSTM_JOB_ID, ok=True, detail="atlandı: LSTM hiç kullanılmıyor")
+    if not DEFAULT_LSTM_MODEL_PATH.exists():
+        status.record(AUTO_RETRAIN_LSTM_JOB_ID, ok=True, detail="atlandı: LSTM hiç eğitilmemiş")
         return
     try:
         exchange = get_exchange(settings.exchange_id)
@@ -198,11 +200,13 @@ def job_auto_retrain_lstm() -> None:
 
 def job_auto_retrain_online() -> None:
     """Periyodik iş: online modeli (river ARF) otomatik yeniden eğitir —
-    YALNIZCA `ensemble_online_enabled` açıksa VEYA model daha önce en az bir
-    kez elle eğitilmişse çalışır. `river`'ın Hoeffding ağaçları XGBoost/LSTM'e
-    göre çok daha hafif eğitildiğinden (bkz. README) bu job'un OOM riski YOK."""
-    if not (settings.ensemble_online_enabled or DEFAULT_ONLINE_MODEL_PATH.exists()):
-        status.record(AUTO_RETRAIN_ONLINE_JOB_ID, ok=True, detail="atlandı: online model hiç kullanılmıyor")
+    YALNIZCA model daha önce en az bir kez elle eğitilmişse çalışır. Canlı
+    karar motorunda kullanılıp kullanılmayacağı (`app.ml.model_status`) HER
+    eğitim sonunda otomatik belirlenir. `river`'ın Hoeffding ağaçları
+    XGBoost/LSTM'e göre çok daha hafif eğitildiğinden (bkz. README) bu
+    job'un OOM riski YOK."""
+    if not DEFAULT_ONLINE_MODEL_PATH.exists():
+        status.record(AUTO_RETRAIN_ONLINE_JOB_ID, ok=True, detail="atlandı: online model hiç eğitilmemiş")
         return
     try:
         exchange = get_exchange(settings.exchange_id)

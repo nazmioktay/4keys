@@ -40,7 +40,7 @@ def run_system_backtest(
       davranış (bkz. README), yani burada YENİ bir yanlılık eklenmiyor.
     - LSTM/online model ensemble'ı (bkz. `DecisionEngine`) burada
       DAHİL DEĞİL — yalnızca birincil (XGBoost) model + meta-label.
-      `ensemble_lstm_enabled`/`ensemble_online_enabled` açıksa canlı
+      Canlıda bu modeller otomatik olarak aktifse (bkz. `app.ml.model_status`)
       davranış burada tam yansıtılmaz.
     - Kademeli alım/satım (tranche), Kelly boyutlandırma, VIX rejim
       filtresi YOK — basitlik için her sinyalde TÜM equity ile tek

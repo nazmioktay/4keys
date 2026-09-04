@@ -197,9 +197,6 @@ def test_compute_auto_retrain_interval_seconds_has_a_floor(monkeypatch):
 
 
 def test_job_auto_retrain_lstm_skips_when_unused(monkeypatch):
-    from app.core.config import settings
-
-    monkeypatch.setattr(settings, "ensemble_lstm_enabled", False)
     monkeypatch.setattr(jobs, "DEFAULT_LSTM_MODEL_PATH", type("P", (), {"exists": staticmethod(lambda: False)})())
 
     jobs.job_auto_retrain_lstm()
@@ -210,15 +207,12 @@ def test_job_auto_retrain_lstm_skips_when_unused(monkeypatch):
 
 
 def test_job_auto_retrain_lstm_trains_when_already_used(monkeypatch):
-    from app.core.config import settings
-
     class _FakeResult:
         rows_used = 500
 
         class out_of_sample:
             balanced_accuracy = 0.4
 
-    monkeypatch.setattr(settings, "ensemble_lstm_enabled", False)
     monkeypatch.setattr(jobs, "DEFAULT_LSTM_MODEL_PATH", type("P", (), {"exists": staticmethod(lambda: True)})())
     monkeypatch.setattr(jobs, "get_exchange", lambda *_a, **_k: object())
     monkeypatch.setattr(jobs, "refresh_screener", lambda: [object()])
@@ -234,9 +228,6 @@ def test_job_auto_retrain_lstm_trains_when_already_used(monkeypatch):
 
 
 def test_job_auto_retrain_online_skips_when_unused(monkeypatch):
-    from app.core.config import settings
-
-    monkeypatch.setattr(settings, "ensemble_online_enabled", False)
     monkeypatch.setattr(jobs, "DEFAULT_ONLINE_MODEL_PATH", type("P", (), {"exists": staticmethod(lambda: False)})())
 
     jobs.job_auto_retrain_online()

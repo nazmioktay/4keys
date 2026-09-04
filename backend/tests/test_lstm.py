@@ -202,6 +202,44 @@ def test_train_lstm_signal_model_persist_false_does_not_save(monkeypatch):
     assert save_calls == []
 
 
+def test_train_lstm_signal_model_writes_disabled_status_when_rejected(tmp_path, monkeypatch):
+    from app.core.config import settings
+    from app.ml import train as train_module
+    from app.ml.model_status import is_model_enabled
+
+    status_target = tmp_path / "lstm_model.pt"
+    monkeypatch.setattr(train_module, "DEFAULT_LSTM_MODEL_PATH", status_target)
+    monkeypatch.setattr(settings, "ml_min_balanced_accuracy", 1.01)  # her zaman reddedilsin
+
+    exchange = _TrendExchange(seed=9)
+    result = train_lstm_signal_model(
+        exchange, ["UPUSDT", "DOWNUSDT"], seq_len=10, timeframe="4h", lookback=400, epochs=2
+    )
+
+    assert result.accepted is False
+    assert is_model_enabled(status_target) is False
+
+
+def test_train_lstm_signal_model_writes_enabled_status_when_accepted(tmp_path, monkeypatch):
+    from app.core.config import settings
+    from app.ml import train as train_module
+    from app.ml.model_status import is_model_enabled
+
+    status_target = tmp_path / "lstm_model.pt"
+    status_target.write_text("placeholder")  # is_model_enabled dosya varlığını da kontrol eder
+    monkeypatch.setattr(train_module, "DEFAULT_LSTM_MODEL_PATH", status_target)
+    monkeypatch.setattr(settings, "ml_min_balanced_accuracy", 0.0)  # her zaman kabul edilsin
+    monkeypatch.setattr(LSTMSignalModel, "save", lambda self, *a, **kw: None)
+
+    exchange = _TrendExchange(seed=10)
+    result = train_lstm_signal_model(
+        exchange, ["UPUSDT", "DOWNUSDT"], seq_len=10, timeframe="4h", lookback=400, epochs=2
+    )
+
+    assert result.accepted is True
+    assert is_model_enabled(status_target) is True
+
+
 def test_sweep_labeling_lstm_covers_full_grid_and_tolerates_failures():
     exchange = _TrendExchange(seed=9)
     points = sweep_labeling_lstm(

@@ -45,18 +45,15 @@ class Settings(BaseSettings):
     ml_min_correlation_with_primary: float = 0.4
     ml_min_quote_volume_24h: float = 5_000_000.0
 
-    # --- XGBoost + LSTM ensemble (opsiyonel, opt-in) ---
-    # LSTM'in BTC-only sınamalarda (bkz. README "Faz B" notu) rastgele
-    # seviyenin belirgin üzerine çıktığı doğrulandıktan sonra eklendi;
-    # yine de LSTM kalitesi henüz her sembol/zaman diliminde ayrı ayrı
-    # doğrulanmadığından varsayılan KAPALI — kullanıcı açıkça açmalı.
-    ensemble_lstm_enabled: bool = False
-
-    # `river` ARFClassifier tabanlı online model (bkz. app.ml.online_model)
-    # — prequential değerlendirmede BTC-only veride overall_balanced_accuracy
-    # ~%49.7 gösterdi (XGBoost/LSTM'den daha iyi), yine de sembol/zaman
-    # dilimine göre ayrı ayrı doğrulanmadığından varsayılan KAPALI.
-    ensemble_online_enabled: bool = False
+    # --- XGBoost + LSTM + online ensemble ---
+    # LSTM ve online (river ARF) modellerinin canlı karar motoruna katılıp
+    # katılmayacağı ARTIK statik bir "açık/kapalı" ayarıyla DEĞİL, her
+    # eğitimin SONUNDA otomatik olarak belirleniyor (bkz.
+    # `app.ml.model_status`, `Settings.ml_min_balanced_accuracy`): bir model
+    # en son eğitiminde kalite eşiğini geçtiyse otomatik devreye girer,
+    # geçemediyse (eski dosyası olsa bile) otomatik devre dışı kalır. Önceki
+    # `ensemble_lstm_enabled`/`ensemble_online_enabled` bayrakları bu yüzden
+    # kaldırıldı — kullanıcının elle açması gerekmiyor.
 
     # --- Feature snapshot biriktirme (LSTM/RL için ileride kullanılacak
     # zaman serisi veri seti) --- Virgülle ayrılmış sembol listesi; her

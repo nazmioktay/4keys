@@ -9,11 +9,12 @@ from app.exchanges.base import Exchange
 
 from .dataset import LabelingMethod, build_training_dataset, build_training_dataset_with_time
 from .features import ALL_FEATURE_COLUMNS
-from .lstm_model import LSTMSignalModel, LSTMTrainingReport
+from .lstm_model import DEFAULT_LSTM_MODEL_PATH, LSTMSignalModel, LSTMTrainingReport
 from .meta_label import MetaLabelModel, build_meta_dataset
 from .model import DEFAULT_MODEL_PATH, Algorithm, SignalModel
-from .online_model import OnlineSignalModel, PrequentialReport, run_prequential_evaluation
-from .patchtst_model import PatchTSTSignalModel, PatchTSTTrainingReport
+from .model_status import write_model_status
+from .online_model import DEFAULT_ONLINE_MODEL_PATH, OnlineSignalModel, PrequentialReport, run_prequential_evaluation
+from .patchtst_model import DEFAULT_PATCHTST_MODEL_PATH, PatchTSTSignalModel, PatchTSTTrainingReport
 from .regime import RegimeModel, build_regime_labeled_dataset, fit_regime_model
 from .sequence_dataset import build_sequence_dataset
 from .validation import OutOfSampleReport, WalkForwardReport, evaluate_out_of_sample, run_walk_forward_validation, split_out_of_sample
@@ -272,17 +273,28 @@ def _train_sequence_model(
         oos_report = OutOfSampleReport(0, 0.0, 0.0)
 
     # Kalite kapısı — bkz. `train_signal_model_validated`'daki AYNI mantık.
+    # Eşiği geçemeyen bir model yalnızca KAYDEDİLMEZ değil, aynı zamanda
+    # canlı karar motorunda DEVRE DIŞI bırakılır (bkz. `write_model_status`)
+    # — daha önce kaydedilmiş ESKİ bir dosya olsa bile o da artık
+    # kullanılmaz; bir model yalnızca EN SON eğitiminde eşiği geçtiği
+    # sürece aktif kalır.
     accepted = True
     rejection_reason: str | None = None
     if oos_report.holdout_rows > 0 and oos_report.balanced_accuracy < settings.ml_min_balanced_accuracy:
         accepted = False
         rejection_reason = (
             f"out_of_sample_balanced_accuracy ({oos_report.balanced_accuracy:.3f}) eşiğin "
-            f"({settings.ml_min_balanced_accuracy}) altında — model KAYDEDİLMEDİ, önceki model (varsa) korunuyor."
+            f"({settings.ml_min_balanced_accuracy}) altında — model KAYDEDİLMEDİ VE DEVRE DIŞI bırakıldı "
+            "(eski dosyası olsa bile canlıda kullanılmayacak)."
         )
         logger.warning("%s model rejected: %s", model_kind, rejection_reason)
     elif persist:
         model.save()
+
+    if persist:
+        status_path = {"LSTM": DEFAULT_LSTM_MODEL_PATH, "PatchTST": DEFAULT_PATCHTST_MODEL_PATH}.get(model_kind)
+        if status_path is not None:
+            write_model_status(status_path, enabled=accepted, balanced_accuracy=oos_report.balanced_accuracy, reason=rejection_reason)
 
     logger.info(
         "%s model trained on %d pencere; train_loss=%.4f train_acc=%.3f; oos_acc=%.3f (holdout=%d pencere); accepted=%s",
@@ -820,11 +832,20 @@ def train_online_signal_model(
         report.accepted = False
         report.rejection_reason = (
             f"overall_balanced_accuracy ({report.overall_balanced_accuracy:.3f}) eşiğin "
-            f"({settings.ml_min_balanced_accuracy}) altında — model KAYDEDİLMEDİ, önceki model (varsa) korunuyor."
+            f"({settings.ml_min_balanced_accuracy}) altında — model KAYDEDİLMEDİ VE DEVRE DIŞI bırakıldı "
+            "(eski dosyası olsa bile canlıda kullanılmayacak)."
         )
         logger.warning("online model rejected: %s", report.rejection_reason)
     elif persist:
         model.save()
+
+    if persist:
+        write_model_status(
+            DEFAULT_ONLINE_MODEL_PATH,
+            enabled=report.accepted,
+            balanced_accuracy=report.overall_balanced_accuracy,
+            reason=report.rejection_reason,
+        )
 
     logger.info(
         "online model (river ARF) trained on %d rows (prequential); overall_acc=%.3f overall_balanced_acc=%.3f; accepted=%s",
