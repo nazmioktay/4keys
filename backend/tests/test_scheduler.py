@@ -84,6 +84,73 @@ def test_job_run_engine_cycle_records_unexpected_failure(monkeypatch):
     assert result.error_count == 1
 
 
+def test_job_auto_retrain_skips_when_no_symbols(monkeypatch):
+    monkeypatch.setattr(jobs, "get_exchange", lambda *_a, **_k: object())
+    monkeypatch.setattr(jobs, "refresh_screener", lambda: [])
+    jobs.job_auto_retrain()
+
+    result = status.get_all()[jobs.AUTO_RETRAIN_JOB_ID]
+    assert result.ok is True
+    assert "atlandı" in result.detail
+
+
+def test_job_auto_retrain_trains_primary_and_records_success(monkeypatch):
+    class _FakeResult:
+        rows_used = 1000
+
+        class out_of_sample:
+            balanced_accuracy = 0.42
+
+    monkeypatch.setattr(jobs, "get_exchange", lambda *_a, **_k: object())
+    monkeypatch.setattr(jobs, "refresh_screener", lambda: [object()])
+    monkeypatch.setattr(jobs, "top_long", lambda results, n: [type("R", (), {"symbol": "BTC/USDT:USDT"})()])
+    monkeypatch.setattr(jobs, "top_short", lambda results, n: [])
+    monkeypatch.setattr(jobs, "train_signal_model_validated", lambda *a, **k: _FakeResult())
+    monkeypatch.setattr(jobs, "DEFAULT_META_MODEL_PATH", type("P", (), {"exists": staticmethod(lambda: False)})())
+
+    jobs.job_auto_retrain()
+
+    result = status.get_all()[jobs.AUTO_RETRAIN_JOB_ID]
+    assert result.ok is True
+    assert "1000" in result.detail
+    assert "meta-label" not in result.detail  # meta model daha önce eğitilmemiş, otomatik başlatılmamalı
+
+
+def test_job_auto_retrain_also_retrains_meta_when_it_already_exists(monkeypatch):
+    class _FakeResult:
+        rows_used = 1000
+
+        class out_of_sample:
+            balanced_accuracy = 0.42
+
+    monkeypatch.setattr(jobs, "get_exchange", lambda *_a, **_k: object())
+    monkeypatch.setattr(jobs, "refresh_screener", lambda: [object()])
+    monkeypatch.setattr(jobs, "top_long", lambda results, n: [type("R", (), {"symbol": "BTC/USDT:USDT"})()])
+    monkeypatch.setattr(jobs, "top_short", lambda results, n: [])
+    monkeypatch.setattr(jobs, "train_signal_model_validated", lambda *a, **k: _FakeResult())
+    monkeypatch.setattr(jobs, "DEFAULT_META_MODEL_PATH", type("P", (), {"exists": staticmethod(lambda: True)})())
+    monkeypatch.setattr(jobs.SignalModel, "load_from", classmethod(lambda cls, path=None: object()))
+    monkeypatch.setattr(jobs, "train_meta_label_model", lambda *a, **k: (object(), 500))
+
+    jobs.job_auto_retrain()
+
+    result = status.get_all()[jobs.AUTO_RETRAIN_JOB_ID]
+    assert result.ok is True
+    assert "meta-label: 500" in result.detail
+
+
+def test_job_auto_retrain_records_failure(monkeypatch):
+    def _boom(*_a, **_k):
+        raise RuntimeError("borsa erişilemedi")
+
+    monkeypatch.setattr(jobs, "get_exchange", _boom)
+    jobs.job_auto_retrain()
+
+    result = status.get_all()[jobs.AUTO_RETRAIN_JOB_ID]
+    assert result.ok is False
+    assert result.error_count == 1
+
+
 def test_start_scheduler_disabled_returns_none():
     scheduler = start_scheduler(enabled=False)
     assert scheduler is None
@@ -96,6 +163,19 @@ def test_start_scheduler_enabled_registers_both_jobs():
     assert scheduler.get_job(jobs.SCREENER_REFRESH_JOB_ID) is not None
     assert scheduler.get_job(jobs.ENGINE_CYCLE_JOB_ID) is not None
     assert get_scheduler() is scheduler
+
+
+def test_start_scheduler_does_not_register_auto_retrain_by_default():
+    scheduler = start_scheduler(enabled=True)
+    assert scheduler.get_job(jobs.AUTO_RETRAIN_JOB_ID) is None
+
+
+def test_start_scheduler_registers_auto_retrain_when_enabled(monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "ml_auto_retrain_enabled", True)
+    scheduler = start_scheduler(enabled=True)
+    assert scheduler.get_job(jobs.AUTO_RETRAIN_JOB_ID) is not None
 
 
 def test_start_scheduler_is_idempotent():

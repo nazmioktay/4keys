@@ -14,7 +14,7 @@ from app.ml.macro_features import latest_macro_feature_row
 from app.ml.orderbook_features import latest_orderbook_feature_row
 from app.ml.model import DEFAULT_MODEL_PATH, Algorithm, SignalModel
 from app.ml.sequence_dataset import build_sequence_dataset
-from app.ml.train import train_lstm_signal_model, train_meta_label_model, train_signal_model_validated
+from app.ml.train import sweep_lookback_values, train_lstm_signal_model, train_meta_label_model, train_signal_model_validated
 from app.screener.scanner import scan_market, top_long, top_short
 
 router = APIRouter(prefix="/ml", tags=["ml"])
@@ -99,6 +99,36 @@ class PredictLSTMResponse(BaseModel):
 class TrainMetaResponse(BaseModel):
     rows_used: int
     symbols_used: int
+
+
+class SweepLookbackRequest(BaseModel):
+    symbols: list[str] | None = None  # None -> screener top long+short kullanılır
+    lookback_values: list[int] = [2000, 4000, 6000, 8000, 10000]
+    horizon: int = 5
+    threshold_pct: float = 1.0
+    labeling_method: LabelingMethod = "threshold"
+    take_profit_pct: float = 2.0
+    stop_loss_pct: float = 2.0
+    algorithm: Algorithm = "xgboost"
+    holdout_frac: float = 0.2
+    walk_forward_splits: int = 5
+
+
+class SweepLookbackPoint(BaseModel):
+    lookback: int
+    rows_used: int
+    walk_forward_mean_accuracy: float
+    walk_forward_mean_balanced_accuracy: float
+    overfit_gap: float
+    out_of_sample_rows: int
+    out_of_sample_accuracy: float
+    out_of_sample_balanced_accuracy: float
+    error: str | None = None
+
+
+class SweepLookbackResponse(BaseModel):
+    symbols_used: int
+    points: list[SweepLookbackPoint]
 
 
 class TrainMetaRequest(BaseModel):
@@ -293,6 +323,39 @@ def train_meta(payload: TrainMetaRequest) -> TrainMetaResponse:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     return TrainMetaResponse(rows_used=rows_used, symbols_used=len(symbols))
+
+
+@router.post("/sweep-lookback", response_model=SweepLookbackResponse)
+def sweep_lookback(payload: SweepLookbackRequest) -> SweepLookbackResponse:
+    """Farklı `lookback` değerleriyle art arda eğitim yapıp her biri için
+    walk-forward + out-of-sample metriklerini döner — "en küçük yeterli
+    lookback nedir" sorusuna karar vermek için VERİ sağlar (otomatik "en
+    iyi"yi seçmez, bkz. `app.ml.train.sweep_lookback_values` docstring'i).
+
+    UYARI: her lookback değeri için sıfırdan bir eğitim (ve o değere göre
+    yeniden Binance'ten veri çekimi) yapılır — birden çok değerle birden
+    çok sembolde bu ÇOK uzun sürebilir. Production modelini DEĞİŞTİRMEZ
+    (`persist=False`) — yalnızca karşılaştırma amaçlıdır, bittikten sonra
+    ayrıca `/ml/train` çağırmak gerekir."""
+    exchange = get_exchange(settings.exchange_id)
+    symbols = _resolve_symbols(exchange, payload.symbols)
+    if not symbols:
+        raise HTTPException(status_code=400, detail="Eğitim için sembol bulunamadı.")
+
+    points = sweep_lookback_values(
+        exchange,
+        symbols,
+        payload.lookback_values,
+        horizon=payload.horizon,
+        threshold_pct=payload.threshold_pct,
+        labeling_method=payload.labeling_method,
+        take_profit_pct=payload.take_profit_pct,
+        stop_loss_pct=payload.stop_loss_pct,
+        algorithm=payload.algorithm,
+        holdout_frac=payload.holdout_frac,
+        walk_forward_splits=payload.walk_forward_splits,
+    )
+    return SweepLookbackResponse(symbols_used=len(symbols), points=[SweepLookbackPoint(**p.__dict__) for p in points])
 
 
 @router.get("/predict", response_model=PredictResponse)

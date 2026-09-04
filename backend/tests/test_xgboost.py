@@ -126,3 +126,48 @@ def test_train_signal_model_validated_produces_walk_forward_and_oos_reports():
     assert 0.0 <= result.walk_forward.mean_accuracy <= 1.0
     assert result.out_of_sample.holdout_rows > 0
     assert 0.0 <= result.out_of_sample.accuracy <= 1.0
+
+
+def test_train_signal_model_validated_persist_false_does_not_touch_disk(tmp_path, monkeypatch):
+    from app.ml.model import SignalModel
+
+    saved_paths = []
+    monkeypatch.setattr(SignalModel, "save", lambda self, path=None: saved_paths.append(path))
+
+    exchange = TrendExchange(seed=6)
+    train_signal_model_validated(
+        exchange, ["UPUSDT", "DOWNUSDT"], horizon=5, threshold_pct=0.5, timeframe="4h", lookback=400, persist=False
+    )
+    assert saved_paths == []
+
+
+def test_sweep_lookback_values_returns_one_point_per_lookback():
+    from app.ml.train import sweep_lookback_values
+
+    exchange = TrendExchange(seed=7)
+    points = sweep_lookback_values(exchange, ["UPUSDT", "DOWNUSDT"], [300, 400], timeframe="4h", horizon=5, threshold_pct=0.5)
+
+    assert [p.lookback for p in points] == [300, 400]
+    for point in points:
+        assert point.error is None
+        assert point.rows_used > 0
+        assert 0.0 <= point.out_of_sample_balanced_accuracy <= 1.0
+
+
+def test_sweep_lookback_values_reports_error_without_stopping_the_sweep(monkeypatch):
+    import app.ml.train as train_module
+
+    original = train_module.train_signal_model_validated
+
+    def _fail_for_small_lookback(*args, **kwargs):
+        if kwargs.get("lookback") == 5:
+            raise ValueError("yeterli veri yok (test)")
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(train_module, "train_signal_model_validated", _fail_for_small_lookback)
+
+    exchange = TrendExchange(seed=8)
+    points = train_module.sweep_lookback_values(exchange, ["UPUSDT"], [5, 400], timeframe="4h", horizon=5, threshold_pct=0.5)
+
+    assert points[0].error is not None
+    assert points[1].error is None

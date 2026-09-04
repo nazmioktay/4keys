@@ -6,10 +6,12 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from app.core.config import settings
 
 from .jobs import (
+    AUTO_RETRAIN_JOB_ID,
     ENGINE_CYCLE_JOB_ID,
     MACRO_REFRESH_JOB_ID,
     ORDERBOOK_REFRESH_JOB_ID,
     SCREENER_REFRESH_JOB_ID,
+    job_auto_retrain,
     job_refresh_macro,
     job_refresh_orderbook,
     job_refresh_screener,
@@ -69,11 +71,23 @@ def start_scheduler(enabled: bool | None = None) -> BackgroundScheduler | None:
             max_instances=1,
             coalesce=True,
         )
+        if settings.ml_auto_retrain_enabled:
+            scheduler.add_job(
+                job_auto_retrain,
+                "interval",
+                seconds=settings.ml_auto_retrain_seconds,
+                id=AUTO_RETRAIN_JOB_ID,
+                max_instances=1,
+                coalesce=True,
+            )
         scheduler.start()
         # İlk taramayı hemen tetikle ki motor döngüsü boş önbekleğe düşmesin.
         scheduler.modify_job(SCREENER_REFRESH_JOB_ID, next_run_time=datetime.now())
         scheduler.modify_job(MACRO_REFRESH_JOB_ID, next_run_time=datetime.now())
         scheduler.modify_job(ORDERBOOK_REFRESH_JOB_ID, next_run_time=datetime.now())
+        # auto_retrain'e İLK çalıştırmada hemen tetiklenmez — yüzlerce
+        # sembolde ağır bir eğitim, uygulama başlarken ilk isteklerin
+        # gecikmesine yol açmasın; yalnızca normal interval'ında çalışır.
         _scheduler = scheduler
         logger.info(
             "scheduler started: screener every %ss, engine cycle every %ss, macro refresh every %ss",

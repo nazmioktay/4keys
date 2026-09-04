@@ -62,6 +62,19 @@ class Settings(BaseSettings):
     macro_refresh_seconds: int = 21600  # 6 saat — makro veriler (VIX, altın, faiz oranları vb.) günde birkaç kez yeterli
     orderbook_refresh_seconds: int = 1800  # 30 dakika — emir defterinin ANLIK görüntüsü, geçmişi yoktur (bkz. app.orderbook)
 
+    # --- Otomatik yeniden eğitim (bkz. app.scheduler.jobs.job_auto_retrain) ---
+    # Neden 24 saat: ml_train_lookback (10.000 saatlik mum, ~1.14 yıl) ile
+    # kıyaslandığında bir günde biriken ~24 yeni bar, toplam veri setinin
+    # ~%0.24'ü — bundan daha sık yeniden eğitmek (ör. saatlik) hesaplama
+    # maliyetini artırır ama modelin öğrendiği dağılımı neredeyse hiç
+    # değiştirmez. Bu, gerçek bir "backtest ile bulunmuş" optimum DEĞİL —
+    # canlı piyasa verisine bu ortamdan erişilemediği için ampirik olarak
+    # doğrulanamadı; rejim değişikliklerini makul bir gecikmeyle yakalayan,
+    # sektörde yaygın bir varsayılan kabul edilmelidir. `enabled=False`
+    # yapılıp elle (`/ml/train`) tetiklenmeye devam edilebilir.
+    ml_auto_retrain_enabled: bool = False
+    ml_auto_retrain_seconds: int = 86400  # 24 saat
+
     # --- Ücretsiz makro veri kaynakları (bkz. app.macro.data) ---
     # FRED (ABD Merkez Bankası) API anahtarı — ücretsiz, anında alınır:
     # https://fred.stlouisfed.org/docs/api/api_key.html . Boş bırakılırsa

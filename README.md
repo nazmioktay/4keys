@@ -100,6 +100,31 @@ karşılığı.
   train loss/accuracy ve out-of-sample doğruluğunu döner.
 - `GET /ml/predict-lstm?symbol=...` — en son `seq_len` bardan tahmin üretir.
 
+**Lookback/otomatik eğitim optimizasyonu (2026-09):**
+- `POST /ml/sweep-lookback` (`app.ml.train.sweep_lookback_values`) —
+  belirtilen `lookback` değerlerinin HER biriyle sıfırdan eğitim yapıp
+  walk-forward + out-of-sample metriklerini karşılaştırmalı döner.
+  **Bilinçli tasarım kararı**: bu endpoint "en iyi" lookback'i OTOMATİK
+  seçmez — hangi noktadan sonra ek geçmişin doğruluğu anlamlı şekilde
+  artırmadığını (platoya ulaştığını) gözlemleyip karar vermek operatöre
+  bırakılır, çünkü bu hem doğruluk hem hesaplama maliyeti arasında bir
+  değer yargısıdır. `train_signal_model_validated(..., persist=False)`
+  ile production modeli sweep sırasında ASLA değiştirilmez.
+- `Settings.ml_auto_retrain_enabled` (varsayılan **False**) +
+  `ml_auto_retrain_seconds` (varsayılan 24 saat) — `app.scheduler.jobs.job_auto_retrain`,
+  açıksa screener'ın top long/short listesiyle XGBoost'u (ve daha önce
+  eğitilmişse meta-label modelini) periyodik olarak otomatik yeniler.
+  **Önemli dürüstlük notu**: 24 saatlik varsayılan, "10.000 mumluk
+  (~1.14 yıl) veri setine göre bir günde biriken ~24 yeni barın toplamın
+  ~%0.24'ü olduğu, bu yüzden daha sık yeniden eğitmenin maliyeti
+  artırıp faydayı neredeyse hiç artırmayacağı" akıl yürütmesine
+  dayanır — ama bu ortamdan (sandbox) canlı piyasa verisine erişilemediği
+  için GERÇEK bir backtest ile ampirik olarak doğrulanmadı. Üretim
+  sunucusunda `/ml/sweep-lookback` ve zaman içinde birikecek gerçek
+  performans verisiyle bu değer daha isabetli kalibre edilebilir.
+  Varsayılan kapalı: otomatik olarak production modelinin üzerine
+  yazılması, kullanıcının bilinçli bir tercihi olmalı.
+
 **Veri altyapısı genişletmesi (2026-09, LSTM'in overfit sonucuna tepki
 olarak — "önce veri, sonra daha fazla özellik" sırası):**
 - `app/exchanges/binance.py::BinanceExchange.fetch_ohlcv` artık **sayfalama
@@ -224,6 +249,7 @@ docker compose up
 | `POST /ml/train` | Birincil modeli eğitir (`algorithm`: `"xgboost"`\|`"mlp"`, `labeling_method`: `"threshold"`\|`"triple_barrier"`, `calibrate`: bool, `calibration_method`: `"sigmoid"`\|`"isotonic"`, `holdout_frac`, `walk_forward_splits`) — yanıt walk-forward + out-of-sample metriklerini de içerir |
 | `GET /ml/explain?symbol=...` | Eğitilmiş XGBoost modelinin SHAP özellik önemlerini döner |
 | `POST /ml/train-meta` | Meta-label modelini eğitir (önce `/ml/train` çağrılmış olmalı) |
+| `POST /ml/sweep-lookback` | Farklı `lookback` değerleriyle art arda eğitip walk-forward/out-of-sample metriklerini karşılaştırır (production modelini DEĞİŞTİRMEZ) — "en küçük yeterli lookback" kararı için veri sağlar |
 | `GET /ml/predict?symbol=BTC/USDT:USDT` | Yön + kalibre güven tahmini (meta model varsa `meta_act`/`meta_confidence` de döner) |
 | `POST /ml/train-lstm` | LSTM (Faz B) modelini sekans veri setiyle eğitir (`seq_len`, `epochs` vb.) |
 | `GET /ml/predict-lstm?symbol=BTC/USDT:USDT` | LSTM ile yön + güven tahmini |

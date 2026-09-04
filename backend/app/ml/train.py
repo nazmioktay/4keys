@@ -81,6 +81,7 @@ def train_signal_model_validated(
     holdout_frac: float = 0.2,
     walk_forward_splits: int = 5,
     embargo_frac: float = 0.02,
+    persist: bool = True,
 ) -> TrainingResult:
     """`app.ml.validation`'daki overfitting korumalarıyla (walk-forward +
     purged/embargo CV + out-of-sample holdout) eğitim yapar (bkz. rehber
@@ -88,6 +89,10 @@ def train_signal_model_validated(
     eğitilir; holdout dilimi (varsayılan: son %20) modele HİÇBİR ZAMAN
     fit() sırasında gösterilmez, yalnızca `out_of_sample` metriği için
     kullanılır.
+
+    `persist=False` verilirse model diske kaydedilmez — ör. `sweep_lookback_values`
+    gibi yalnızca KARŞILAŞTIRMA amaçlı, art arda birden çok deneme yapan
+    çağrılarda production modelinin yanlışlıkla üzerine yazılmasını önler.
     """
     X, y, time_frac = build_training_dataset_with_time(
         exchange,
@@ -121,7 +126,8 @@ def train_signal_model_validated(
 
     oos_report = evaluate_out_of_sample(model, X_holdout, y_holdout) if len(X_holdout) > 0 else OutOfSampleReport(0, 0.0, 0.0)
 
-    model.save()
+    if persist:
+        model.save()
     logger.info(
         "model trained (algorithm=%s) on %d rows; walk-forward mean_acc=%.3f overfit_gap=%.3f; oos_acc=%.3f (holdout=%d rows)",
         algorithm,
@@ -213,6 +219,96 @@ def train_lstm_signal_model(
         oos_report.holdout_rows,
     )
     return LSTMTrainingResult(model=model, rows_used=len(X_train), training=training_report, out_of_sample=oos_report)
+
+
+@dataclass
+class LookbackSweepPoint:
+    lookback: int
+    rows_used: int
+    walk_forward_mean_accuracy: float
+    walk_forward_mean_balanced_accuracy: float
+    overfit_gap: float
+    out_of_sample_rows: int
+    out_of_sample_accuracy: float
+    out_of_sample_balanced_accuracy: float
+    error: str | None = None
+
+
+def sweep_lookback_values(
+    exchange: Exchange,
+    symbols: list[str],
+    lookback_values: list[int],
+    timeframe: str | None = None,
+    horizon: int = 5,
+    threshold_pct: float = 1.0,
+    labeling_method: LabelingMethod = "threshold",
+    take_profit_pct: float = 2.0,
+    stop_loss_pct: float = 2.0,
+    algorithm: Algorithm = "xgboost",
+    holdout_frac: float = 0.2,
+    walk_forward_splits: int = 5,
+) -> list[LookbackSweepPoint]:
+    """Farklı `lookback` (geçmiş derinliği) değerleriyle art arda eğitim
+    yapıp her biri için walk-forward + out-of-sample metriklerini döner —
+    "en küçük yeterli lookback'i bul" (rehberin overfitting/veri yeterliliği
+    ilkeleriyle uyumlu bir "diminishing returns" analizi) sorusuna
+    CEVAP değil, CEVABI BULMAK İÇİN VERİ sağlar: hangi noktadan sonra daha
+    fazla geçmişin doğruluğu anlamlı şekilde artırmadığını (platoya
+    ulaştığını) gözlemleyip seçim yapmak çağıran tarafa (bkz. `/ml/sweep-lookback`
+    endpoint'i ve onu çağıran operatöre) kalır — otomatik "en iyi" seçimi
+    dayatmaz çünkü "en iyi" hem doğruluk hem hesaplama maliyeti arasında bir
+    değer yargısıdır.
+
+    Her lookback bağımsız değerlendirilir; biri başarısız olursa (ör.
+    yetersiz veri) `error` alanıyla işaretlenir, taramanın geri kalanı
+    durmaz.
+    """
+    results: list[LookbackSweepPoint] = []
+    for lookback in lookback_values:
+        try:
+            result = train_signal_model_validated(
+                exchange,
+                symbols,
+                timeframe=timeframe,
+                lookback=lookback,
+                horizon=horizon,
+                threshold_pct=threshold_pct,
+                labeling_method=labeling_method,
+                take_profit_pct=take_profit_pct,
+                stop_loss_pct=stop_loss_pct,
+                algorithm=algorithm,
+                holdout_frac=holdout_frac,
+                walk_forward_splits=walk_forward_splits,
+                persist=False,
+            )
+            wf, oos = result.walk_forward, result.out_of_sample
+            results.append(
+                LookbackSweepPoint(
+                    lookback=lookback,
+                    rows_used=result.rows_used,
+                    walk_forward_mean_accuracy=wf.mean_accuracy,
+                    walk_forward_mean_balanced_accuracy=wf.mean_balanced_accuracy,
+                    overfit_gap=wf.overfit_gap,
+                    out_of_sample_rows=oos.holdout_rows,
+                    out_of_sample_accuracy=oos.accuracy,
+                    out_of_sample_balanced_accuracy=oos.balanced_accuracy,
+                )
+            )
+        except ValueError as exc:
+            results.append(
+                LookbackSweepPoint(
+                    lookback=lookback,
+                    rows_used=0,
+                    walk_forward_mean_accuracy=0.0,
+                    walk_forward_mean_balanced_accuracy=0.0,
+                    overfit_gap=0.0,
+                    out_of_sample_rows=0,
+                    out_of_sample_accuracy=0.0,
+                    out_of_sample_balanced_accuracy=0.0,
+                    error=str(exc),
+                )
+            )
+    return results
 
 
 def train_meta_label_model(
