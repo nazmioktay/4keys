@@ -1,6 +1,44 @@
 import math
 
-from .schemas import PerformanceMetrics
+import numpy as np
+
+from .schemas import MonteCarloReport, PerformanceMetrics
+
+
+def monte_carlo_bootstrap(
+    trade_pnls_pct: list[float], num_simulations: int = 1000, seed: int | None = None
+) -> MonteCarloReport | None:
+    """GERÇEKLEŞEN işlem getirilerini YERİNE KOYARAK (with replacement)
+    tekrar tekrar örnekleyip, her simülasyon için toplam getiri ve max
+    drawdown hesaplar — işlem SIRASININ/ÖRNEKLEMESİNİN "şans" payını
+    ölçmenin hafif (vectorbt gibi ağır bağımlılık gerektirmeyen) bir yolu.
+
+    Az sayıda işlemle (<10) güvenilmez olur; bu durumda None döner."""
+    n = len(trade_pnls_pct)
+    if n < 10 or num_simulations <= 0:
+        return None
+
+    rng = np.random.default_rng(seed)
+    pnls = np.array(trade_pnls_pct)
+    samples = rng.choice(pnls, size=(num_simulations, n), replace=True)
+
+    equity_curves = np.cumsum(samples, axis=1)
+    total_returns = equity_curves[:, -1]
+
+    running_peak = np.maximum.accumulate(np.concatenate([np.zeros((num_simulations, 1)), equity_curves], axis=1), axis=1)
+    drawdowns = running_peak[:, 1:] - equity_curves
+    max_drawdowns = drawdowns.max(axis=1)
+
+    return MonteCarloReport(
+        num_simulations=num_simulations,
+        num_trades_per_simulation=n,
+        total_return_pct_p5=round(float(np.percentile(total_returns, 5)), 3),
+        total_return_pct_p50=round(float(np.percentile(total_returns, 50)), 3),
+        total_return_pct_p95=round(float(np.percentile(total_returns, 95)), 3),
+        max_drawdown_pct_p50=round(float(np.percentile(max_drawdowns, 50)), 3),
+        max_drawdown_pct_p95=round(float(np.percentile(max_drawdowns, 95)), 3),
+        probability_of_loss_pct=round(float((total_returns < 0).mean() * 100), 2),
+    )
 
 
 def compute_metrics(trade_pnls_pct: list[float], num_candles: int, timeframe_minutes: int) -> PerformanceMetrics:

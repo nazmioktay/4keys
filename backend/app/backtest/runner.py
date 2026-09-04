@@ -5,7 +5,7 @@ from app.exchanges.base import Exchange
 from app.strategy.engine import run_backtest as run_strategy_backtest
 
 from .data import fetch_full_history, timeframe_to_minutes
-from .metrics import compute_metrics
+from .metrics import compute_metrics, monte_carlo_bootstrap
 from .schemas import BacktestReport, BacktestRequest, DataSufficiency, PerformanceMetrics
 
 
@@ -88,9 +88,9 @@ def _discover_sufficient_history(
         candles_needed = min(candles_needed * 2, request.max_candles)
 
 
-def _metrics_for(ohlcv: pd.DataFrame, request: BacktestRequest, timeframe_minutes: int) -> PerformanceMetrics:
+def _metrics_for(ohlcv: pd.DataFrame, request: BacktestRequest, timeframe_minutes: int) -> tuple[PerformanceMetrics, list[float]]:
     _, pnls = _simulate(ohlcv, request)
-    return compute_metrics(pnls, len(ohlcv), timeframe_minutes)
+    return compute_metrics(pnls, len(ohlcv), timeframe_minutes), pnls
 
 
 def run_backtest_report(exchange: Exchange, request: BacktestRequest) -> BacktestReport:
@@ -126,9 +126,19 @@ def run_backtest_report(exchange: Exchange, request: BacktestRequest) -> Backtes
     train_df = ohlcv.iloc[:split_idx].reset_index(drop=True)
     test_df = ohlcv.iloc[split_idx:].reset_index(drop=True)
 
-    train_metrics = _metrics_for(train_df, request, timeframe_minutes) if len(train_df) >= 30 else None
-    test_metrics = _metrics_for(test_df, request, timeframe_minutes) if len(test_df) >= 30 else None
-    full_metrics = _metrics_for(ohlcv, request, timeframe_minutes)
+    train_metrics, test_pnls = None, []
+    if len(train_df) >= 30:
+        train_metrics, _ = _metrics_for(train_df, request, timeframe_minutes)
+
+    test_metrics = None
+    if len(test_df) >= 30:
+        test_metrics, test_pnls = _metrics_for(test_df, request, timeframe_minutes)
+
+    full_metrics, _ = _metrics_for(ohlcv, request, timeframe_minutes)
+
+    monte_carlo = (
+        monte_carlo_bootstrap(test_pnls, num_simulations=request.monte_carlo_simulations) if test_pnls else None
+    )
 
     warnings: list[str] = []
     if not sufficiency.sufficient:
@@ -160,5 +170,6 @@ def run_backtest_report(exchange: Exchange, request: BacktestRequest) -> Backtes
         train_metrics=train_metrics,
         test_metrics=test_metrics,
         full_period_metrics=full_metrics,
+        monte_carlo=monte_carlo,
         warnings=warnings,
     )

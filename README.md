@@ -514,6 +514,16 @@ uçlu, "gerçekten güvenilir mi?" sorusuna cevap veren bir backtest sistemi.
   kalıyorsa **aşırı uyum (overfitting) uyarısı** üretir.
 - DCA ve strateji motorları tek bir arayüzden (`_simulate`) çağrıldığı için
   aynı backtest altyapısı ikisinde de kullanılıyor — kod tekrarı yok.
+- **Monte Carlo bootstrap** (`app/backtest/metrics.py::monte_carlo_bootstrap`,
+  2026-09) — `vectorbt` gibi ağır bağımlılıklar (numba vb.) eklemeden,
+  mevcut motorun ÜSTÜNE eklenen hafif bir katman: test (out-of-sample)
+  dönemindeki GERÇEKLEŞEN işlem getirileri YERİNE KOYARAK (with
+  replacement) `monte_carlo_simulations` (varsayılan 1000) kez yeniden
+  örneklenir; her simülasyon için toplam getiri ve max drawdown hesaplanıp
+  p5/p50/p95 yüzdelikleri + kayıpla sonuçlanma olasılığı raporlanır. Bu,
+  işlem SIRASININ/ÖRNEKLEMESİNİN "şans" payını ölçer — az sayıda işlemle
+  (<10) güvenilmez olacağından o durumda `null` döner. `monte_carlo_simulations: 0`
+  ile tamamen atlanabilir.
 
 `POST /backtest/run` örnek gövde (DCA veya strateji, tam olarak biri):
 ```json

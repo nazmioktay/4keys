@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 
 from app.backtest.data import fetch_full_history, timeframe_to_minutes
-from app.backtest.metrics import compute_metrics
+from app.backtest.metrics import compute_metrics, monte_carlo_bootstrap
 from app.backtest.runner import _discover_sufficient_history, run_backtest_report
 from app.backtest.schemas import BacktestRequest
 from app.dca.schemas import DCAParams
@@ -131,6 +131,34 @@ def test_discover_sufficient_history_reports_insufficient_when_capped():
     assert sufficiency.sufficient is False
 
 
+def test_monte_carlo_bootstrap_returns_none_for_too_few_trades():
+    assert monte_carlo_bootstrap([1.0, -2.0, 3.0], num_simulations=100) is None
+
+
+def test_monte_carlo_bootstrap_returns_none_when_simulations_disabled():
+    assert monte_carlo_bootstrap([1.0] * 20, num_simulations=0) is None
+
+
+def test_monte_carlo_bootstrap_all_positive_trades_never_shows_loss():
+    pnls = [1.0, 2.0, 1.5, 3.0, 2.5] * 4  # 20 işlem, hepsi kârlı
+    report = monte_carlo_bootstrap(pnls, num_simulations=500, seed=0)
+    assert report is not None
+    assert report.probability_of_loss_pct == pytest.approx(0.0)
+    assert report.total_return_pct_p5 > 0
+    assert report.num_simulations == 500
+    assert report.num_trades_per_simulation == 20
+
+
+def test_monte_carlo_bootstrap_mixed_trades_produces_sensible_percentile_ordering():
+    rng = np.random.default_rng(1)
+    pnls = list(rng.normal(0.5, 3.0, 50))  # ortalama pozitif ama gürültülü, gerçekçi bir dağılım
+    report = monte_carlo_bootstrap(pnls, num_simulations=1000, seed=1)
+    assert report is not None
+    assert report.total_return_pct_p5 <= report.total_return_pct_p50 <= report.total_return_pct_p95
+    assert report.max_drawdown_pct_p50 <= report.max_drawdown_pct_p95
+    assert 0.0 <= report.probability_of_loss_pct <= 100.0
+
+
 def test_run_backtest_report_with_strategy_produces_train_test_split():
     exchange = FakeHistoryExchange(total_candles=3000, oscillation=True)
     request = BacktestRequest(
@@ -149,6 +177,43 @@ def test_run_backtest_report_with_strategy_produces_train_test_split():
     if report.train_metrics and report.test_metrics:
         total_candles = report.data_sufficiency.candles_used
         assert report.train_metrics.num_trades + report.test_metrics.num_trades <= total_candles
+
+
+def test_run_backtest_report_includes_monte_carlo_when_enough_test_trades():
+    exchange = FakeHistoryExchange(total_candles=6000, oscillation=True)
+    request = BacktestRequest(
+        symbol="OSCUSDT",
+        timeframe="4h",
+        strategy=RSI_OVERSOLD_BOUNCE,
+        min_trades=30,
+        max_candles=6000,
+        initial_candles=2000,
+        train_ratio=0.7,
+        monte_carlo_simulations=200,
+    )
+    report = run_backtest_report(exchange, request)
+
+    if report.test_metrics and report.test_metrics.num_trades >= 10:
+        assert report.monte_carlo is not None
+        assert report.monte_carlo.num_simulations == 200
+    else:
+        assert report.monte_carlo is None
+
+
+def test_run_backtest_report_skips_monte_carlo_when_disabled():
+    exchange = FakeHistoryExchange(total_candles=6000, oscillation=True)
+    request = BacktestRequest(
+        symbol="OSCUSDT",
+        timeframe="4h",
+        strategy=RSI_OVERSOLD_BOUNCE,
+        min_trades=30,
+        max_candles=6000,
+        initial_candles=2000,
+        train_ratio=0.7,
+        monte_carlo_simulations=0,
+    )
+    report = run_backtest_report(exchange, request)
+    assert report.monte_carlo is None
 
 
 def test_backtest_request_requires_exactly_one_target():
