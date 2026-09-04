@@ -45,7 +45,8 @@ def compute_auto_retrain_interval_seconds() -> int:
         return settings.ml_auto_retrain_seconds
     minutes = timeframe_to_minutes(settings.ml_train_timeframe)
     interval = int(settings.ml_train_lookback * minutes * 60 * settings.ml_auto_retrain_refresh_fraction)
-    return max(interval, 3600)  # en az 1 saat
+    interval = max(interval, 3600)  # en az 1 saat
+    return min(interval, settings.ml_auto_retrain_max_seconds)  # en geç ml_auto_retrain_max_seconds (varsayılan 7 gün)
 
 
 def job_refresh_screener() -> None:

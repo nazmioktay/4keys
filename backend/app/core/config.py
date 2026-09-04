@@ -94,14 +94,18 @@ class Settings(BaseSettings):
     # penceresinin (`ml_train_lookback` bar, `ml_train_timeframe`) ne kadarı
     # YENİ veriyle değişmiş olmalı ki yeniden eğitmeye değsin. Varsayılan
     # `ml_auto_retrain_refresh_fraction=0.05` (%5) ile, varsayılan
-    # ml_train_lookback=10000 / ml_train_timeframe=1h için:
-    # 10000 saat * 3600sn * 0.05 = 1.800.000sn (~20.8 gün). Bu bir
-    # "backtest ile bulunmuş" optimum DEĞİL — sektörde yaygın "pencerenin
-    # ~%5'i tazelenince yeniden eğit" pratiğine dayanan, veri hacmine göre
-    # GEREKÇELENDİRİLMİŞ bir varsayılan (önceki sabit 24 saatten farkı:
-    # `ml_train_lookback`/`ml_train_timeframe` değişirse aralık da otomatik
-    # ölçeklenir). `ml_auto_retrain_seconds` açıkça verilirse (None değilse)
-    # bu hesaplamanın YERİNE geçer.
+    # ml_train_lookback=10000 / ml_train_timeframe=1h için ham hesap
+    # 10000 saat * 3600sn * 0.05 = 1.800.000sn (~20.8 gün) verir — ama bu
+    # kullanıcı için çok uzun bulunduğundan `ml_auto_retrain_max_seconds`
+    # (varsayılan 7 gün) ile YUKARI SINIRLANIR: ham hesap tavanı aşarsa
+    # tavan kullanılır, en geç haftada bir yeniden eğitim garanti edilir.
+    # `%5` oranının kendisi bir "backtest ile bulunmuş" optimum DEĞİL —
+    # sektörde yaygın "pencerenin ~%5'i tazelenince yeniden eğit" pratiğine
+    # dayanan, veri hacmine göre GEREKÇELENDİRİLMİŞ bir varsayılan (önceki
+    # sabit 24 saatten farkı: `ml_train_lookback`/`ml_train_timeframe`
+    # değişirse aralık da otomatik ölçeklenir, tavana çarpmadığı sürece).
+    # `ml_auto_retrain_seconds` açıkça verilirse (None değilse) bu
+    # hesaplamanın (taban VE tavan dahil) YERİNE geçer.
     #
     # Hangi modeller: XGBoost + (varsa) meta-label HER ZAMAN bu job'a dahildir
     # (canlı karar motorunun birincil modeli). LSTM/PatchTST/online/regime
@@ -111,6 +115,7 @@ class Settings(BaseSettings):
     ml_auto_retrain_enabled: bool = True
     ml_auto_retrain_seconds: int | None = None  # None = compute_auto_retrain_interval_seconds() kullanılır
     ml_auto_retrain_refresh_fraction: float = 0.05
+    ml_auto_retrain_max_seconds: int = 604800  # 7 gün — "en geç haftada bir" üst sınırı
 
     # --- Ücretsiz makro veri kaynakları (bkz. app.macro.data) ---
     # FRED (ABD Merkez Bankası) API anahtarı — ücretsiz, anında alınır:

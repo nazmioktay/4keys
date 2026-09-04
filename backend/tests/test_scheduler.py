@@ -156,11 +156,25 @@ def test_compute_auto_retrain_interval_seconds_derived_from_lookback(monkeypatch
 
     monkeypatch.setattr(settings, "ml_auto_retrain_seconds", None)
     monkeypatch.setattr(settings, "ml_train_timeframe", "1h")
+    monkeypatch.setattr(settings, "ml_train_lookback", 2000)
+    monkeypatch.setattr(settings, "ml_auto_retrain_refresh_fraction", 0.05)
+    monkeypatch.setattr(settings, "ml_auto_retrain_max_seconds", 604800)
+
+    # 2000 saat * 3600sn * 0.05 = 360.000sn (tavanın altında, ham hesap geçerli)
+    assert jobs.compute_auto_retrain_interval_seconds() == 360_000
+
+
+def test_compute_auto_retrain_interval_seconds_capped_at_max(monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "ml_auto_retrain_seconds", None)
+    monkeypatch.setattr(settings, "ml_train_timeframe", "1h")
     monkeypatch.setattr(settings, "ml_train_lookback", 10000)
     monkeypatch.setattr(settings, "ml_auto_retrain_refresh_fraction", 0.05)
+    monkeypatch.setattr(settings, "ml_auto_retrain_max_seconds", 604800)
 
-    # 10000 saat * 3600sn * 0.05 = 1.800.000sn
-    assert jobs.compute_auto_retrain_interval_seconds() == 1_800_000
+    # Varsayılanlarla ham hesap 1.800.000sn (~20.8 gün) -> 604800sn (7 gün) tavanına çarpar
+    assert jobs.compute_auto_retrain_interval_seconds() == 604800
 
 
 def test_compute_auto_retrain_interval_seconds_respects_explicit_override(monkeypatch):
@@ -177,6 +191,7 @@ def test_compute_auto_retrain_interval_seconds_has_a_floor(monkeypatch):
     monkeypatch.setattr(settings, "ml_train_timeframe", "1h")
     monkeypatch.setattr(settings, "ml_train_lookback", 10)
     monkeypatch.setattr(settings, "ml_auto_retrain_refresh_fraction", 0.05)
+    monkeypatch.setattr(settings, "ml_auto_retrain_max_seconds", 604800)
 
     assert jobs.compute_auto_retrain_interval_seconds() == 3600  # taban değer
 
