@@ -12,6 +12,7 @@ from .features import ALL_FEATURE_COLUMNS
 from .lstm_model import LSTMSignalModel, LSTMTrainingReport
 from .meta_label import MetaLabelModel, build_meta_dataset
 from .model import DEFAULT_MODEL_PATH, Algorithm, SignalModel
+from .online_model import OnlineSignalModel, PrequentialReport, run_prequential_evaluation
 from .patchtst_model import PatchTSTSignalModel, PatchTSTTrainingReport
 from .regime import RegimeModel, build_regime_labeled_dataset, fit_regime_model
 from .sequence_dataset import build_sequence_dataset
@@ -695,6 +696,67 @@ def train_signal_models_by_regime(
         regime_model.save()
 
     return regime_model, results
+
+
+def train_online_signal_model(
+    exchange: Exchange,
+    symbols: list[str],
+    timeframe: str | None = None,
+    lookback: int | None = None,
+    horizon: int = 5,
+    threshold_pct: float = 1.0,
+    labeling_method: LabelingMethod = "threshold",
+    take_profit_pct: float = 2.0,
+    stop_loss_pct: float = 2.0,
+    n_models: int = 10,
+    window_size: int = 500,
+    persist: bool = True,
+) -> tuple[OnlineSignalModel, PrequentialReport]:
+    """Kullanıcı önerisi: XGBoost/LSTM'in periyodik toptan (batch)
+    yeniden eğitimi yerine, verinin akışından ANLIK öğrenen bir model
+    (`river.forest.ARFClassifier` — Hoeffding ağaçlarından oluşan,
+    kendi kavram kayması tespitine sahip bir topluluk, bkz.
+    `app.ml.online_model` docstring'i).
+
+    `build_training_dataset_with_time` ile AYNI özellik/etiketleme işlem
+    hattı kullanılır (XGBoost ile adil karşılaştırma için), ama eğitim
+    `fit(X, y)` DEĞİL, `run_prequential_evaluation` ile bar-bar
+    test-then-train'dir — bkz. o fonksiyonun docstring'i.
+
+    NOT: Birden fazla sembol verilirse, semboller `time_frac`'e göre değil
+    `_build_symbol_frames`'in sırasına göre ART ARDA (önce tüm A sembolü,
+    sonra tüm B sembolü) işlenir — her sembolün KENDİ içinde kronolojik
+    sıra korunur, ama semboller arası GERÇEK takvim sırası değildir. BTC-only
+    (veya BTC-öncelikli az sayıda sembol) kullanmak bu basitleştirmeyi
+    önemsiz kılar.
+    """
+    X, y, _time_frac = build_training_dataset_with_time(
+        exchange,
+        symbols,
+        timeframe or settings.ml_train_timeframe,
+        lookback or settings.ml_train_lookback,
+        horizon,
+        threshold_pct,
+        labeling_method,
+        take_profit_pct,
+        stop_loss_pct,
+    )
+
+    if len(X) < 60:
+        raise ValueError(f"Online model eğitimi için yeterli veri yok ({len(X)} satır).")
+
+    model, report = run_prequential_evaluation(X, y, n_models=n_models, window_size=window_size)
+
+    if persist:
+        model.save()
+
+    logger.info(
+        "online model (river ARF) trained on %d rows (prequential); overall_acc=%.3f overall_balanced_acc=%.3f",
+        report.rows_used,
+        report.overall_accuracy,
+        report.overall_balanced_accuracy,
+    )
+    return model, report
 
 
 def train_meta_label_model(

@@ -22,6 +22,7 @@ from app.ml.train import (
     sweep_lookback_values,
     train_lstm_signal_model,
     train_meta_label_model,
+    train_online_signal_model,
     train_patchtst_signal_model,
     train_signal_model_validated,
     train_signal_models_by_regime,
@@ -654,6 +655,77 @@ def train_regime(payload: TrainRegimeRequest) -> TrainRegimeResponse:
         symbols_used=len(symbols),
         n_regimes=payload.n_regimes,
         regimes=[RegimeTrainingPoint(**r.__dict__) for r in results],
+    )
+
+
+class TrainOnlineRequest(BaseModel):
+    symbols: list[str] | None = None
+    lookback: int | None = None
+    horizon: int = 5
+    threshold_pct: float = 1.0
+    labeling_method: LabelingMethod = "threshold"
+    take_profit_pct: float = 2.0
+    stop_loss_pct: float = 2.0
+    n_models: int = 10
+    window_size: int = 500
+
+
+class PrequentialWindowPointModel(BaseModel):
+    window_index: int
+    rows: int
+    accuracy: float
+    balanced_accuracy: float
+
+
+class TrainOnlineResponse(BaseModel):
+    symbols_used: int
+    rows_used: int
+    overall_accuracy: float
+    overall_balanced_accuracy: float
+    windows: list[PrequentialWindowPointModel]
+
+
+@router.post("/train-online", response_model=TrainOnlineResponse)
+def train_online(payload: TrainOnlineRequest) -> TrainOnlineResponse:
+    """Kullanıcı önerisi: kavram kayması (concept drift) ile başa çıkmak
+    için gerçek çevrimiçi (online) öğrenme — XGBoost/LSTM'in periyodik
+    toptan (batch) yeniden eğitimi yerine, `river.forest.ARFClassifier`
+    (Hoeffding ağaçlarından oluşan, kendi ADWIN kavram kayması tespitine
+    sahip bir topluluk) verinin akışından bar-bar öğrenir.
+
+    Değerlendirme "test-then-train" (prequential) protokolüyle yapılır —
+    XGBoost'un statik holdout'undan FARKLI, ama online öğrenme
+    literatüründe standart bir yöntem (bkz. `app.ml.online_model`
+    docstring'i). `windows`, modelin ZAMAN İÇİNDE nasıl adapte olduğunu
+    gösterir — erken pencerelerde düşük, sonraki pencerelerde yüksek
+    accuracy, modelin öğrendiğinin (adaptasyonun) göstergesidir."""
+    exchange = get_exchange(settings.exchange_id)
+    symbols = _resolve_symbols(exchange, payload.symbols)
+    if not symbols:
+        raise HTTPException(status_code=400, detail="Eğitim için sembol bulunamadı.")
+
+    try:
+        _model, report = train_online_signal_model(
+            exchange,
+            symbols,
+            lookback=payload.lookback,
+            horizon=payload.horizon,
+            threshold_pct=payload.threshold_pct,
+            labeling_method=payload.labeling_method,
+            take_profit_pct=payload.take_profit_pct,
+            stop_loss_pct=payload.stop_loss_pct,
+            n_models=payload.n_models,
+            window_size=payload.window_size,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    return TrainOnlineResponse(
+        symbols_used=len(symbols),
+        rows_used=report.rows_used,
+        overall_accuracy=report.overall_accuracy,
+        overall_balanced_accuracy=report.overall_balanced_accuracy,
+        windows=[PrequentialWindowPointModel(**w.__dict__) for w in report.windows],
     )
 
 
