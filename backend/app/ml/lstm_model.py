@@ -106,8 +106,11 @@ class LSTMSignalModel:
             dropout=self.dropout,
         )
 
-        X_tensor = torch.tensor(X_norm, dtype=torch.float32)
-        y_tensor = torch.tensor(y_idx, dtype=torch.long)
+        # `torch.tensor(...)` her zaman kopyalar; `torch.from_numpy` bu
+        # ölçekte (10K mum × ~20 sembol) gereksiz bir tam kopyayı (yüzlerce
+        # MB) önlemek için tercih edilir — bkz. bellek notu yukarıda.
+        X_tensor = torch.from_numpy(np.ascontiguousarray(X_norm, dtype=np.float32))
+        y_tensor = torch.from_numpy(np.ascontiguousarray(y_idx, dtype=np.int64))
         dataset = torch.utils.data.TensorDataset(X_tensor, y_tensor)
         loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
 

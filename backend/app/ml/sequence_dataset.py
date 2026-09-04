@@ -38,9 +38,20 @@ def build_sequence_dataset(
       (bkz. `app.ml.validation.split_out_of_sample`, burada numpy
       maskesiyle eşdeğer mantık uygulanır).
     """
-    all_X: list[np.ndarray] = []
-    all_y: list[float] = []
-    all_time_frac: list[float] = []
+    # Not (bellek): önceki sürüm her pencereyi ayrı bir küçük numpy dizisi
+    # olarak bir Python listesine ekliyordu (n_pencere adet nesne, her biri
+    # kendi bellek tahsisi + Python nesne başlığıyla), sonra `np.stack` bunu
+    # tek bir büyük diziye kopyalıyordu — liste hâlâ bellekteyken. 10.000
+    # mum × ~20 sembol × seq_len=20 örtüşen pencerede bu, gerçek veri
+    # boyutunun (örtüşme nedeniyle zaten ~seq_len kat şişmiş) üzerine bir
+    # kat daha (parçalanma + geçici kopya) bindiriyor ve üretim sunucusunda
+    # OOM'a yol açtı. Bunun yerine `sliding_window_view` ile sembol başına
+    # bir VIEW (kopyasız) çıkarılır; tüm semboller tek seferde
+    # `np.concatenate` ile birleştirilir (kaçınılmaz tek kopya, ama
+    # sembol/pencere başına ayrı Python nesnesi yok).
+    per_symbol_X: list[np.ndarray] = []
+    per_symbol_y: list[np.ndarray] = []
+    per_symbol_time_frac: list[np.ndarray] = []
 
     for symbol in symbols:
         try:
@@ -61,19 +72,27 @@ def build_sequence_dataset(
             feat_values = frame[FEATURE_COLUMNS].to_numpy(dtype="float32")
             label_values = frame["label"].to_numpy()
 
-            for i in range(seq_len - 1, n):
-                all_X.append(feat_values[i - seq_len + 1 : i + 1])
-                all_y.append(label_values[i])
-                all_time_frac.append(i / max(n - 1, 1))
+            windows = np.lib.stride_tricks.sliding_window_view(feat_values, seq_len, axis=0)
+            # sliding_window_view (n - seq_len + 1, n_özellik, seq_len) döner;
+            # beklenen (n_pencere, seq_len, n_özellik) şekline taşınır.
+            windows = np.moveaxis(windows, -1, 1)
+
+            per_symbol_X.append(windows)
+            per_symbol_y.append(label_values[seq_len - 1 :])
+            positions = np.arange(seq_len - 1, n, dtype="float64")
+            per_symbol_time_frac.append(positions / max(n - 1, 1))
         except Exception as exc:  # noqa: BLE001 - tek sembol hatası tüm eğitimi durdurmamalı
             logger.warning("sequence dataset: skipping %s: %s", symbol, exc)
             continue
 
-    if not all_X:
+    if not per_symbol_X:
         return (
             np.empty((0, seq_len, len(FEATURE_COLUMNS)), dtype="float32"),
             np.empty((0,)),
             np.empty((0,)),
         )
 
-    return np.stack(all_X), np.array(all_y), np.array(all_time_frac)
+    X = np.concatenate(per_symbol_X, axis=0)
+    y = np.concatenate(per_symbol_y, axis=0)
+    time_frac = np.concatenate(per_symbol_time_frac, axis=0)
+    return X, y, time_frac
