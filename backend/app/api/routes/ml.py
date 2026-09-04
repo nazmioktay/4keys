@@ -96,6 +96,11 @@ class PredictLSTMResponse(BaseModel):
     confidence: float
 
 
+class TrainMetaResponse(BaseModel):
+    rows_used: int
+    symbols_used: int
+
+
 class TrainMetaRequest(BaseModel):
     symbols: list[str] | None = None
     horizon: int = 5
@@ -258,8 +263,8 @@ def predict_lstm(symbol: str = Query(..., description="Örn: BTC/USDT:USDT")) ->
     return PredictLSTMResponse(symbol=symbol, direction=prediction.direction, confidence=prediction.confidence)
 
 
-@router.post("/train-meta", response_model=TrainResponse)
-def train_meta(payload: TrainMetaRequest) -> TrainResponse:
+@router.post("/train-meta", response_model=TrainMetaResponse)
+def train_meta(payload: TrainMetaRequest) -> TrainMetaResponse:
     """Meta-label modelini eğitir: birincil modelin sinyaline "gir/girme"
     kararı verecek ikinci bir model (bkz. app/ml/meta_label.py). Önce
     /ml/train ile birincil model eğitilmiş olmalıdır."""
@@ -287,7 +292,7 @@ def train_meta(payload: TrainMetaRequest) -> TrainResponse:
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    return TrainResponse(rows_used=rows_used, symbols_used=len(symbols))
+    return TrainMetaResponse(rows_used=rows_used, symbols_used=len(symbols))
 
 
 @router.get("/predict", response_model=PredictResponse)
