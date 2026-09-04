@@ -8,7 +8,19 @@ class Settings(BaseSettings):
     market_type: str = "future"  # "future" (USDT-M perpetuals) or "spot"
     candle_timeframe: str = "4h"
     candle_lookback: int = 200
-    screener_top_n: int = 10
+    screener_top_n: int = 5
+
+    # --- Screener ön-filtresi (hacim + fiyat tabanı) ---
+    # Önceden `scan_market` PİYASADAKİ TÜM sembolleri (yüzlerce) tek tek
+    # `fetch_ohlcv` ile taramaya çalışıyordu — bu, taramanın kendi periyodundan
+    # (screener_refresh_seconds) çok daha uzun sürmesine, hatta hiç
+    # bitmemesine yol açıyordu (bkz. APScheduler "maximum number of running
+    # instances reached" logları). Şimdi önce TEK bir toplu istekle
+    # (`Exchange.fetch_tickers`) tüm sembollerin hacmi/fiyatı alınıyor;
+    # pahalı gösterge hesaplaması yalnızca bu ön-filtreyi geçen KÜÇÜK bir
+    # alt kümede çalışıyor.
+    screener_min_price: float = 0.1  # bu fiyatın altındaki semboller elenir
+    screener_volume_top_pct: float = 20.0  # 24s işlem hacmine göre en yüksek %X (fiyat tabanını geçenler arasında)
 
     # --- ML eğitimi için ayrı zaman dilimi/geçmiş derinliği ---
     # Screener'ın canlı görüntülediği candle_timeframe/candle_lookback'ten
@@ -83,7 +95,13 @@ class Settings(BaseSettings):
 
     # --- Periyodik zamanlayıcı (Modül: Screener + motorların otomatik döngüsü) ---
     scheduler_enabled: bool = True
-    screener_refresh_seconds: int = 60
+    # 60sn'den 300sn'e çıkarıldı: hacim ön-filtresiyle (bkz. yukarıdaki
+    # screener_min_price/screener_volume_top_pct) tarama artık TÜM piyasa
+    # yerine yalnızca en yüksek hacimli ~%20'yi işliyor, ama yine de her
+    # sembol için bir ağ isteği (fetch_ohlcv) gerektirdiğinden 60sn hâlâ
+    # dar olabilir — bkz. `job_refresh_screener`'ın önceki periyottan uzun
+    # sürüp "maximum number of running instances reached" ile kilitlenmesi.
+    screener_refresh_seconds: int = 300
     engine_cycle_seconds: int = 300
     macro_refresh_seconds: int = 21600  # 6 saat — makro veriler (VIX, altın, faiz oranları vb.) günde birkaç kez yeterli
     orderbook_refresh_seconds: int = 1800  # 30 dakika — emir defterinin ANLIK görüntüsü, geçmişi yoktur (bkz. app.orderbook)

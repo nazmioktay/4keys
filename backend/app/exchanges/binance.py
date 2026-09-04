@@ -19,6 +19,14 @@ class BinanceExchange(Exchange):
 
     def __init__(self, api_key: str | None = None, api_secret: str | None = None, testnet: bool = True) -> None:
         auth = {"apiKey": api_key, "secret": api_secret} if api_key and api_secret else {}
+        # `enableRateLimit`/`timeout` açıkça verilmezse ccxt'nin varsayılanı
+        # (rate limit KAPALI, 10sn timeout) kullanılır — art arda yüzlerce
+        # sembol taranan `scan_market`'te bu, borsanın kendi limitine
+        # sessizce (istisna fırlatmadan sadece yavaşlayarak) çarpıp
+        # taramanın kendi periyodundan çok uzun sürmesine yol açabiliyordu.
+        # `enableRateLimit=True` ccxt'nin kendi trafiğini borsanın izin
+        # verdiği hıza göre otomatik aralıklandırmasını sağlar.
+        auth = {**auth, "enableRateLimit": True, "timeout": 15000}
         self._spot = ccxt.binance(auth)
         self._futures = ccxt.binance({**auth, "options": {"defaultType": "future"}})
         if testnet:
@@ -49,6 +57,31 @@ class BinanceExchange(Exchange):
             and m.get("active", True)
             and (market_type != "future" or m.get("swap"))
         ]
+
+    def fetch_tickers(self, quote_currency: str, market_type: str) -> dict[str, dict]:
+        """`client.fetch_tickers()` — TEK istekte TÜM sembollerin 24 saatlik
+        ticker'ını (son fiyat + hacim) döner. `list_symbols` + sembol başına
+        `fetch_ohlcv` döngüsünün AKSİNE (bkz. base sınıf docstring'i), bu
+        borsanın kendi toplu uç noktasını kullandığı için yüzlerce ayrı
+        istek yerine 1 istekle sonuçlanır."""
+        client = self._client(market_type)
+        tickers = client.fetch_tickers()
+        result: dict[str, dict] = {}
+        for symbol, ticker in tickers.items():
+            market = client.markets.get(symbol, {})
+            if market.get("quote") != quote_currency:
+                continue
+            if not market.get("active", True):
+                continue
+            if market_type == "future" and not market.get("swap"):
+                continue
+            last = ticker.get("last") or ticker.get("close") or 0.0
+            quote_volume = ticker.get("quoteVolume")
+            if quote_volume is None:
+                base_volume = ticker.get("baseVolume") or 0.0
+                quote_volume = base_volume * (last or 0.0)
+            result[symbol] = {"last": float(last or 0.0), "quote_volume": float(quote_volume or 0.0)}
+        return result
 
     _MAX_CANDLES_PER_CALL = 1000  # Binance futures REST API'sinin tek istekteki üst sınırı
 

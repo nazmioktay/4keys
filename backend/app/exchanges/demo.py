@@ -50,6 +50,15 @@ class DemoExchange(Exchange):
     def list_symbols(self, quote_currency: str, market_type: str) -> list[str]:
         return list(_DEMO_SYMBOLS)
 
+    def fetch_tickers(self, quote_currency: str, market_type: str) -> dict[str, dict]:
+        result: dict[str, dict] = {}
+        for symbol in _DEMO_SYMBOLS:
+            rng = np.random.default_rng(_seed_for(symbol))
+            last = float(rng.uniform(1.0, 60000.0))
+            quote_volume = float(rng.uniform(1_000_000, 500_000_000))
+            result[symbol] = {"last": last, "quote_volume": quote_volume}
+        return result
+
     def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int, since: int | None = None) -> pd.DataFrame:
         minutes = _TIMEFRAME_MINUTES.get(timeframe, 60)
         rng = np.random.default_rng(_seed_for(symbol))

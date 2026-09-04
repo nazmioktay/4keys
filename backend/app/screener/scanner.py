@@ -1,4 +1,5 @@
 import logging
+import math
 
 from app.core.config import settings
 from app.db import repository as db
@@ -12,13 +13,40 @@ from .schemas import ScreenerResult
 logger = logging.getLogger(__name__)
 
 
+def _select_candidate_symbols(exchange: Exchange) -> list[str]:
+    """Pahalı `fetch_ohlcv`+gösterge taramasına girecek ADAY sembolleri
+    ucuz bir ön-filtreyle daraltır — bkz. `Exchange.fetch_tickers`
+    docstring'i (önceden `scan_market` PİYASADAKİ TÜM sembolleri tek tek
+    tarıyordu, bu da taramanın kendi periyodundan uzun sürüp hiç
+    bitmemesine yol açabiliyordu).
+
+    1. `screener_min_price`'ın altındaki (ör. 0.1 USDT) düşük değerli
+       semboller elenir.
+    2. Kalanlar 24 saatlik işlem hacmine göre sıralanır, en yüksek
+       `screener_volume_top_pct` (varsayılan %20) tutulur.
+    """
+    tickers = exchange.fetch_tickers(settings.quote_currency, settings.market_type)
+    candidates = [
+        (symbol, data.get("quote_volume", 0.0))
+        for symbol, data in tickers.items()
+        if data.get("last", 0.0) >= settings.screener_min_price
+    ]
+    if not candidates:
+        return []
+
+    candidates.sort(key=lambda item: item[1], reverse=True)
+    keep_count = max(1, math.ceil(len(candidates) * settings.screener_volume_top_pct / 100))
+    return [symbol for symbol, _volume in candidates[:keep_count]]
+
+
 def scan_market(exchange: Exchange) -> list[ScreenerResult]:
-    """Borsadaki tüm sembolleri tarayıp her biri için yön skoru üretir.
+    """Borsadaki (hacim/fiyat ön-filtresinden geçen) sembolleri tarayıp her
+    biri için yön skoru üretir.
 
     Sonuç, çağıran tarafından skor sırasına göre Long/Short Top N'e
     bölünebilecek şekilde ham liste olarak döner.
     """
-    symbols = exchange.list_symbols(settings.quote_currency, settings.market_type)
+    symbols = _select_candidate_symbols(exchange)
     results: list[ScreenerResult] = []
 
     for symbol in symbols:
