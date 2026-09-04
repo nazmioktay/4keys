@@ -5,6 +5,7 @@ from app.portfolio.risk_manager import calculate_kelly_position_size, calculate_
 from app.portfolio.schemas import (
     KellySizeRequest,
     KellySizeResponse,
+    PnlSummary,
     PortfolioStatus,
     PositionSizeRequest,
     PositionSizeResponse,
@@ -26,6 +27,14 @@ class ResetRequest(BaseModel):
 @router.get("/status", response_model=PortfolioStatus)
 def status() -> PortfolioStatus:
     return PortfolioStatus(**get_portfolio().status())
+
+
+@router.get("/pnl", response_model=PnlSummary)
+def pnl() -> PnlSummary:
+    """Toplam + kayan pencereli (son 24s/7g/30g) PNL özeti, kapanmış
+    işlem geçmişinden (`portfolio.status().closed_history`, kademeli
+    kapanışlar dahil) hesaplanır."""
+    return get_portfolio().pnl_summary()
 
 
 @router.put("/rules", response_model=RiskRules)

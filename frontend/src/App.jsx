@@ -1,6 +1,7 @@
 import { NavLink, Route, Routes } from "react-router-dom";
 import Portfolio from "./pages/Portfolio.jsx";
 import Trade from "./pages/Trade.jsx";
+import PaperTrading from "./pages/PaperTrading.jsx";
 import Screener from "./pages/Screener.jsx";
 import Assistant from "./pages/Assistant.jsx";
 import Settings from "./pages/Settings.jsx";
@@ -8,6 +9,7 @@ import Settings from "./pages/Settings.jsx";
 const TABS = [
   { to: "/", label: "Portföy", icon: "◔", end: true },
   { to: "/trade", label: "Al-Sat", icon: "⇅" },
+  { to: "/paper-trading", label: "Paper Trading", icon: "◫" },
   { to: "/assistant", label: "AI Asistan", icon: "✦" },
   { to: "/screener", label: "Araştırıcı", icon: "▤" },
   { to: "/settings", label: "Ayarlar", icon: "⚙" },
@@ -19,6 +21,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Portfolio />} />
         <Route path="/trade" element={<Trade />} />
+        <Route path="/paper-trading" element={<PaperTrading />} />
         <Route path="/assistant" element={<Assistant />} />
         <Route path="/screener" element={<Screener />} />
         <Route path="/settings" element={<Settings />} />

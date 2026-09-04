@@ -1,6 +1,6 @@
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 KELLY_VARIANTS: dict[str, float] = {"quarter": 0.25, "half": 0.5, "full": 1.0}
@@ -33,6 +33,31 @@ class RiskRules(BaseModel):
         25.0, gt=0,
         description="Kelly formülü ne derse desin, bir işleme ayrılacak sermayenin üst güvenlik sınırı (%)",
     )
+
+    # --- Kademeli (aşamalı) alım/satım ---
+    # Bir pozisyon TEK seferde değil, birden çok "tranche" (dilim) halinde
+    # açılır/kapatılır — piyasayı tek büyük emirle hareket ettirmemek ve
+    # sinyalin bir sonraki döngüde de kalıcı olduğunu teyit etmek için.
+    entry_tranche_weights: list[float] = Field(
+        default_factory=lambda: [0.5, 0.5],
+        description="Hesaplanan tam pozisyon boyutunun her alım diliminde ne kadarının kullanılacağı (toplamı ~1.0 olmalı). Örn. [0.5, 0.5] = çeyrek Kelly ile hesaplanan tutarın yarısı ilk döngüde, yarısı sinyal bir sonraki döngüde de kalıcıysa açılır.",
+    )
+    exit_tranche_weights: list[float] = Field(
+        default_factory=lambda: [0.5, 0.5],
+        description="Kapanış sinyali geldiğinde pozisyonun ne kadarının her dilimde satılacağı (toplamı ~1.0 olmalı). Son dilim, yuvarlama artığı kalmaması için pozisyonun TAMAMINI kapatır.",
+    )
+
+    @field_validator("entry_tranche_weights", "exit_tranche_weights")
+    @classmethod
+    def _validate_tranche_weights(cls, value: list[float]) -> list[float]:
+        if not value:
+            raise ValueError("en az bir tranche ağırlığı gerekli")
+        if any(w <= 0 for w in value):
+            raise ValueError("tranche ağırlıkları pozitif olmalı")
+        total = sum(value)
+        if not (0.98 <= total <= 1.02):
+            raise ValueError(f"tranche ağırlıklarının toplamı ~1.0 olmalı (şu an {total:.3f})")
+        return value
 
 
 class PositionSizeRequest(BaseModel):
@@ -94,6 +119,24 @@ class KellySizeRequest(BaseModel):
     variant: Literal["quarter", "half", "full", "custom"] = "half"
     custom_multiplier: float | None = Field(default=None, gt=0, le=1.5, description="variant='custom' iken kullanılır")
     max_kelly_fraction_pct: float = Field(25.0, gt=0)
+
+
+class PnlWindow(BaseModel):
+    pnl_quote: float
+    trade_count: int
+    win_rate_pct: float
+
+
+class PnlSummary(BaseModel):
+    """Kayan pencereli (rolling) PNL özeti — takvim günü/haftası/ayı
+    sınırlarına göre DEĞİL, "son 24 saat / son 7 gün / son 30 gün"
+    şeklinde hesaplanır (basitlik için; zaman dilimi belirsizliğinden
+    kaynaklanan sınır hatalarını önler)."""
+
+    total: PnlWindow
+    daily: PnlWindow
+    weekly: PnlWindow
+    monthly: PnlWindow
 
 
 class KellySizeResponse(BaseModel):

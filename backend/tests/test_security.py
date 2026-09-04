@@ -71,7 +71,10 @@ def test_check_withdrawals_disabled_fails_closed_on_verification_error():
 
 def test_portfolio_manager_auto_trips_kill_switch_on_drawdown(monkeypatch):
     monkeypatch.setattr(settings, "kill_switch_daily_drawdown_pct", 10.0)
-    portfolio = PortfolioManager(starting_equity=1000, rules=RiskRules(max_symbol_exposure_pct=100, max_total_exposure_pct=100))
+    portfolio = PortfolioManager(
+        starting_equity=1000,
+        rules=RiskRules(max_symbol_exposure_pct=100, max_total_exposure_pct=100, entry_tranche_weights=[1.0]),
+    )
 
     portfolio.open("BTC/USDT", "long", entry_price=100, size_quote=1000)
     assert kill_switch.is_active() is False

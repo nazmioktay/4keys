@@ -79,6 +79,193 @@ def test_portfolio_manager_open_close_updates_equity():
     assert portfolio.equity > portfolio.starting_equity
 
 
+def test_open_only_fills_first_entry_tranche():
+    rules = RiskRules(entry_tranche_weights=[0.4, 0.6])
+    portfolio = PortfolioManager(starting_equity=1000, rules=rules)
+    portfolio.open("BTC/USDT", "long", entry_price=100, size_quote=1000)
+
+    position = portfolio.get("BTC/USDT")
+    assert position.size_quote == pytest.approx(400.0)
+    assert position.target_size_quote == pytest.approx(1000.0)
+    assert position.entry_fill_index == 1
+    assert not position.entry_fully_filled()
+
+
+def test_add_entry_tranche_fills_remaining_and_recomputes_avg_price():
+    rules = RiskRules(entry_tranche_weights=[0.5, 0.5])
+    portfolio = PortfolioManager(starting_equity=1000, rules=rules)
+    portfolio.open("BTC/USDT", "long", entry_price=100, size_quote=1000)  # 500 @ 100
+
+    portfolio.add_entry_tranche("BTC/USDT", price=110)  # +500 @ 110
+
+    position = portfolio.get("BTC/USDT")
+    assert position.size_quote == pytest.approx(1000.0)
+    assert position.entry_price == pytest.approx(105.0)  # ağırlıklı ortalama (500*100 + 500*110)/1000
+    assert position.entry_fully_filled()
+
+
+def test_add_entry_tranche_is_noop_when_already_fully_filled():
+    rules = RiskRules(entry_tranche_weights=[1.0])
+    portfolio = PortfolioManager(starting_equity=1000, rules=rules)
+    portfolio.open("BTC/USDT", "long", entry_price=100, size_quote=1000)
+
+    result = portfolio.add_entry_tranche("BTC/USDT", price=110)
+    assert result is None
+    assert portfolio.get("BTC/USDT").size_quote == pytest.approx(1000.0)
+
+
+def test_close_tranche_keeps_position_open_until_final_tranche():
+    rules = RiskRules(entry_tranche_weights=[1.0], exit_tranche_weights=[0.5, 0.5])
+    portfolio = PortfolioManager(starting_equity=1000, rules=rules)
+    portfolio.open("BTC/USDT", "long", entry_price=100, size_quote=1000)
+
+    first = portfolio.close_tranche("BTC/USDT", exit_price=110)
+    assert first["partial"] is True
+    assert first["size_quote"] == pytest.approx(500.0)
+    assert portfolio.get("BTC/USDT") is not None
+    assert portfolio.get("BTC/USDT").size_quote == pytest.approx(500.0)
+
+    second = portfolio.close_tranche("BTC/USDT", exit_price=115)
+    assert second["partial"] is False
+    assert second["size_quote"] == pytest.approx(500.0)
+    assert portfolio.get("BTC/USDT") is None  # tamamen kapandı
+
+
+def test_close_tranche_last_tranche_closes_full_remaining_size_avoiding_dust():
+    # 3 eşit olmayan dilim: yuvarlama artığı son dilimde TAMAMEN kapatılarak giderilmeli
+    rules = RiskRules(entry_tranche_weights=[1.0], exit_tranche_weights=[0.33, 0.33, 0.34])
+    portfolio = PortfolioManager(starting_equity=1000, rules=rules)
+    portfolio.open("BTC/USDT", "long", entry_price=100, size_quote=999)
+
+    portfolio.close_tranche("BTC/USDT", exit_price=100)
+    portfolio.close_tranche("BTC/USDT", exit_price=100)
+    last = portfolio.close_tranche("BTC/USDT", exit_price=100)
+
+    assert last["partial"] is False
+    assert portfolio.get("BTC/USDT") is None
+
+
+def test_close_forces_full_immediate_close_ignoring_exit_tranches():
+    rules = RiskRules(entry_tranche_weights=[1.0], exit_tranche_weights=[0.5, 0.5])
+    portfolio = PortfolioManager(starting_equity=1000, rules=rules)
+    portfolio.open("BTC/USDT", "long", entry_price=100, size_quote=1000)
+
+    record = portfolio.close("BTC/USDT", exit_price=110)
+    assert record["partial"] is False
+    assert record["size_quote"] == pytest.approx(1000.0)
+    assert portfolio.get("BTC/USDT") is None
+
+
+def test_pnl_summary_totals_match_closed_history():
+    portfolio = PortfolioManager(starting_equity=1000, rules=RiskRules(entry_tranche_weights=[1.0]))
+    portfolio.open("BTC/USDT", "long", entry_price=100, size_quote=1000)
+    portfolio.close("BTC/USDT", exit_price=110)  # +%10 -> +100 quote
+
+    summary = portfolio.pnl_summary()
+    assert summary.total.pnl_quote == pytest.approx(100.0)
+    assert summary.total.trade_count == 1
+    assert summary.daily.pnl_quote == pytest.approx(100.0)  # az önce kapandı -> son 24s içinde
+    assert summary.weekly.pnl_quote == pytest.approx(100.0)
+    assert summary.monthly.pnl_quote == pytest.approx(100.0)
+
+
+class _StaticOhlcvExchange(Exchange):
+    """`DecisionEngine._predict`'in ihtiyaç duyduğu kadar OHLCV üreten,
+    ama tahmini SABİT bir sahte modelden alan testler için minimal borsa."""
+
+    def list_symbols(self, quote_currency: str, market_type: str) -> list[str]:
+        return ["BTC/USDT"]
+
+    def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int, since=None) -> pd.DataFrame:
+        n = max(limit, 220)
+        close = np.linspace(100, 110, n)
+        return pd.DataFrame(
+            {
+                "timestamp": pd.date_range("2024-01-01", periods=n, freq="4h"),
+                "open": close,
+                "high": close + 1,
+                "low": close - 1,
+                "close": close,
+                "volume": np.full(n, 1000.0),
+            }
+        )
+
+
+class _FixedModel:
+    """Her zaman aynı tahmini döndüren sahte model — kademeli alım/satım
+    akışını gerçek bir XGBoost eğitimi olmadan, deterministik test etmek için."""
+
+    def __init__(self, direction: str, confidence: float) -> None:
+        from app.ml.model import Prediction
+
+        self._prediction = Prediction(direction=direction, confidence=confidence)
+
+    def predict(self, feature_row):
+        return self._prediction
+
+
+def test_decision_engine_fills_second_entry_tranche_on_next_cycle_when_signal_persists():
+    portfolio = PortfolioManager(
+        starting_equity=1000,
+        rules=RiskRules(entry_tranche_weights=[0.5, 0.5], max_symbol_exposure_pct=100, max_total_exposure_pct=100),
+    )
+    engine = DecisionEngine(
+        exchange=_StaticOhlcvExchange(),
+        model=_FixedModel("long", 0.9),
+        positions=PaperPositionStore(),
+        timeframe="4h",
+        lookback=220,
+        open_confidence=0.6,
+        close_confidence=0.55,
+        portfolio=portfolio,
+    )
+
+    first_actions = engine.run_cycle(["BTC/USDT"])
+    assert first_actions[0].type == "open_long"
+    position = portfolio.get("BTC/USDT")
+    assert position.entry_fill_index == 1
+    first_size = position.size_quote
+
+    second_actions = engine.run_cycle(["BTC/USDT"])  # sinyal hâlâ aynı yönde -> 2. dilim eklenmeli
+    assert second_actions[0].type == "add_entry_tranche"
+    position = portfolio.get("BTC/USDT")
+    assert position.entry_fully_filled()
+    assert position.size_quote > first_size
+
+    third_actions = engine.run_cycle(["BTC/USDT"])  # tüm dilimler dolu -> artık "hold"
+    assert third_actions[0].type == "hold"
+
+
+def test_decision_engine_closes_position_in_stages_across_cycles():
+    portfolio = PortfolioManager(
+        starting_equity=1000,
+        rules=RiskRules(
+            entry_tranche_weights=[1.0], exit_tranche_weights=[0.5, 0.5], max_symbol_exposure_pct=100, max_total_exposure_pct=100
+        ),
+    )
+    engine = DecisionEngine(
+        exchange=_StaticOhlcvExchange(),
+        model=_FixedModel("long", 0.9),
+        positions=PaperPositionStore(),
+        timeframe="4h",
+        lookback=220,
+        open_confidence=0.6,
+        close_confidence=0.55,
+        portfolio=portfolio,
+    )
+    engine.run_cycle(["BTC/USDT"])
+    assert portfolio.get("BTC/USDT").entry_fully_filled()
+
+    engine.model = _FixedModel("short", 0.9)  # ters sinyal -> kapanış tetiklenir
+    first_close = engine.run_cycle(["BTC/USDT"])
+    assert first_close[0].type == "close_partial"
+    assert portfolio.get("BTC/USDT") is not None
+
+    second_close = engine.run_cycle(["BTC/USDT"])
+    assert second_close[0].type == "close"
+    assert portfolio.get("BTC/USDT") is None
+
+
 class _TrendExchange(Exchange):
     def __init__(self) -> None:
         self._rng = np.random.default_rng(11)

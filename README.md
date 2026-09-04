@@ -355,13 +355,38 @@ docker compose up
 
 | Endpoint | Açıklama |
 |---|---|
-| `GET /portfolio/status` | Equity, açık pozisyonlar, kapanan işlemler, aktif kurallar, işlem istatistikleri |
-| `PUT /portfolio/rules` | Risk kurallarını (fixed_risk veya Kelly) günceller |
+| `GET /portfolio/status` | Equity, açık pozisyonlar (kademeli dilim durumu dahil), kapanan işlemler, aktif kurallar, işlem istatistikleri |
+| `GET /portfolio/pnl` | Kayan pencereli (son 24s/7g/30g) + toplam PNL özeti |
+| `PUT /portfolio/rules` | Risk kurallarını (fixed_risk/Kelly, kademeli alım-satım dilimleri dahil) günceller |
 | `POST /portfolio/reset` | Portföyü verilen sermaye/kurallarla sıfırdan başlatır |
 | `POST /portfolio/position-size` | Risk yüzdesi + SL mesafesinden pozisyon boyutu hesaplar (fixed_risk) |
 | `GET /portfolio/trade-stats` | Portföyün kendi geçmişinden hesaplanan kazanma oranı / ort. kazanç-kayıp |
 | `POST /portfolio/kelly-size` | Çeyrek/yarım/tam Kelly'ye göre bağımsız pozisyon boyutu hesaplar |
 | `POST /portfolio/risk-check` | Durumsuz "ne olurdu" risk kontrolü (paylaşılan portföyü etkilemez) |
+
+**Kademeli (aşamalı) alım/satım (2026-09):**
+- `RiskRules.entry_tranche_weights` (varsayılan `[0.5, 0.5]`) / `exit_tranche_weights`
+  (varsayılan `[0.5, 0.5]`) — parametrik, `PUT /portfolio/rules` ile
+  değiştirilebilir (frontend: **Paper Trading** ekranı).
+- **Kademeli alım**: `PortfolioManager.open()` hesaplanan TAM (Kelly/fixed_risk)
+  boyutun yalnızca ilk dilimini (`entry_tranche_weights[0]`) hemen açar.
+  `DecisionEngine`, sinyal AYNI yönde ve yeterince güvenli kalmaya devam
+  ederse (yani bir sonraki karar döngüsünde de teyit edilirse) sonraki
+  dilim(ler)i `add_entry_tranche` ile ekler — ortalama giriş fiyatı
+  ağırlıklı olarak yeniden hesaplanır. Bu, piyasayı tek büyük emirle
+  hareket ettirmemek VE sinyalin geçici bir gürültü olmadığını teyit
+  etmek içindir.
+- **Kademeli satış**: kapanış sinyali geldiğinde `close_tranche` yalnızca
+  ilk dilimi satar (Action tipi `close_partial`); sinyal sonraki
+  döngü(ler)de de sürerse kalan dilim(ler) kapanır (Action tipi `close`).
+  Son dilim, yuvarlama artığı kalmaması için pozisyonun TAMAMINI kapatır.
+  `PortfolioManager.close()` (tek seferde tam kapatma) geriye dönük
+  uyumluluk ve acil durumlar için hâlâ mevcuttur.
+- `GET /portfolio/pnl`: toplam + son 24 saat/7 gün/30 gün (takvim
+  sınırı değil, kayan pencere) PNL ve işlem sayısı/kazanma oranı.
+- Frontend: `frontend/src/pages/PaperTrading.jsx` — PNL kartları, açık
+  pozisyonların dilim durumu, kademeli dilimler dahil kapanan işlem
+  geçmişi, Kelly çeşidi + dilim ağırlıklarını düzenleyen parametrik form.
 
 ### Modül 6 — Binance & Denizbank API Hazırlığı ✅
 **Binance canlı işlem** (`app/exchanges/binance.py`, `app/trading/`):

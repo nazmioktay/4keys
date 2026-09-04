@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class Action:
     symbol: str
-    type: str  # "open_long" | "open_short" | "close" | "hold" | "blocked"
+    type: str  # "open_long" | "open_short" | "add_entry_tranche" | "close" | "close_partial" | "hold" | "blocked"
     reason: str
     price: float
     confidence: float
@@ -119,6 +119,21 @@ class DecisionEngine:
         if prediction.confidence >= self.close_confidence and (opposing or prediction.direction == "neutral"):
             return Action(symbol, "close", "model kapanış/ters sinyali", price, prediction.confidence)
 
+        # Kademeli alım: pozisyon hâlâ AYNI yönde ve yeterince güvenli
+        # sinyal veriyorsa (yani sinyal bir sonraki döngüde de kalıcıysa)
+        # ve tüm alım dilimleri henüz dolmadıysa, bir sonraki dilim eklenir
+        # (bkz. `PortfolioManager.add_entry_tranche`). Yalnızca `portfolio`
+        # katmanı varken anlamlıdır — basit `PaperPositionStore` dilim
+        # takibi desteklemez.
+        if (
+            self.portfolio is not None
+            and hasattr(position, "entry_fully_filled")
+            and not position.entry_fully_filled()
+            and prediction.direction == position.direction
+            and prediction.confidence >= self.open_confidence
+        ):
+            return Action(symbol, "add_entry_tranche", "kademeli alım: sonraki dilim", price, prediction.confidence)
+
         return Action(symbol, "hold", "pozisyon açık, sinyal değişmedi", price, prediction.confidence)
 
     def _open(self, symbol: str, direction: str, price: float) -> Action | None:
@@ -149,9 +164,23 @@ class DecisionEngine:
         if action.type == "open_short":
             blocked = self._open(action.symbol, "short", action.price)
             return blocked or action
+        if action.type == "add_entry_tranche":
+            if self.portfolio is not None:
+                self.portfolio.add_entry_tranche(action.symbol, action.price)
+            return action
         if action.type == "close":
             if self.portfolio is not None:
-                self.portfolio.close(action.symbol, action.price)
+                record = self.portfolio.close_tranche(action.symbol, action.price)
+                if record and record.get("partial"):
+                    remaining = self.portfolio.get(action.symbol)
+                    total_tranches = len(remaining.exit_tranche_weights) if remaining else record["tranche"]
+                    return Action(
+                        action.symbol,
+                        "close_partial",
+                        f"{action.reason} (dilim {record['tranche']}/{total_tranches})",
+                        action.price,
+                        action.confidence,
+                    )
             else:
                 self.positions.close(action.symbol, action.price)
         return action
