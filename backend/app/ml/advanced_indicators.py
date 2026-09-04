@@ -354,3 +354,35 @@ def dynamic_support_resistance(
         },
         index=ohlcv.index,
     )
+
+
+def rolling_hurst_exponent(close: pd.Series, window: int = 100) -> pd.Series:
+    """Kayan pencereli Hurst üsteli (H) — bir fiyat serisinin "hafızası"nı
+    (trend-devamlılığı mı, ortalamaya-dönüş mü, yoksa rastgele yürüyüş mü
+    olduğunu) ölçen bir fraktal analiz göstergesi:
+
+    - H ≈ 0.5: rastgele yürüyüş (öngörülemez, "verimli piyasa")
+    - H > 0.5: trend-devamlılığı (momentum kalıcı olma eğiliminde)
+    - H < 0.5: ortalamaya-dönüş (aşırı hareketler tersine dönme eğiliminde)
+
+    Basitleştirilmiş varyans-ölçekleme yöntemiyle (fiyat farklarının
+    farklı gecikmelerdeki (lag) standart sapmasının log-log eğimi, ≈2H)
+    tahmin edilir — tam R/S analizi değildir ama pratikte yaygın kullanılan,
+    ucuz bir yaklaşımdır.
+
+    Not: Fraktal boyut (D) klasik olarak D = 2 - H ilişkisiyle Hurst'ten
+    DOĞRUDAN türetilir — yani ayrı bir "fraktal boyut" özelliği eklemek
+    bu Hurst değerinin birebir (ters yönlü) bir kopyası olur, modele YENİ
+    bilgi katmaz. Bu yüzden burada yalnızca Hurst hesaplanıyor; fraktal
+    boyut isteyen bir tüketici `2 - hurst` ile kendi türetebilir.
+    """
+    log_close = np.log(close.clip(lower=1e-9))
+    lags = np.arange(2, 20)
+
+    def _hurst(x: np.ndarray) -> float:
+        taus = np.array([np.std(x[lag:] - x[:-lag]) for lag in lags])
+        taus = np.where(taus <= 0, 1e-8, taus)
+        slope = np.polyfit(np.log(lags), np.log(taus), 1)[0]
+        return float(np.clip(slope * 2.0, 0.0, 1.0))
+
+    return log_close.rolling(window).apply(_hurst, raw=True)

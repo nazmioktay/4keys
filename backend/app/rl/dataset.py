@@ -13,6 +13,7 @@ from app.exchanges.base import Exchange
 from app.ml.features import ALL_FEATURE_COLUMNS, FEATURE_COLUMNS, build_features
 from app.ml.macro_features import load_macro_history, merge_macro_features
 from app.ml.orderbook_features import load_orderbook_history, merge_orderbook_features
+from app.ml.orderflow_features import merge_taker_flow_features
 
 
 def build_episode_data(
@@ -27,15 +28,16 @@ def build_episode_data(
     Döner: (X: şekil (n, len(ALL_FEATURE_COLUMNS)), close: şekil (n,))
 
     Yalnızca teknik özelliklerin (`FEATURE_COLUMNS`) tam dolu olduğu
-    satırlar tutulur (warm-up barları elenir); makro/order-book
-    özellikleri eksikse (henüz yeterli geçmiş birikmediyse) 0.0 (nötr)
-    ile doldurulur — XGBoost'un aksine RL ajanının kendi ağı NaN kabul
-    etmez.
+    satırlar tutulur (warm-up barları elenir); makro/order-book/order-flow
+    özellikleri eksikse (henüz yeterli geçmiş birikmediyse ya da borsa
+    desteklemiyorsa) 0.0 (nötr) ile doldurulur — XGBoost'un aksine RL
+    ajanının kendi ağı NaN kabul etmez.
     """
     ohlcv = exchange.fetch_ohlcv(symbol, timeframe, lookback)
     features = build_features(ohlcv)
     features = merge_macro_features(features, load_macro_history())
     features = merge_orderbook_features(features, load_orderbook_history(symbol))
+    features = merge_taker_flow_features(features, ohlcv, exchange, symbol, timeframe)
 
     features = features.dropna(subset=FEATURE_COLUMNS).reset_index(drop=True)
     features = features.fillna(0.0)  # kalan NaN'lar yalnızca makro/order-book kolonlarında olabilir

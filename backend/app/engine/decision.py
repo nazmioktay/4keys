@@ -12,6 +12,7 @@ from app.monitoring.metrics import record_ml_prediction
 from app.ml.meta_label import MetaLabelModel
 from app.ml.model import Prediction, SignalModel
 from app.ml.orderbook_features import latest_orderbook_feature_row
+from app.ml.orderflow_features import latest_taker_buy_ratio_norm
 from app.ml.sequence_dataset import latest_sequence_window
 from app.portfolio.manager import PortfolioManager
 from app.security import kill_switch
@@ -120,10 +121,18 @@ class DecisionEngine:
             feature_row[col] = value
         for col, value in latest_orderbook_feature_row(symbol).items():
             feature_row[col] = value
+        feature_row["taker_buy_ratio_norm"] = latest_taker_buy_ratio_norm(self.exchange, symbol, self.timeframe)
         prediction = self.model.predict(feature_row)
 
         if self.lstm_model is not None:
-            window = latest_sequence_window(ohlcv, symbol, self.lstm_model.seq_len, self.lstm_model.feature_columns)
+            window = latest_sequence_window(
+                ohlcv,
+                symbol,
+                self.lstm_model.seq_len,
+                self.lstm_model.feature_columns,
+                exchange=self.exchange,
+                timeframe=self.timeframe,
+            )
             lstm_prediction = self.lstm_model.predict(window) if window is not None else None
             prediction = self._combine_predictions(prediction, lstm_prediction)
 

@@ -16,11 +16,13 @@ from .advanced_indicators import (
     nadaraya_watson_envelope,
     on_balance_volume,
     pmax,
+    rolling_hurst_exponent,
     rolling_vwap,
     stoch_rsi_log,
     supertrend,
     wavetrend,
 )
+from .orderflow_features import TAKER_FLOW_FEATURE_COLUMNS
 
 FEATURE_COLUMNS = [
     "rsi_norm",
@@ -68,6 +70,9 @@ FEATURE_COLUMNS = [
     "fib_retracement_position",
     # --- Ham hacim büyüklüğü (oran değil, hacmin kendisinin anormalliği) ---
     "volume_zscore",
+    # --- Fraktal analiz: piyasanın "hafızası" (trend-devamlılığı mı,
+    # ortalamaya-dönüş mü) — bkz. rolling_hurst_exponent docstring'i ---
+    "hurst_exponent",
 ]
 
 # Makro/piyasa bağlamı özellikleri (app.macro.service ile toplanan
@@ -99,8 +104,14 @@ ORDERBOOK_FEATURE_COLUMNS = [
     "orderbook_depth_norm",
 ]
 
-# Modelin gerçekten gördüğü tüm girdi kolonları (teknik + makro + order book).
-ALL_FEATURE_COLUMNS = FEATURE_COLUMNS + MACRO_FEATURE_COLUMNS + ORDERBOOK_FEATURE_COLUMNS
+# Mum bazlı agresif alım/satım akışı (taker buy ratio) — bkz.
+# `app.ml.orderflow_features`. ORDERBOOK_FEATURE_COLUMNS'un (anlık emir
+# defteri görüntüsü, geçmişi yok) aksine bu TAM GEÇMİŞE sahiptir, ama
+# yine de opsiyonel/NaN-toleranslı tutulur çünkü her borsa adapter'ı
+# desteklemez.
+
+# Modelin gerçekten gördüğü tüm girdi kolonları (teknik + makro + order book + order flow).
+ALL_FEATURE_COLUMNS = FEATURE_COLUMNS + MACRO_FEATURE_COLUMNS + ORDERBOOK_FEATURE_COLUMNS + TAKER_FLOW_FEATURE_COLUMNS
 
 
 def build_features(ohlcv: pd.DataFrame) -> pd.DataFrame:
@@ -228,6 +239,9 @@ def build_features(ohlcv: pd.DataFrame) -> pd.DataFrame:
 
     # --- Fibonacci Geri Çekilme ---
     features["fib_retracement_position"] = fibonacci_retracement_position(ohlcv)
+
+    # --- Fraktal analiz (Hurst üsteli) — bkz. rolling_hurst_exponent ---
+    features["hurst_exponent"] = rolling_hurst_exponent(ohlcv["close"]).fillna(0.5)
 
     features["close"] = ind["close"]
     # int64 (HER ZAMAN nanosaniye epoch, çözünürlükten bağımsız) olarak

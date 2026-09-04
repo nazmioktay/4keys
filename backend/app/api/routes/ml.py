@@ -12,6 +12,7 @@ from app.ml.meta_label import DEFAULT_META_MODEL_PATH, MetaLabelModel
 from app.ml.lstm_model import DEFAULT_LSTM_MODEL_PATH, LSTMSignalModel
 from app.ml.macro_features import latest_macro_feature_row
 from app.ml.orderbook_features import latest_orderbook_feature_row
+from app.ml.orderflow_features import latest_taker_buy_ratio_norm
 from app.ml.model import DEFAULT_MODEL_PATH, Algorithm, SignalModel
 from app.ml.patchtst_model import DEFAULT_PATCHTST_MODEL_PATH, PatchTSTSignalModel
 from app.ml.sequence_dataset import build_sequence_dataset
@@ -595,6 +596,7 @@ def predict(symbol: str = Query(..., description="Örn: BTC/USDT:USDT")) -> Pred
         feature_row[col] = value
     for col, value in latest_orderbook_feature_row(symbol).items():
         feature_row[col] = value
+    feature_row["taker_buy_ratio_norm"] = latest_taker_buy_ratio_norm(exchange, symbol, settings.ml_train_timeframe)
 
     model = SignalModel.load_from()
     prediction = model.predict(feature_row)

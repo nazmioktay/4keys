@@ -119,6 +119,9 @@ class FeatureSnapshot(Base):
     fib_retracement_position: Mapped[float | None] = mapped_column(Float, nullable=True)
     volume_zscore: Mapped[float | None] = mapped_column(Float, nullable=True)
 
+    # --- Fraktal analiz (3. tur) ---
+    hurst_exponent: Mapped[float | None] = mapped_column(Float, nullable=True)
+
 
 class MacroSnapshot(Base):
     """Ücretsiz makro/piyasa bağlamı verilerinin periyodik anlık görüntüsü

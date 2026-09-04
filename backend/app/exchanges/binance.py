@@ -87,6 +87,78 @@ class BinanceExchange(Exchange):
         df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
         return df
 
+    def fetch_taker_flow(self, symbol: str, timeframe: str, limit: int, since: int | None = None) -> pd.DataFrame:
+        """Binance'in HAM kline uç noktasından (ccxt'nin `fetch_ohlcv` ile
+        normalize ettiği 6 sütunun ÖTESİNDE) "taker buy base asset volume"
+        alanını çeker — bir mumdaki toplam hacmin ne kadarının AGRESİF
+        (piyasa emriyle, en iyi teklif/talep fiyatını vuran) alıcılardan
+        geldiğini gösterir.
+
+        Bu, `fetch_order_book_metrics`teki anlık emir defteri
+        dengesizliğinden (statik, yalnızca periyodik anlık görüntü olarak
+        toplanabilen, geçmişi olmayan) FARKLI ve TAMAMLAYICI bir mikro
+        yapı sinyalidir: mum bazlı olduğu için TAM GEÇMİŞE sahiptir ve
+        `ml_train_lookback` derinliğinde geriye dönük backfill edilebilir
+        (bkz. `app.ml.features.taker_flow_features`).
+
+        Döner: `timestamp`, `volume` (toplam), `taker_buy_base_volume`
+        kolonlarıyla bir DataFrame — oran (`taker_buy_ratio`) çağıran
+        tarafından hesaplanır.
+        """
+        client = self._client("future")
+        client.load_markets()
+        market_id = client.market(symbol)["id"]
+
+        def _fetch_page(page_limit: int, page_since: int | None) -> list[list]:
+            params: dict = {"symbol": market_id, "interval": timeframe, "limit": page_limit}
+            if page_since is not None:
+                params["startTime"] = page_since
+            return client.fapiPublicGetKlines(params)
+
+        if limit <= self._MAX_CANDLES_PER_CALL:
+            raw = _fetch_page(limit, since)
+            return self._taker_flow_frame(raw)
+
+        timeframe_ms = client.parse_timeframe(timeframe) * 1000
+        end_ms = client.milliseconds()
+        start_ms = since if since is not None else end_ms - limit * timeframe_ms
+
+        all_rows: list[list] = []
+        cursor = start_ms
+        while len(all_rows) < limit and cursor < end_ms:
+            batch = _fetch_page(self._MAX_CANDLES_PER_CALL, cursor)
+            if not batch:
+                break
+            all_rows.extend(batch)
+            last_ts = int(batch[-1][0])
+            if last_ts <= cursor:  # ilerleme yoksa sonsuz döngüyü önle
+                break
+            cursor = last_ts + timeframe_ms
+
+        return self._taker_flow_frame(all_rows[-limit:])
+
+    @staticmethod
+    def _taker_flow_frame(raw: list[list]) -> pd.DataFrame:
+        columns = [
+            "timestamp",
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+            "close_time",
+            "quote_volume",
+            "trades",
+            "taker_buy_base_volume",
+            "taker_buy_quote_volume",
+            "ignore",
+        ]
+        df = pd.DataFrame(raw, columns=columns)
+        df["timestamp"] = pd.to_datetime(df["timestamp"].astype("int64"), unit="ms")
+        df["volume"] = df["volume"].astype(float)
+        df["taker_buy_base_volume"] = df["taker_buy_base_volume"].astype(float)
+        return df[["timestamp", "volume", "taker_buy_base_volume"]]
+
     def fetch_funding_rate(self, symbol: str) -> float | None:
         """Şu anki (bir sonraki ödemede uygulanacak) funding rate'i döner
         (ör. 0.0001 = %0.01). Kimlik doğrulama gerektirmez, herkese açık

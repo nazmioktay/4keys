@@ -8,6 +8,7 @@ from .dataset import LabelingMethod, _compute_labels, _persist_feature_snapshots
 from .features import ALL_FEATURE_COLUMNS, FEATURE_COLUMNS, build_features
 from .macro_features import load_macro_history, merge_macro_features
 from .orderbook_features import load_orderbook_history, merge_orderbook_features
+from .orderflow_features import merge_taker_flow_features
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +87,7 @@ def build_sequence_dataset(
             _persist_feature_snapshots(symbol, timeframe, features)
             features = merge_macro_features(features, macro_history)
             features = merge_orderbook_features(features, load_orderbook_history(symbol))
+            features = merge_taker_flow_features(features, ohlcv, exchange, symbol, timeframe)
             labels = _compute_labels(ohlcv, labeling_method, horizon, threshold_pct, take_profit_pct, stop_loss_pct)
             frame = features.copy()
             frame["label"] = labels
@@ -129,6 +131,8 @@ def latest_sequence_window(
     symbol: str,
     seq_len: int,
     feature_columns: list[str] | None = None,
+    exchange=None,
+    timeframe: str | None = None,
 ) -> np.ndarray | None:
     """CANLI tahmin için: `ohlcv` (borsadan zaten çekilmiş — burada YENİDEN
     borsa çağrısı yapılmaz) üzerinden en son `seq_len` barın özellik
@@ -137,9 +141,11 @@ def latest_sequence_window(
 
     `app.engine.decision.DecisionEngine`'in XGBoost+LSTM ensemble'ı için
     eklendi — `build_sequence_dataset` ile aynı özellik hazırlama mantığını
-    (makro/order-book birleştirme, `fillna(0.0)`) paylaşır ama tek bir
-    sembol için tek bir pencere döner ve mevcut `ohlcv` verisini yeniden
-    kullanır (ekstra ağ çağrısı yok).
+    (makro/order-book/order-flow birleştirme, `fillna(0.0)`) paylaşır ama
+    tek bir sembol için tek bir pencere döner ve mevcut `ohlcv` verisini
+    yeniden kullanır (ekstra ağ çağrısı yok) — `exchange`/`timeframe` yalnızca
+    order-flow (`merge_taker_flow_features`, kendi ayrı ağ çağrısını yapar)
+    için gerekli; verilmezse order-flow kolonu nötr (0.0) kalır.
 
     Yeterli veri yoksa (ör. `len(ohlcv) < seq_len`) `None` döner.
     """
@@ -149,6 +155,8 @@ def latest_sequence_window(
     features = build_features(ohlcv)
     features = merge_macro_features(features, load_macro_history())
     features = merge_orderbook_features(features, load_orderbook_history(symbol))
+    if exchange is not None and timeframe is not None:
+        features = merge_taker_flow_features(features, ohlcv, exchange, symbol, timeframe)
     frame = features.dropna(subset=dense_columns).reset_index(drop=True)
 
     if len(frame) < seq_len:
