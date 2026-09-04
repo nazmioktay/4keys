@@ -851,6 +851,9 @@ da scraping riskini kabul etmek gerekecek; kullanıcıyla ayrıca karar verilece
 - [ ] BTC likidasyon heatmap'i + BTC ETF akışları — ücretsiz/güvenilir kaynak yok, Faz 2'ye ertelendi
 - [ ] Çoklu zaman dilimi mimarisi (4h karar / 1D yön / 1h destek)
 - [~] RL hazırlığı (ortam + veri pipeline'ı + rastgele referans) — gerçek ajan (PPO/DQN) henüz eğitilmedi
+- [x] RL yönü netleştirildi: doğrudan alım-satım sinyali üretmek yerine (ödül tasarımının zorluğu nedeniyle riskli) daha odaklı kullanımlar değerlendirildi (optimal execution, model-tabanlı RL, hiyerarşik RL). Optimal execution (emri parçalara bölerek piyasa etkisini azaltma) seçildi ama BİLİNÇLİ OLARAK klasik haliyle uygulanmadı: order-book derinliği verimiz yok ve işlem boyutlarımız (çeyrek Kelly) BTC/USDT likiditesine göre ihmal edilebilir — piyasa etkisi modeli olmadan "bölmek daha iyi" sonucu yapay/yanıltıcı olurdu
+- [x] Bunun yerine `app/rl/execution_timing.py`: Hurst üsteline dayalı, ölçülebilir bir hipotez test ediliyor — sinyal anında H<0.5 (ortalamaya-dönüş) iken sabit bir gecikmeyle (look-ahead yanlılığından kaçınmak için veriye göre optimize edilmez) yürütmek, H>0.5 (trend-devamlılığı) durumuna göre ortalama olarak daha ucuz mu? `GET /rl/hurst-execution-timing` — canlı bir ajan/strateji DEĞİL, tarihsel bir gözlem/hipotez testi
+- [ ] Model-tabanlı RL (piyasa simülatörü öğrenip onda eğitme) ve hiyerarşik RL (portföy dağılımı + varlık-bazlı zamanlama) — kullanıcı önerdi, kapsamları (ayrı bir simülatör bileşeni; çoklu-varlık portföy optimizasyonu) şu anki tek-sembol (BTC-only) odağın ötesinde, backlog'da
 - [x] Prometheus + Grafana izlenebilirlik (hazır dashboard, otomatik provizyon)
 - [x] Backtest Monte Carlo bootstrap (işlem sırası/örneklemesinin "şans" payını ölçer)
 - [x] Confidence-weighted pozisyon boyutlandırma (tahminin güvenine göre ek ölçekleme)

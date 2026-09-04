@@ -5,6 +5,7 @@ from app.core.config import settings
 from app.exchanges import get_exchange
 from app.rl.dataset import build_episode_data
 from app.rl.environment import TradingEnv
+from app.rl.execution_timing import analyze_hurst_execution_timing
 from app.rl.train import evaluate_random_policy
 
 router = APIRouter(prefix="/rl", tags=["rl"])
@@ -47,4 +48,48 @@ def random_baseline(
         mean_total_reward=evaluation.mean_total_reward,
         median_total_reward=evaluation.median_total_reward,
         std_total_reward=evaluation.std_total_reward,
+    )
+
+
+class HurstBucketPoint(BaseModel):
+    label: str
+    hurst_range: str
+    samples: int
+    mean_delayed_slippage_pct: float
+
+
+class HurstExecutionTimingResponse(BaseModel):
+    symbol: str
+    delay_bars: int
+    total_samples: int
+    buckets: list[HurstBucketPoint]
+
+
+@router.get("/hurst-execution-timing", response_model=HurstExecutionTimingResponse)
+def hurst_execution_timing(
+    symbol: str = Query(..., description="Örn: BTC/USDT:USDT"),
+    delay_bars: int = Query(3, ge=1, le=20, description="Sabit gecikme (mum sayısı) — look-ahead yanlılığından kaçınmak için veriye göre optimize edilmez"),
+) -> HurstExecutionTimingResponse:
+    """"Optimal execution" (emri parçalara bölerek piyasa etkisini azaltma)
+    bizim verimizle (order-book derinliği yok) ve ölçeğimizle (çeyrek
+    Kelly boyutları, BTC/USDT likiditesine göre ihmal edilebilir) anlamlı
+    bir sonuç veremez — piyasa etkisi modeli olmadan "bölmek daha iyi"
+    sonucu yapay olurdu.
+
+    Bunun yerine test edilen hipotez: sinyal anındaki Hurst üsteli (H)
+    DÜŞÜKSE (ortalamaya-dönüş rejimi), BUY için hemen yürütmek yerine
+    `delay_bars` mum GECİKTİRMEK ortalama olarak daha iyi (daha ucuz) bir
+    fiyat verir mi? Bkz. `app.rl.execution_timing` docstring'i — metodoloji
+    ve look-ahead yanlılığından nasıl kaçınıldığı için."""
+    exchange = get_exchange(settings.exchange_id)
+    report = analyze_hurst_execution_timing(
+        exchange, symbol, settings.ml_train_timeframe, settings.ml_train_lookback, delay_bars=delay_bars
+    )
+    if report.total_samples == 0:
+        raise HTTPException(status_code=422, detail="Yeterli veri yok.")
+    return HurstExecutionTimingResponse(
+        symbol=report.symbol,
+        delay_bars=report.delay_bars,
+        total_samples=report.total_samples,
+        buckets=[HurstBucketPoint(**b.__dict__) for b in report.buckets],
     )
