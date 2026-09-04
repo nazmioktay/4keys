@@ -1,5 +1,6 @@
 from app.core.config import settings
 from app.exchanges import get_exchange
+from app.ml.lstm_model import DEFAULT_LSTM_MODEL_PATH, LSTMSignalModel
 from app.ml.meta_label import DEFAULT_META_MODEL_PATH, MetaLabelModel
 from app.ml.model import DEFAULT_MODEL_PATH, SignalModel
 from app.portfolio.shared import get_portfolio
@@ -36,6 +37,13 @@ def run_cycle_once() -> list[Action]:
     exchange = get_exchange(settings.exchange_id)
     model = SignalModel.load_from()
     meta_model = MetaLabelModel.load_from() if DEFAULT_META_MODEL_PATH.exists() else None
+    # Opt-in: LSTM'in canlı karar motoruna (ensemble olarak) katılması,
+    # kullanıcının açıkça `ensemble_lstm_enabled=True` yapmasını gerektirir
+    # — LSTM kalitesi (bkz. README "Faz B" notu) sembol/zaman dilimine göre
+    # değişebilir, varsayılan olarak yalnızca XGBoost karar verir.
+    lstm_model = (
+        LSTMSignalModel.load_from() if settings.ensemble_lstm_enabled and DEFAULT_LSTM_MODEL_PATH.exists() else None
+    )
 
     results = get_scan_results()
     picks = top_long(results, settings.screener_top_n) + top_short(results, settings.screener_top_n)
@@ -55,5 +63,6 @@ def run_cycle_once() -> list[Action]:
         lookback=settings.ml_train_lookback,
         portfolio=get_portfolio(),
         meta_model=meta_model,
+        lstm_model=lstm_model,
     )
     return engine.run_cycle(symbols)

@@ -1,6 +1,7 @@
 import logging
 
 import numpy as np
+import pandas as pd
 from app.exchanges.base import Exchange
 
 from .dataset import LabelingMethod, _compute_labels, _persist_feature_snapshots
@@ -121,3 +122,37 @@ def build_sequence_dataset(
     y = np.concatenate(per_symbol_y, axis=0)
     time_frac = np.concatenate(per_symbol_time_frac, axis=0)
     return X, y, time_frac
+
+
+def latest_sequence_window(
+    ohlcv: pd.DataFrame,
+    symbol: str,
+    seq_len: int,
+    feature_columns: list[str] | None = None,
+) -> np.ndarray | None:
+    """CANLI tahmin için: `ohlcv` (borsadan zaten çekilmiş — burada YENİDEN
+    borsa çağrısı yapılmaz) üzerinden en son `seq_len` barın özellik
+    penceresini kurar, `LSTMSignalModel.predict`/`PatchTSTSignalModel.predict`
+    ile doğrudan uyumlu şekilde.
+
+    `app.engine.decision.DecisionEngine`'in XGBoost+LSTM ensemble'ı için
+    eklendi — `build_sequence_dataset` ile aynı özellik hazırlama mantığını
+    (makro/order-book birleştirme, `fillna(0.0)`) paylaşır ama tek bir
+    sembol için tek bir pencere döner ve mevcut `ohlcv` verisini yeniden
+    kullanır (ekstra ağ çağrısı yok).
+
+    Yeterli veri yoksa (ör. `len(ohlcv) < seq_len`) `None` döner.
+    """
+    columns = feature_columns or ALL_FEATURE_COLUMNS
+    dense_columns = [c for c in columns if c in FEATURE_COLUMNS]
+
+    features = build_features(ohlcv)
+    features = merge_macro_features(features, load_macro_history())
+    features = merge_orderbook_features(features, load_orderbook_history(symbol))
+    frame = features.dropna(subset=dense_columns).reset_index(drop=True)
+
+    if len(frame) < seq_len:
+        return None
+
+    values = frame[columns].fillna(0.0).to_numpy(dtype="float32")
+    return values[-seq_len:]

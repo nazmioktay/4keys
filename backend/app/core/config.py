@@ -33,6 +33,13 @@ class Settings(BaseSettings):
     ml_min_correlation_with_primary: float = 0.4
     ml_min_quote_volume_24h: float = 5_000_000.0
 
+    # --- XGBoost + LSTM ensemble (opsiyonel, opt-in) ---
+    # LSTM'in BTC-only sınamalarda (bkz. README "Faz B" notu) rastgele
+    # seviyenin belirgin üzerine çıktığı doğrulandıktan sonra eklendi;
+    # yine de LSTM kalitesi henüz her sembol/zaman diliminde ayrı ayrı
+    # doğrulanmadığından varsayılan KAPALI — kullanıcı açıkça açmalı.
+    ensemble_lstm_enabled: bool = False
+
     # --- Feature snapshot biriktirme (LSTM/RL için ileride kullanılacak
     # zaman serisi veri seti) --- Virgülle ayrılmış sembol listesi; her
     # tarama döngüsünde bu sembollerin ML özellik vektörü (bkz.

@@ -6,11 +6,13 @@ import pandas as pd
 from app.db import repository as db
 from app.exchanges.base import Exchange
 from app.ml.features import latest_feature_vector
+from app.ml.lstm_model import LSTMSignalModel
 from app.ml.macro_features import latest_macro_feature_row
 from app.monitoring.metrics import record_ml_prediction
 from app.ml.meta_label import MetaLabelModel
 from app.ml.model import Prediction, SignalModel
 from app.ml.orderbook_features import latest_orderbook_feature_row
+from app.ml.sequence_dataset import latest_sequence_window
 from app.portfolio.manager import PortfolioManager
 from app.security import kill_switch
 
@@ -44,10 +46,21 @@ class DecisionEngine:
     `PaperPositionStore` davranışına geri düşer (geriye dönük uyumluluk).
 
     `meta_model` verilirse (opsiyonel, bkz. `app.ml.meta_label`), birincil
-    modelin açılış sinyali ham haliyle uygulanmaz: meta model bu sinyale
-    "güvenilir mi" kararını verir; güvenilmezse işlem açılmaz, "hold"a
-    düşülür. Bu, sabit ağırlıklı bir ensemble yerine ikinci bir modelin
-    filtre görevi görmesini sağlar (Kripto Bot Rehberi Bölüm 2.5).
+    (XGBoost, veya XGBoost+LSTM ensemble'ı) sinyali ham haliyle
+    uygulanmaz: meta model bu sinyale "güvenilir mi" kararını verir;
+    güvenilmezse işlem açılmaz, "hold"a düşülür.
+
+    `lstm_model` verilirse (opsiyonel, bkz. `app.ml.lstm_model`), XGBoost'un
+    tahmini TEK BAŞINA kullanılmaz — basit, kural tabanlı bir ensemble
+    (`_combine_predictions`) ile LSTM'in tahminiyle birleştirilir: ikisi
+    AYNI yönü işaret ediyorsa güven artırılır (iki bağımsız modelin
+    mutabakatı); biri nötr diğeri yönlüyse yönlü olan indirimli güvenle
+    kullanılır; ZIT yönleri işaret ediyorlarsa (biri long biri short)
+    belirsizlik nedeniyle nötre düşülür. Bu, ağırlıklı oy birliği veya
+    RL tabanlı bir meta-ensemble'ın YERİNE geçmez (henüz yok, bkz. README
+    roadmap) — LSTM'in artık rastgele seviyenin belirgin üzerinde
+    (bkz. BTC-only etiketleme taraması) olduğu doğrulandıktan sonra
+    eklenen ilk, en basit birleştirme kuralıdır.
     """
 
     def __init__(
@@ -62,6 +75,7 @@ class DecisionEngine:
         portfolio: PortfolioManager | None = None,
         assumed_stop_loss_pct: float = 3.0,
         meta_model: MetaLabelModel | None = None,
+        lstm_model: LSTMSignalModel | None = None,
     ) -> None:
         self.exchange = exchange
         self.model = model
@@ -73,6 +87,24 @@ class DecisionEngine:
         self.portfolio = portfolio
         self.assumed_stop_loss_pct = assumed_stop_loss_pct
         self.meta_model = meta_model
+        self.lstm_model = lstm_model
+
+    @staticmethod
+    def _combine_predictions(xgb: Prediction, lstm: Prediction | None) -> Prediction:
+        """XGBoost + LSTM için basit, kural tabanlı ensemble — bkz. sınıf
+        docstring'i. `lstm=None` (model yok veya bu sembol için yeterli
+        sekans verisi yoksa) XGBoost'un tahmini olduğu gibi döner."""
+        if lstm is None:
+            return xgb
+        if xgb.direction == lstm.direction:
+            # İki bağımsız model AYNI yönde mutabık -> güveni artır (üst sınır 1.0).
+            return Prediction(direction=xgb.direction, confidence=min(1.0, (xgb.confidence + lstm.confidence) / 2 * 1.1))
+        if xgb.direction == "neutral":
+            return Prediction(direction=lstm.direction, confidence=lstm.confidence * 0.7)
+        if lstm.direction == "neutral":
+            return Prediction(direction=xgb.direction, confidence=xgb.confidence * 0.7)
+        # İkisi de yönlü ama ZIT (biri long biri short) -> belirsizlik, işlem açma.
+        return Prediction(direction="neutral", confidence=min(xgb.confidence, lstm.confidence))
 
     def _predict(self, symbol: str) -> tuple[Prediction, float, pd.Series] | None:
         ohlcv = self.exchange.fetch_ohlcv(symbol, self.timeframe, self.lookback)
@@ -89,6 +121,12 @@ class DecisionEngine:
         for col, value in latest_orderbook_feature_row(symbol).items():
             feature_row[col] = value
         prediction = self.model.predict(feature_row)
+
+        if self.lstm_model is not None:
+            window = latest_sequence_window(ohlcv, symbol, self.lstm_model.seq_len, self.lstm_model.feature_columns)
+            lstm_prediction = self.lstm_model.predict(window) if window is not None else None
+            prediction = self._combine_predictions(prediction, lstm_prediction)
+
         return prediction, float(feature_row["close"]), feature_row
 
     def evaluate(self, symbol: str) -> Action | None:
