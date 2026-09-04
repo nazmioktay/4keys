@@ -45,8 +45,14 @@ def run_cycle_once() -> list[Action]:
         exchange=exchange,
         model=model,
         positions=_positions,
-        timeframe=settings.candle_timeframe,
-        lookback=settings.candle_lookback,
+        # ML modeli artık `ml_train_timeframe`/`ml_train_lookback` (1h,
+        # 10.000 mum) ile eğitiliyor — karar motoru da eğitimle AYNI zaman
+        # dilimini kullanmalı, aksi halde model eğitimde görmediği bir
+        # dağılımdan (4h) tahmin üretmeye çalışır (screener'ın kendi
+        # candle_timeframe'i, 4h, teknik skor gösterimi için ayrı kalmaya
+        # devam eder — bkz. app/screener/scanner.py).
+        timeframe=settings.ml_train_timeframe,
+        lookback=settings.ml_train_lookback,
         portfolio=get_portfolio(),
         meta_model=meta_model,
     )

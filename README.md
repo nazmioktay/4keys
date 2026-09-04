@@ -112,7 +112,14 @@ olarak — "önce veri, sonra daha fazla özellik" sırası):**
   4h'de kalırken, ML eğitimi artık daha ince taneli ve çok daha derin
   (~10.000 saat ≈ 416 gün / ~1.14 yıl, sembol başına ~10.000 mum) bir
   geçmişle çalışır — pagination (`BinanceExchange.fetch_ohlcv`) sayesinde
-  tek istek sınırı (1000) aşılarak ücretsiz şekilde çekilir.
+  tek istek sınırı (1000) aşılarak ücretsiz şekilde çekilir. **Karar
+  motoru** (`app/engine/service.py::run_cycle_once`, otomatik açma/kapama
+  döngüsü) de bu ayarları kullanır — modelin eğitildiği dağılımla (1h)
+  AYNI zaman diliminden tahmin üretir; yalnızca screener'ın kendi teknik
+  skor gösterimi 4h'de kalmaya devam eder. `DecisionEngine._predict` de
+  artık `/ml/predict` ile aynı şekilde canlı makro/order-book özelliklerini
+  (bkz. aşağı) tahmine ekliyor — önceden bunları hiç görmüyordu (model
+  eğitimde gördüğü 13 kolonu canlıda sessizce 0.0/nötr varsayıyordu).
 - `FEATURE_COLUMNS` 24'ten **39 teknik özelliğe** çıkarıldı: ham OHLC mum
   yapısı (`candle_body_pct`, `candle_upper_wick_pct`, `candle_lower_wick_pct`,
   `true_range_pct` — ham fiyat değil, ölçeklenmiş oranlar) ve kullanıcının

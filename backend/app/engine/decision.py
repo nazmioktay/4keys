@@ -6,8 +6,10 @@ import pandas as pd
 from app.db import repository as db
 from app.exchanges.base import Exchange
 from app.ml.features import latest_feature_vector
+from app.ml.macro_features import latest_macro_feature_row
 from app.ml.meta_label import MetaLabelModel
 from app.ml.model import Prediction, SignalModel
+from app.ml.orderbook_features import latest_orderbook_feature_row
 from app.portfolio.manager import PortfolioManager
 from app.security import kill_switch
 
@@ -76,6 +78,15 @@ class DecisionEngine:
         feature_row = latest_feature_vector(ohlcv)
         if feature_row is None:
             return None
+        # Eğitimde kullanılan makro/order-book özellikleriyle tutarlı olması
+        # için canlı tahmine de eklenir (bkz. `POST /ml/predict` aynı deseni
+        # kullanır) — aksi halde model, eğitimde gördüğü 13 özelliği (11
+        # makro + 3 order book... bkz. ALL_FEATURE_COLUMNS) canlıda hiç
+        # görmeden (sessizce 0.0/nötr varsayarak) tahmin üretirdi.
+        for col, value in latest_macro_feature_row().items():
+            feature_row[col] = value
+        for col, value in latest_orderbook_feature_row(symbol).items():
+            feature_row[col] = value
         prediction = self.model.predict(feature_row)
         return prediction, float(feature_row["close"]), feature_row
 
