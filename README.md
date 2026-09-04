@@ -851,5 +851,8 @@ da scraping riskini kabul etmek gerekecek; kullanıcıyla ayrıca karar verilece
 - [x] VIX rejim filtresi (opsiyonel — aşırı piyasa stresinde boyut küçültme/engelleme)
 - [ ] Sembol-çapraz doğrulama (bir grup sembolde eğitip hiç görmediği sembollerde test etme) — henüz yapılmadı
 - [ ] Meta-labeling/karar eşiklerinin (`open_confidence`/`close_confidence`) backtestle optimizasyonu — ML karar motoruna özel bir backtest harness'i gerektiriyor, henüz yok (`/backtest` modülü şu an yalnızca DCA/JSON-strateji motorlarını destekliyor)
-- [ ] `/ml/sweep-lookback` sonuçlarının periyodik/otomatik izlenmesi — henüz yok, elle çalıştırılıyor
+- [ ] `/ml/sweep-lookback` sonuçlarının periyodik/otomatik izlenmesi — henüz yok, elle çalıştırılıyor; Grafana panel/alert olarak da karşılık bulabilir (bkz. aşağıdaki Grafana maddeleri)
 - [ ] Ensemble (XGBoost + LSTM + RL oy birliği) — LSTM ve RL henüz üretime hazır olmadığından ertelendi
+- [x] Frontend'den Grafana'ya "Monitoring" linki (yeni sekmede açılır) — Grafana bilinçli olarak ayrı bir izleme aracı olarak bırakıldı, uygulama içine gömülmedi
+- [ ] Grafana alerting — eşik tabanlı uyarı kuralları (equity düşüşü, kill switch tetiklenmesi, art arda başarısız zamanlayıcı işi) + Slack/Telegram/e-posta bildirimi
+- [ ] RL/LSTM'e özel Grafana panelleri — her retrain'de out-of-sample accuracy/overfit_gap'in kalıcı bir metrik olarak kaydedilip zaman içindeki değişiminin grafiğe dökülmesi (şu an yalnızca o anki API yanıtında görünüyor)

@@ -15,6 +15,11 @@ const TABS = [
   { to: "/settings", label: "Ayarlar", icon: "⚙" },
 ];
 
+// Grafana, 4keys'in kendi frontend'inden ayrı bir izleme aracı olarak
+// çalışıyor (bkz. README "Grafana/Prometheus") — burada yeniden inşa
+// edilmiyor, aynı host üzerindeki :3001 portuna yeni sekmede yönlendiriliyor.
+const GRAFANA_URL = `${window.location.protocol}//${window.location.hostname}:3001`;
+
 export default function App() {
   return (
     <div className="app-shell">
@@ -39,6 +44,10 @@ export default function App() {
             <span>{tab.label}</span>
           </NavLink>
         ))}
+        <a href={GRAFANA_URL} target="_blank" rel="noopener noreferrer" className="nav-item">
+          <span className="nav-icon">📈</span>
+          <span>Monitoring</span>
+        </a>
       </nav>
     </div>
   );
