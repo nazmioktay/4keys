@@ -8,13 +8,14 @@ set -euo pipefail
 # AYRI bir XGBoost modeli egitir ve out-of-sample sonuclarini
 # karsilastirir.
 #
-# ILK DENEME (yalnizca BTC-only, symbols=["BTC/USDT:USDT"]) her uc
-# rejimde de balanced_accuracy'nin tam olarak 1/3'e (rastgele seviye)
-# oturdugunu gosterdi — kucuk veri + siniflandirici sinif dengesizligi
-# birlesince coktu. Iki duzeltme yapildi: (1) XGBoost'a (SignalModel)
-# LSTM'dekiyle AYNI ters-frekans sinif agirliklandirmasi eklendi,
-# (2) burada artik coklu-sembol (BTC + korele semboller) kullaniliyor
-# ki rejim basina yeterli ornek olsun.
+# ILK IKI DENEME de (once BTC-only, sonra coklu-sembol ama varsayilan
+# horizon=5/threshold_pct=1.0 ile) balanced_accuracy'nin ~1/3'e
+# (rastgele seviye) yakin kaldigini gosterdi. Sinif agirliklandirma ve
+# coklu-sembol duzeltmeleri (bkz. git gecmisi) kok nedeni COZMEDI —
+# asil sorun LSTM'de de bulunan AYNI sey: zayif etiketleme kalibrasyonu
+# (horizon=5/threshold_pct=1.0). Bu script artik LSTM etiketleme
+# taramasinin (sweep-labeling-lstm-btc.sh) buldugu EN IYI kombinasyonu
+# (horizon=3, threshold_pct=1.0) kullaniyor.
 #
 # UYARI: canli karar motoruna HENUZ baglanmadi — bu, "rejime ayirmak
 # tek global modelden daha mi iyi?" sorusuna cevap vermek icin offline
@@ -25,6 +26,6 @@ set -euo pipefail
 
 curl -sS -X POST http://127.0.0.1:8000/ml/train-regime \
   -H "Content-Type: application/json" \
-  -d '{"n_regimes": 3, "walk_forward_splits": 3}'
+  -d '{"n_regimes": 3, "walk_forward_splits": 3, "horizon": 3, "threshold_pct": 1.0}'
 echo
 echo "Tamamlandi. Her rejimin out_of_sample_balanced_accuracy'sini, mevcut global XGBoost modelinin sonucuyla (bkz. train-xgboost.sh) karsilastir."
