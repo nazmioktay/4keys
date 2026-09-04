@@ -3,6 +3,7 @@ from app.exchanges import get_exchange
 from app.ml.lstm_model import DEFAULT_LSTM_MODEL_PATH, LSTMSignalModel
 from app.ml.meta_label import DEFAULT_META_MODEL_PATH, MetaLabelModel
 from app.ml.model import DEFAULT_MODEL_PATH, SignalModel
+from app.ml.online_model import DEFAULT_ONLINE_MODEL_PATH, OnlineSignalModel
 from app.portfolio.shared import get_portfolio
 from app.screener.scanner import top_long, top_short
 from app.screener.service import get_scan_results
@@ -44,6 +45,12 @@ def run_cycle_once() -> list[Action]:
     lstm_model = (
         LSTMSignalModel.load_from() if settings.ensemble_lstm_enabled and DEFAULT_LSTM_MODEL_PATH.exists() else None
     )
+    # Opt-in: online model (river ARF) prequential değerlendirmede BTC-only
+    # veride overall_balanced_accuracy ~%49.7 gösterdi (bkz. README) —
+    # yine de sembol/zaman dilimine göre değişebileceğinden varsayılan kapalı.
+    online_model = (
+        OnlineSignalModel.load_from() if settings.ensemble_online_enabled and DEFAULT_ONLINE_MODEL_PATH.exists() else None
+    )
 
     results = get_scan_results()
     picks = top_long(results, settings.screener_top_n) + top_short(results, settings.screener_top_n)
@@ -64,5 +71,6 @@ def run_cycle_once() -> list[Action]:
         portfolio=get_portfolio(),
         meta_model=meta_model,
         lstm_model=lstm_model,
+        online_model=online_model,
     )
     return engine.run_cycle(symbols)

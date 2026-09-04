@@ -7,6 +7,7 @@ from app.engine.positions import PaperPositionStore
 from app.exchanges.base import Exchange
 from app.ml.model import Prediction, SignalModel
 from app.ml.lstm_model import LSTMSignalModel
+from app.ml.online_model import OnlineSignalModel
 
 
 def test_combine_predictions_agreement_boosts_confidence():
@@ -95,6 +96,38 @@ def test_decision_engine_ensemble_uses_lstm_when_provided():
         open_confidence=0.0,
         close_confidence=0.0,
         lstm_model=lstm_model,
+    )
+
+    result = engine._predict("BTCUSDT")
+    assert result is not None
+    prediction, price, _feature_row = result
+    assert prediction.direction in {"long", "short", "neutral"}
+    assert 0.0 <= prediction.confidence <= 1.0
+    assert price > 0
+
+
+def test_decision_engine_ensemble_uses_online_model_when_provided():
+    from app.ml.dataset import build_training_dataset
+
+    exchange = _FakeExchange()
+
+    X, y = build_training_dataset(exchange, ["BTCUSDT"], "1h", 220, horizon=5, threshold_pct=1.0)
+    xgb_model = SignalModel()
+    xgb_model.fit(X, y)
+
+    online_model = OnlineSignalModel(n_models=3, seed=0)
+    for (_idx, row), label in zip(X.iterrows(), y):
+        online_model.learn_one(row.to_dict(), int(label))
+
+    engine = DecisionEngine(
+        exchange=exchange,
+        model=xgb_model,
+        positions=PaperPositionStore(),
+        timeframe="1h",
+        lookback=220,
+        open_confidence=0.0,
+        close_confidence=0.0,
+        online_model=online_model,
     )
 
     result = engine._predict("BTCUSDT")

@@ -11,6 +11,7 @@ from app.ml.macro_features import latest_macro_feature_row
 from app.monitoring.metrics import record_ml_prediction
 from app.ml.meta_label import MetaLabelModel
 from app.ml.model import Prediction, SignalModel
+from app.ml.online_model import OnlineSignalModel
 from app.ml.orderbook_features import latest_orderbook_feature_row
 from app.ml.orderflow_features import latest_taker_buy_ratio_norm
 from app.ml.sequence_dataset import latest_sequence_window
@@ -62,6 +63,11 @@ class DecisionEngine:
     roadmap) — LSTM'in artık rastgele seviyenin belirgin üzerinde
     (bkz. BTC-only etiketleme taraması) olduğu doğrulandıktan sonra
     eklenen ilk, en basit birleştirme kuralıdır.
+
+    `online_model` verilirse (opsiyonel, bkz. `app.ml.online_model` —
+    `river` ile gerçek çevrimiçi öğrenme, kavram kaymasına karşı), AYNI
+    `_combine_predictions` kuralı üçüncü bir "oy" olarak (önce XGBoost+LSTM
+    birleştirilir, sonra sonuç online modelle birleştirilir) uygulanır.
     """
 
     def __init__(
@@ -77,6 +83,7 @@ class DecisionEngine:
         assumed_stop_loss_pct: float = 3.0,
         meta_model: MetaLabelModel | None = None,
         lstm_model: LSTMSignalModel | None = None,
+        online_model: OnlineSignalModel | None = None,
     ) -> None:
         self.exchange = exchange
         self.model = model
@@ -89,6 +96,7 @@ class DecisionEngine:
         self.assumed_stop_loss_pct = assumed_stop_loss_pct
         self.meta_model = meta_model
         self.lstm_model = lstm_model
+        self.online_model = online_model
 
     @staticmethod
     def _combine_predictions(xgb: Prediction, lstm: Prediction | None) -> Prediction:
@@ -135,6 +143,15 @@ class DecisionEngine:
             )
             lstm_prediction = self.lstm_model.predict(window) if window is not None else None
             prediction = self._combine_predictions(prediction, lstm_prediction)
+
+        if self.online_model is not None:
+            # Online model (river ARF), prequential değerlendirmede BTC-only
+            # veride overall_balanced_accuracy ~%49.7 gösterdi (soğuk
+            # başlangıç sonrası ~%43-45 istikrarlı) — XGBoost/LSTM'den daha
+            # iyi. AYNI ikili birleştirme kuralı (`_combine_predictions`)
+            # burada da uygulanır — üçüncü bir "oy" olarak.
+            online_prediction = self.online_model.predict(feature_row)
+            prediction = self._combine_predictions(prediction, online_prediction)
 
         return prediction, float(feature_row["close"]), feature_row
 

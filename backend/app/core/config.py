@@ -40,6 +40,12 @@ class Settings(BaseSettings):
     # doğrulanmadığından varsayılan KAPALI — kullanıcı açıkça açmalı.
     ensemble_lstm_enabled: bool = False
 
+    # `river` ARFClassifier tabanlı online model (bkz. app.ml.online_model)
+    # — prequential değerlendirmede BTC-only veride overall_balanced_accuracy
+    # ~%49.7 gösterdi (XGBoost/LSTM'den daha iyi), yine de sembol/zaman
+    # dilimine göre ayrı ayrı doğrulanmadığından varsayılan KAPALI.
+    ensemble_online_enabled: bool = False
+
     # --- Feature snapshot biriktirme (LSTM/RL için ileride kullanılacak
     # zaman serisi veri seti) --- Virgülle ayrılmış sembol listesi; her
     # tarama döngüsünde bu sembollerin ML özellik vektörü (bkz.
