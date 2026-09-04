@@ -4,6 +4,8 @@ from app.ml import train as train_module
 class _FakePrimaryResult:
     model = object()
     rows_used = 1000
+    accepted = True
+    rejection_reason = None
 
     class out_of_sample:
         balanced_accuracy = 0.42
@@ -11,6 +13,8 @@ class _FakePrimaryResult:
 
 class _FakeLSTMResult:
     rows_used = 800
+    accepted = True
+    rejection_reason = None
 
     class out_of_sample:
         balanced_accuracy = 0.41
@@ -19,6 +23,8 @@ class _FakeLSTMResult:
 class _FakeOnlineReport:
     rows_used = 900
     overall_balanced_accuracy = 0.49
+    accepted = True
+    rejection_reason = None
 
 
 class _FakeRegimeResult:
@@ -95,3 +101,33 @@ def test_train_all_models_one_independent_step_failure_does_not_block_others(mon
     assert "yeterli veri yok" in by_step["lstm"].detail
     assert by_step["online"].ok is True
     assert by_step["regime"].ok is True
+
+
+def test_train_all_models_skips_meta_when_primary_rejected(monkeypatch):
+    class _RejectedPrimary:
+        model = object()
+        rows_used = 1000
+        accepted = False
+        rejection_reason = "out_of_sample_balanced_accuracy (0.333) eşiğin (0.37) altında"
+
+        class out_of_sample:
+            balanced_accuracy = 0.333
+
+    monkeypatch.setattr(train_module, "train_signal_model_validated", lambda *a, **k: _RejectedPrimary())
+    monkeypatch.setattr(train_module, "train_lstm_signal_model", lambda *a, **k: _FakeLSTMResult())
+    monkeypatch.setattr(train_module, "train_online_signal_model", lambda *a, **k: (object(), _FakeOnlineReport()))
+    monkeypatch.setattr(
+        train_module, "train_signal_models_by_regime", lambda *a, **k: (object(), [_FakeRegimeResult(0)])
+    )
+
+    results = train_module.train_all_models(object(), ["BTC/USDT:USDT"])
+    by_step = {r.step: r for r in results}
+
+    # Reddedilen model de "teknik olarak" başarıyla eğitildi (exception yok),
+    # ama detay metninde REDDEDİLDİ olarak açıkça işaretlenmeli.
+    assert by_step["xgboost"].ok is True
+    assert "REDDEDİLDİ" in by_step["xgboost"].detail
+    # Reddedilen (kaydedilmeyen) bir modelin üzerine meta-label eğitmek
+    # tutarsız olurdu -> meta-label adımı atlanmalı.
+    assert by_step["meta_label"].ok is False
+    assert "reddedildi" in by_step["meta_label"].detail

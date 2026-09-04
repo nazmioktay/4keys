@@ -381,6 +381,44 @@ def get_recent_trades(limit: int = 50) -> list[dict]:
         return []
 
 
+def get_ohlcv(symbol: str, timeframe: str, limit: int) -> pd.DataFrame:
+    """`ohlcv_raw`'dan bir sembolün en son `limit` mumunu kronolojik sırayla
+    (eskiden yeniye) döner — bkz. `app.exchanges.cache.fetch_ohlcv_cached`:
+    borsadan HER seferinde tam geçmişi (ör. 10.000 mum) tekrar tekrar
+    çekmek yerine, önceden kaydedilmiş geçmiş buradan okunur; yalnızca
+    EKSİK/YENİ kuyruk borsadan çekilir. DB kapalı/erişilemezse boş
+    DataFrame (çağıran taraf bu durumda doğrudan borsaya düşer)."""
+    if not is_enabled():
+        return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"])
+    try:
+        with session_scope() as db:
+            rows = (
+                db.execute(
+                    select(OHLCVRaw)
+                    .where(OHLCVRaw.symbol == symbol, OHLCVRaw.timeframe == timeframe)
+                    .order_by(OHLCVRaw.time.desc())
+                    .limit(limit)
+                )
+                .scalars()
+                .all()
+            )
+            records = [
+                {
+                    "timestamp": r.time,
+                    "open": r.open,
+                    "high": r.high,
+                    "low": r.low,
+                    "close": r.close,
+                    "volume": r.volume,
+                }
+                for r in reversed(rows)
+            ]
+            return pd.DataFrame(records, columns=["timestamp", "open", "high", "low", "close", "volume"])
+    except SQLAlchemyError:
+        logger.exception("failed to read ohlcv history for %s", symbol)
+        return pd.DataFrame(columns=["timestamp", "open", "high", "low", "close", "volume"])
+
+
 def save_ohlcv_bulk(symbol: str, timeframe: str, ohlcv: pd.DataFrame) -> int:
     """`ohlcv_raw`'a bir OHLCV DataFrame'ini (timestamp/open/high/low/close/
     volume kolonları) tek seferde yazar — `app.backtest.system_runner`,

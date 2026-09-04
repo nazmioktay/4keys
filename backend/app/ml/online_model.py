@@ -105,6 +105,8 @@ class PrequentialReport:
     overall_accuracy: float
     overall_balanced_accuracy: float
     windows: list[PrequentialWindowPoint]
+    accepted: bool = True
+    rejection_reason: str | None = None
 
 
 def run_prequential_evaluation(

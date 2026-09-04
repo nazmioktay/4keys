@@ -27,6 +27,8 @@ class TrainingResult:
     rows_used: int
     walk_forward: WalkForwardReport
     out_of_sample: OutOfSampleReport
+    accepted: bool = True
+    rejection_reason: str | None = None
 
 
 def train_signal_model(
@@ -130,18 +132,40 @@ def train_signal_model_validated(
 
     oos_report = evaluate_out_of_sample(model, X_holdout, y_holdout) if len(X_holdout) > 0 else OutOfSampleReport(0, 0.0, 0.0)
 
-    if persist:
+    # Kalite kapısı: holdout değerlendirmesi VARSA (0 satır ise yargılanamaz,
+    # kapı uygulanmaz) ve dengeli doğruluk eşiğin (varsayılan 0.37) ALTINDAYSA
+    # model diske KAYDEDİLMEZ — önceden eğitilmiş (varsa) model dosyası
+    # KORUNUR, canlı karar motoru eski/iyi modeli kullanmaya devam eder.
+    accepted = True
+    rejection_reason: str | None = None
+    if oos_report.holdout_rows > 0 and oos_report.balanced_accuracy < settings.ml_min_balanced_accuracy:
+        accepted = False
+        rejection_reason = (
+            f"out_of_sample_balanced_accuracy ({oos_report.balanced_accuracy:.3f}) eşiğin "
+            f"({settings.ml_min_balanced_accuracy}) altında — model KAYDEDİLMEDİ, önceki model (varsa) korunuyor."
+        )
+        logger.warning("model rejected (algorithm=%s): %s", algorithm, rejection_reason)
+    elif persist:
         model.save()
+
     logger.info(
-        "model trained (algorithm=%s) on %d rows; walk-forward mean_acc=%.3f overfit_gap=%.3f; oos_acc=%.3f (holdout=%d rows)",
+        "model trained (algorithm=%s) on %d rows; walk-forward mean_acc=%.3f overfit_gap=%.3f; oos_acc=%.3f (holdout=%d rows); accepted=%s",
         algorithm,
         len(X_train),
         wf_report.mean_accuracy,
         wf_report.overfit_gap,
         oos_report.accuracy,
         oos_report.holdout_rows,
+        accepted,
     )
-    return TrainingResult(model=model, rows_used=len(X_train), walk_forward=wf_report, out_of_sample=oos_report)
+    return TrainingResult(
+        model=model,
+        rows_used=len(X_train),
+        walk_forward=wf_report,
+        out_of_sample=oos_report,
+        accepted=accepted,
+        rejection_reason=rejection_reason,
+    )
 
 
 @dataclass
@@ -150,6 +174,8 @@ class LSTMTrainingResult:
     rows_used: int
     training: LSTMTrainingReport
     out_of_sample: OutOfSampleReport
+    accepted: bool = True
+    rejection_reason: str | None = None
 
 
 def _train_sequence_model(
@@ -245,18 +271,30 @@ def _train_sequence_model(
     else:
         oos_report = OutOfSampleReport(0, 0.0, 0.0)
 
-    if persist:
+    # Kalite kapısı — bkz. `train_signal_model_validated`'daki AYNI mantık.
+    accepted = True
+    rejection_reason: str | None = None
+    if oos_report.holdout_rows > 0 and oos_report.balanced_accuracy < settings.ml_min_balanced_accuracy:
+        accepted = False
+        rejection_reason = (
+            f"out_of_sample_balanced_accuracy ({oos_report.balanced_accuracy:.3f}) eşiğin "
+            f"({settings.ml_min_balanced_accuracy}) altında — model KAYDEDİLMEDİ, önceki model (varsa) korunuyor."
+        )
+        logger.warning("%s model rejected: %s", model_kind, rejection_reason)
+    elif persist:
         model.save()
+
     logger.info(
-        "%s model trained on %d pencere; train_loss=%.4f train_acc=%.3f; oos_acc=%.3f (holdout=%d pencere)",
+        "%s model trained on %d pencere; train_loss=%.4f train_acc=%.3f; oos_acc=%.3f (holdout=%d pencere); accepted=%s",
         model_kind,
         len(X_train),
         training_report.final_train_loss,
         training_report.final_train_accuracy,
         oos_report.accuracy,
         oos_report.holdout_rows,
+        accepted,
     )
-    return model, len(X_train), training_report, oos_report
+    return model, len(X_train), training_report, oos_report, accepted, rejection_reason
 
 
 def train_lstm_signal_model(
@@ -288,7 +326,7 @@ def train_lstm_signal_model(
     kılar — etiketleme taramasında aynı hiperparametrelerin farklı
     çalıştırmalarda dalgalanmasının (bkz. README) nedeni buydu."""
     model = LSTMSignalModel(seq_len=seq_len, hidden_size=hidden_size, num_layers=num_layers, dropout=dropout)
-    model, rows_used, training_report, oos_report = _train_sequence_model(
+    model, rows_used, training_report, oos_report, accepted, rejection_reason = _train_sequence_model(
         model,
         exchange,
         symbols,
@@ -309,7 +347,14 @@ def train_lstm_signal_model(
         persist=persist,
         seed=seed,
     )
-    return LSTMTrainingResult(model=model, rows_used=rows_used, training=training_report, out_of_sample=oos_report)
+    return LSTMTrainingResult(
+        model=model,
+        rows_used=rows_used,
+        training=training_report,
+        out_of_sample=oos_report,
+        accepted=accepted,
+        rejection_reason=rejection_reason,
+    )
 
 
 @dataclass
@@ -318,6 +363,8 @@ class PatchTSTTrainingResult:
     rows_used: int
     training: PatchTSTTrainingReport
     out_of_sample: OutOfSampleReport
+    accepted: bool = True
+    rejection_reason: str | None = None
 
 
 def train_patchtst_signal_model(
@@ -353,7 +400,7 @@ def train_patchtst_signal_model(
     model = PatchTSTSignalModel(
         seq_len=seq_len, patch_len=patch_len, stride=stride, d_model=d_model, nhead=nhead, num_layers=num_layers, dropout=dropout
     )
-    model, rows_used, training_report, oos_report = _train_sequence_model(
+    model, rows_used, training_report, oos_report, accepted, rejection_reason = _train_sequence_model(
         model,
         exchange,
         symbols,
@@ -374,7 +421,14 @@ def train_patchtst_signal_model(
         persist=persist,
         seed=seed,
     )
-    return PatchTSTTrainingResult(model=model, rows_used=rows_used, training=training_report, out_of_sample=oos_report)
+    return PatchTSTTrainingResult(
+        model=model,
+        rows_used=rows_used,
+        training=training_report,
+        out_of_sample=oos_report,
+        accepted=accepted,
+        rejection_reason=rejection_reason,
+    )
 
 
 @dataclass
@@ -656,7 +710,18 @@ def train_signal_models_by_regime(
             model.fit(X_train, y_train)
             oos_report = evaluate_out_of_sample(model, X_holdout, y_holdout) if len(X_holdout) > 0 else OutOfSampleReport(0, 0.0, 0.0)
 
-            if persist:
+            # Kalite kapısı — bkz. `train_signal_model_validated`'daki AYNI
+            # mantık, rejim başına uygulanır: bir rejimin modeli eşiğin
+            # altındaysa YALNIZCA O REJİMİN dosyası kaydedilmez, diğer
+            # rejimler etkilenmez.
+            regime_error: str | None = None
+            if oos_report.holdout_rows > 0 and oos_report.balanced_accuracy < settings.ml_min_balanced_accuracy:
+                regime_error = (
+                    f"out_of_sample_balanced_accuracy ({oos_report.balanced_accuracy:.3f}) eşiğin "
+                    f"({settings.ml_min_balanced_accuracy}) altında — model KAYDEDİLMEDİ."
+                )
+                logger.warning("regime %d model rejected: %s", r, regime_error)
+            elif persist:
                 model.save(DEFAULT_MODEL_PATH.parent / f"model_regime_{r}.joblib")
 
             results.append(
@@ -672,6 +737,7 @@ def train_signal_models_by_regime(
                     out_of_sample_rows=oos_report.holdout_rows,
                     out_of_sample_accuracy=oos_report.accuracy,
                     out_of_sample_balanced_accuracy=oos_report.balanced_accuracy,
+                    error=regime_error,
                 )
             )
         except ValueError as exc:
@@ -747,14 +813,25 @@ def train_online_signal_model(
 
     model, report = run_prequential_evaluation(X, y, n_models=n_models, window_size=window_size)
 
-    if persist:
+    # Kalite kapısı — bkz. `train_signal_model_validated`'daki AYNI mantık.
+    # Prequential değerlendirme her satırı işlediği için burada "holdout"
+    # kavramı yok, `overall_balanced_accuracy` doğrudan kullanılır.
+    if report.overall_balanced_accuracy < settings.ml_min_balanced_accuracy:
+        report.accepted = False
+        report.rejection_reason = (
+            f"overall_balanced_accuracy ({report.overall_balanced_accuracy:.3f}) eşiğin "
+            f"({settings.ml_min_balanced_accuracy}) altında — model KAYDEDİLMEDİ, önceki model (varsa) korunuyor."
+        )
+        logger.warning("online model rejected: %s", report.rejection_reason)
+    elif persist:
         model.save()
 
     logger.info(
-        "online model (river ARF) trained on %d rows (prequential); overall_acc=%.3f overall_balanced_acc=%.3f",
+        "online model (river ARF) trained on %d rows (prequential); overall_acc=%.3f overall_balanced_acc=%.3f; accepted=%s",
         report.rows_used,
         report.overall_accuracy,
         report.overall_balanced_accuracy,
+        report.accepted,
     )
     return model, report
 
@@ -838,19 +915,23 @@ def train_all_models(exchange: Exchange, symbols: list[str]) -> list[TrainAllSte
 
     try:
         primary = train_signal_model_validated(exchange, symbols, horizon=3, threshold_pct=1.0)
-        results.append(
-            TrainAllStepResult(
-                "xgboost",
-                True,
-                f"{primary.rows_used} satır, oos_balanced_acc={primary.out_of_sample.balanced_accuracy:.3f}",
-            )
-        )
+        detail = f"{primary.rows_used} satır, oos_balanced_acc={primary.out_of_sample.balanced_accuracy:.3f}"
+        if not primary.accepted:
+            detail = f"REDDEDİLDİ: {primary.rejection_reason} ({detail})"
+        results.append(TrainAllStepResult("xgboost", True, detail))
     except ValueError as exc:
+        primary = None
         results.append(TrainAllStepResult("xgboost", False, str(exc)))
-        # Meta-label birincil modele bağımlı olduğundan, birincil model
-        # eğitilemediyse meta-label'ı denemek anlamsız — geri kalan
-        # (LSTM/online/regime) bağımsız olduğu için devam edilir.
+
+    if primary is None:
+        # Meta-label birincil modele bağımlı olduğundan, birincil model hiç
+        # eğitilemediyse meta-label'ı denemek anlamsız.
         results.append(TrainAllStepResult("meta_label", False, "atlandı: birincil model eğitilemedi"))
+    elif not primary.accepted:
+        # Birincil model kalite kapısından geçemedi (KAYDEDİLMEDİ) — meta-label'ı
+        # bu REDDEDİLEN model üzerinde eğitmek, canlıda kullanılan (eski,
+        # kaydedilmiş) modelle TUTARSIZ bir meta-label üretirdi.
+        results.append(TrainAllStepResult("meta_label", False, "atlandı: birincil model reddedildi (kalite eşiğinin altında)"))
     else:
         try:
             _, meta_rows = train_meta_label_model(exchange, symbols, primary.model)
@@ -860,25 +941,19 @@ def train_all_models(exchange: Exchange, symbols: list[str]) -> list[TrainAllSte
 
     try:
         lstm_result = train_lstm_signal_model(exchange, symbols, horizon=3, threshold_pct=1.0)
-        results.append(
-            TrainAllStepResult(
-                "lstm",
-                True,
-                f"{lstm_result.rows_used} satır, oos_balanced_acc={lstm_result.out_of_sample.balanced_accuracy:.3f}",
-            )
-        )
+        detail = f"{lstm_result.rows_used} satır, oos_balanced_acc={lstm_result.out_of_sample.balanced_accuracy:.3f}"
+        if not lstm_result.accepted:
+            detail = f"REDDEDİLDİ: {lstm_result.rejection_reason} ({detail})"
+        results.append(TrainAllStepResult("lstm", True, detail))
     except ValueError as exc:
         results.append(TrainAllStepResult("lstm", False, str(exc)))
 
     try:
         _, online_report = train_online_signal_model(exchange, symbols, window_size=500)
-        results.append(
-            TrainAllStepResult(
-                "online",
-                True,
-                f"{online_report.rows_used} satır, overall_balanced_acc={online_report.overall_balanced_accuracy:.3f}",
-            )
-        )
+        detail = f"{online_report.rows_used} satır, overall_balanced_acc={online_report.overall_balanced_accuracy:.3f}"
+        if not online_report.accepted:
+            detail = f"REDDEDİLDİ: {online_report.rejection_reason} ({detail})"
+        results.append(TrainAllStepResult("online", True, detail))
     except ValueError as exc:
         results.append(TrainAllStepResult("online", False, str(exc)))
 
@@ -887,7 +962,7 @@ def train_all_models(exchange: Exchange, symbols: list[str]) -> list[TrainAllSte
             exchange, symbols, n_regimes=3, walk_forward_splits=3, horizon=3, threshold_pct=1.0
         )
         summary = "; ".join(
-            f"rejim {r.regime}: {r.rows_used} satır" + (f" (hata: {r.error})" if r.error else "") for r in regime_results
+            f"rejim {r.regime}: {r.rows_used} satır" + (f" (REDDEDİLDİ: {r.error})" if r.error else "") for r in regime_results
         )
         results.append(TrainAllStepResult("regime", True, summary or "sonuç yok"))
     except ValueError as exc:

@@ -3,8 +3,11 @@ from typing import Literal
 
 import pandas as pd
 
+from app.backtest.data import timeframe_to_minutes
 from app.exchanges.base import Exchange
+from app.exchanges.cache import fetch_ohlcv_cached
 
+from .data_quality import warn_if_gaps
 from .features import ALL_FEATURE_COLUMNS, FEATURE_COLUMNS, build_features
 from .labeling import label_future_direction, triple_barrier_labels
 from .macro_features import load_macro_history, merge_macro_features
@@ -72,9 +75,10 @@ def _build_symbol_frames(
 
     for symbol in symbols:
         try:
-            ohlcv = exchange.fetch_ohlcv(symbol, timeframe, lookback)
+            ohlcv = fetch_ohlcv_cached(exchange, symbol, timeframe, lookback)
             if len(ohlcv) < 60:
                 continue
+            warn_if_gaps(symbol, timeframe, ohlcv, timeframe_to_minutes(timeframe))
             features = build_features(ohlcv)
             _persist_feature_snapshots(symbol, timeframe, features)
             features = merge_macro_features(features, macro_history)

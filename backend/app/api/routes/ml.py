@@ -66,6 +66,8 @@ class TrainResponse(BaseModel):
     out_of_sample_rows: int
     out_of_sample_accuracy: float
     out_of_sample_balanced_accuracy: float
+    accepted: bool = True
+    rejection_reason: str | None = None
 
 
 class ShapImportance(BaseModel):
@@ -111,6 +113,8 @@ class TrainLSTMResponse(BaseModel):
     out_of_sample_rows: int
     out_of_sample_accuracy: float
     out_of_sample_balanced_accuracy: float
+    accepted: bool = True
+    rejection_reason: str | None = None
 
 
 class PredictLSTMResponse(BaseModel):
@@ -154,6 +158,8 @@ class TrainPatchTSTResponse(BaseModel):
     out_of_sample_rows: int
     out_of_sample_accuracy: float
     out_of_sample_balanced_accuracy: float
+    accepted: bool = True
+    rejection_reason: str | None = None
 
 
 class PredictPatchTSTResponse(BaseModel):
@@ -271,6 +277,8 @@ def train(payload: TrainRequest) -> TrainResponse:
         out_of_sample_rows=oos.holdout_rows,
         out_of_sample_accuracy=oos.accuracy,
         out_of_sample_balanced_accuracy=oos.balanced_accuracy,
+        accepted=result.accepted,
+        rejection_reason=result.rejection_reason,
     )
 
 
@@ -395,6 +403,8 @@ def train_lstm(payload: TrainLSTMRequest) -> TrainLSTMResponse:
         out_of_sample_rows=oos.holdout_rows,
         out_of_sample_accuracy=oos.accuracy,
         out_of_sample_balanced_accuracy=oos.balanced_accuracy,
+        accepted=result.accepted,
+        rejection_reason=result.rejection_reason,
     )
 
 
@@ -472,6 +482,8 @@ def train_patchtst(payload: TrainPatchTSTRequest) -> TrainPatchTSTResponse:
         out_of_sample_rows=oos.holdout_rows,
         out_of_sample_accuracy=oos.accuracy,
         out_of_sample_balanced_accuracy=oos.balanced_accuracy,
+        accepted=result.accepted,
+        rejection_reason=result.rejection_reason,
     )
 
 
@@ -722,6 +734,8 @@ class TrainOnlineResponse(BaseModel):
     overall_accuracy: float
     overall_balanced_accuracy: float
     windows: list[PrequentialWindowPointModel]
+    accepted: bool = True
+    rejection_reason: str | None = None
 
 
 @router.post("/train-online", response_model=TrainOnlineResponse)
@@ -765,6 +779,8 @@ def train_online(payload: TrainOnlineRequest) -> TrainOnlineResponse:
         overall_accuracy=report.overall_accuracy,
         overall_balanced_accuracy=report.overall_balanced_accuracy,
         windows=[PrequentialWindowPointModel(**w.__dict__) for w in report.windows],
+        accepted=report.accepted,
+        rejection_reason=report.rejection_reason,
     )
 
 

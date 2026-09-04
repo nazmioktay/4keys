@@ -141,6 +141,53 @@ def test_train_signal_model_validated_persist_false_does_not_touch_disk(tmp_path
     assert saved_paths == []
 
 
+def test_train_signal_model_validated_rejects_and_skips_save_below_quality_threshold(monkeypatch):
+    """`Settings.ml_min_balanced_accuracy`'nin ALTINDA kalan bir model
+    diske KAYDEDİLMEMELİ (önceki model korunmalı) ve `accepted=False`
+    ile açıkça işaretlenmeli — bkz. app.ml.train kalite kapısı."""
+    from app.core.config import settings
+    from app.ml.model import SignalModel
+
+    # Eşiği kasıtlı olarak imkansız derecede yüksek (1.01) yaparak, gerçekte
+    # ne kadar iyi eğitilmiş olursa olsun modelin REDDEDİLMESİNİ garantiler
+    # — testin kırılganlığını (gerçek balanced_accuracy'nin rastgele altında/
+    # üstünde çıkmasına bağlı olmadan) önler.
+    monkeypatch.setattr(settings, "ml_min_balanced_accuracy", 1.01)
+
+    saved_paths = []
+    monkeypatch.setattr(SignalModel, "save", lambda self, path=None: saved_paths.append(path))
+
+    exchange = TrendExchange(seed=7)
+    result = train_signal_model_validated(
+        exchange, ["UPUSDT", "DOWNUSDT"], horizon=5, threshold_pct=0.5, timeframe="4h", lookback=400
+    )
+
+    assert result.accepted is False
+    assert result.rejection_reason is not None
+    assert "1.01" in result.rejection_reason
+    assert saved_paths == []  # reddedilen model KAYDEDİLMEDİ
+
+
+def test_train_signal_model_validated_accepts_and_saves_above_quality_threshold(monkeypatch):
+    from app.core.config import settings
+    from app.ml.model import SignalModel
+
+    # Eşiği 0'a çekerek (her zaman geçilir) kabul/kaydetme yolunu test eder.
+    monkeypatch.setattr(settings, "ml_min_balanced_accuracy", 0.0)
+
+    saved_paths = []
+    monkeypatch.setattr(SignalModel, "save", lambda self, path=None: saved_paths.append(path))
+
+    exchange = TrendExchange(seed=8)
+    result = train_signal_model_validated(
+        exchange, ["UPUSDT", "DOWNUSDT"], horizon=5, threshold_pct=0.5, timeframe="4h", lookback=400
+    )
+
+    assert result.accepted is True
+    assert result.rejection_reason is None
+    assert len(saved_paths) == 1
+
+
 def test_sweep_lookback_values_returns_one_point_per_lookback():
     from app.ml.train import sweep_lookback_values
 

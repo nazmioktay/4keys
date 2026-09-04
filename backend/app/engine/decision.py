@@ -5,6 +5,7 @@ import pandas as pd
 
 from app.db import repository as db
 from app.exchanges.base import Exchange
+from app.exchanges.cache import fetch_ohlcv_cached
 from app.ml.features import latest_feature_vector
 from app.ml.lstm_model import LSTMSignalModel
 from app.ml.macro_features import latest_macro_feature_row
@@ -116,7 +117,7 @@ class DecisionEngine:
         return Prediction(direction="neutral", confidence=min(xgb.confidence, lstm.confidence))
 
     def _predict(self, symbol: str) -> tuple[Prediction, float, pd.Series] | None:
-        ohlcv = self.exchange.fetch_ohlcv(symbol, self.timeframe, self.lookback)
+        ohlcv = fetch_ohlcv_cached(self.exchange, symbol, self.timeframe, self.lookback)
         feature_row = latest_feature_vector(ohlcv)
         if feature_row is None:
             return None

@@ -135,6 +135,18 @@ class Settings(BaseSettings):
     ml_auto_retrain_refresh_fraction: float = 0.05
     ml_auto_retrain_max_seconds: int = 604800  # 7 gün — "en geç haftada bir" üst sınırı
 
+    # --- Eğitim kalite kapısı ---
+    # Bir modelin out-of-sample (veya online modelde prequential) dengeli
+    # doğruluğu (balanced_accuracy) bu eşiğin ALTINDAYSA, model diske
+    # KAYDEDİLMEZ (önceden eğitilmiş — varsa — model dosyası KORUNUR, canlı
+    # karar motoru eski/iyi modeli kullanmaya devam eder) ve sonuç
+    # (`TrainingResult.accepted`/`rejection_reason` vb.) açıkça "reddedildi"
+    # olarak işaretlenir. 0.37, 3 sınıflı (long/short/nötr) bir problemde
+    # rastgele seviyenin (1/3 ≈ 0.333) hemen üzerinde, "en azından rastgele
+    # tahminden biraz daha iyi" için makul bir taban — ampirik olarak
+    # optimize edilmiş bir değer DEĞİL.
+    ml_min_balanced_accuracy: float = 0.37
+
     # --- Ücretsiz makro veri kaynakları (bkz. app.macro.data) ---
     # FRED (ABD Merkez Bankası) API anahtarı — ücretsiz, anında alınır:
     # https://fred.stlouisfed.org/docs/api/api_key.html . Boş bırakılırsa
