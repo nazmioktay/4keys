@@ -810,3 +810,87 @@ def train_meta_label_model(
     meta_model.save()
     logger.info("meta-label model trained on %d rows", len(meta_X))
     return meta_model, len(meta_X)
+
+
+@dataclass
+class TrainAllStepResult:
+    step: str
+    ok: bool
+    detail: str
+
+
+def train_all_models(exchange: Exchange, symbols: list[str]) -> list[TrainAllStepResult]:
+    """Tüm modelleri (XGBoost -> meta-label -> LSTM -> online -> regime)
+    sırayla, deploy script'lerinde (`deploy/train-xgboost-best-labeling.sh`,
+    `train-meta.sh`, `train-lstm-btc-best-labeling.sh`, `train-online-btc.sh`,
+    `train-regime-multi.sh`) DOĞRULANMIŞ AYNI parametrelerle eğitir — ilk
+    kurulumda (henüz hiçbir model yokken) veya toplu bir yeniden eğitim
+    istendiğinde, kullanıcının bu 5 script'i tek tek elle çalıştırması
+    YERİNE `POST /ml/train-all` ile tek çağrıda tetiklenebilir.
+
+    Her adım BAĞIMSIZ try/except ile sarılır (bkz. `app.scheduler.jobs`
+    aynı desen) — bir adımın hatası (ör. yetersiz veri) sonraki adımların
+    çalışmasını ENGELLEMEZ; her adımın sonucu ayrı ayrı raporlanır.
+    LSTM sırasıyla en yavaş adımdır, toplam çalışma süresi birkaç dakikayı
+    bulabilir.
+    """
+    results: list[TrainAllStepResult] = []
+
+    try:
+        primary = train_signal_model_validated(exchange, symbols, horizon=3, threshold_pct=1.0)
+        results.append(
+            TrainAllStepResult(
+                "xgboost",
+                True,
+                f"{primary.rows_used} satır, oos_balanced_acc={primary.out_of_sample.balanced_accuracy:.3f}",
+            )
+        )
+    except ValueError as exc:
+        results.append(TrainAllStepResult("xgboost", False, str(exc)))
+        # Meta-label birincil modele bağımlı olduğundan, birincil model
+        # eğitilemediyse meta-label'ı denemek anlamsız — geri kalan
+        # (LSTM/online/regime) bağımsız olduğu için devam edilir.
+        results.append(TrainAllStepResult("meta_label", False, "atlandı: birincil model eğitilemedi"))
+    else:
+        try:
+            _, meta_rows = train_meta_label_model(exchange, symbols, primary.model)
+            results.append(TrainAllStepResult("meta_label", True, f"{meta_rows} satır"))
+        except ValueError as exc:
+            results.append(TrainAllStepResult("meta_label", False, str(exc)))
+
+    try:
+        lstm_result = train_lstm_signal_model(exchange, symbols, horizon=3, threshold_pct=1.0)
+        results.append(
+            TrainAllStepResult(
+                "lstm",
+                True,
+                f"{lstm_result.rows_used} satır, oos_balanced_acc={lstm_result.out_of_sample.balanced_accuracy:.3f}",
+            )
+        )
+    except ValueError as exc:
+        results.append(TrainAllStepResult("lstm", False, str(exc)))
+
+    try:
+        _, online_report = train_online_signal_model(exchange, symbols, window_size=500)
+        results.append(
+            TrainAllStepResult(
+                "online",
+                True,
+                f"{online_report.rows_used} satır, overall_balanced_acc={online_report.overall_balanced_accuracy:.3f}",
+            )
+        )
+    except ValueError as exc:
+        results.append(TrainAllStepResult("online", False, str(exc)))
+
+    try:
+        _, regime_results = train_signal_models_by_regime(
+            exchange, symbols, n_regimes=3, walk_forward_splits=3, horizon=3, threshold_pct=1.0
+        )
+        summary = "; ".join(
+            f"rejim {r.regime}: {r.rows_used} satır" + (f" (hata: {r.error})" if r.error else "") for r in regime_results
+        )
+        results.append(TrainAllStepResult("regime", True, summary or "sonuç yok"))
+    except ValueError as exc:
+        results.append(TrainAllStepResult("regime", False, str(exc)))
+
+    return results

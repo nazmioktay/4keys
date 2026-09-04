@@ -20,6 +20,7 @@ from app.ml.symbol_selection import select_training_symbols
 from app.ml.train import (
     sweep_labeling_lstm,
     sweep_lookback_values,
+    train_all_models,
     train_lstm_signal_model,
     train_meta_label_model,
     train_online_signal_model,
@@ -270,6 +271,44 @@ def train(payload: TrainRequest) -> TrainResponse:
         out_of_sample_rows=oos.holdout_rows,
         out_of_sample_accuracy=oos.accuracy,
         out_of_sample_balanced_accuracy=oos.balanced_accuracy,
+    )
+
+
+class TrainAllRequest(BaseModel):
+    symbols: list[str] | None = None
+
+
+class TrainAllStepModel(BaseModel):
+    step: str  # "xgboost" | "meta_label" | "lstm" | "online" | "regime"
+    ok: bool
+    detail: str
+
+
+class TrainAllResponse(BaseModel):
+    symbols_used: int
+    steps: list[TrainAllStepModel]
+
+
+@router.post("/train-all", response_model=TrainAllResponse)
+def train_all(payload: TrainAllRequest) -> TrainAllResponse:
+    """Tüm modelleri (XGBoost -> meta-label -> LSTM -> online -> regime)
+    TEK ÇAĞRIDA, deploy script'lerinde doğrulanmış AYNI parametrelerle
+    sırayla eğitir (bkz. `app.ml.train.train_all_models` docstring'i).
+
+    İlk kurulumda (henüz hiçbir model yokken, ör. yeni bir
+    `fourkeys_ml_artifacts` volume'ünden sonra) veya toplu bir yeniden
+    eğitim istendiğinde, 5 ayrı `curl`/deploy script'i yerine bunu
+    kullanabilirsiniz. Bir adımın başarısız olması diğerlerini
+    ENGELLEMEZ — her adımın sonucu `steps` listesinde ayrı raporlanır."""
+    exchange = get_exchange(settings.exchange_id)
+    symbols = _resolve_symbols(exchange, payload.symbols)
+    if not symbols:
+        raise HTTPException(status_code=400, detail="Eğitim için sembol bulunamadı.")
+
+    results = train_all_models(exchange, symbols)
+    return TrainAllResponse(
+        symbols_used=len(symbols),
+        steps=[TrainAllStepModel(step=r.step, ok=r.ok, detail=r.detail) for r in results],
     )
 
 
