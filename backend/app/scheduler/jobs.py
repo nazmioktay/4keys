@@ -1,12 +1,22 @@
 import logging
 
+from app.backtest.data import timeframe_to_minutes
 from app.core.config import settings
 from app.engine.service import ModelNotTrained, run_cycle_once
 from app.exchanges import get_exchange
 from app.macro.service import refresh_and_record_macro_snapshot
+from app.ml.lstm_model import DEFAULT_LSTM_MODEL_PATH, LSTMSignalModel
 from app.ml.meta_label import DEFAULT_META_MODEL_PATH
 from app.ml.model import SignalModel
-from app.ml.train import train_meta_label_model, train_signal_model_validated
+from app.ml.online_model import DEFAULT_ONLINE_MODEL_PATH
+from app.ml.regime import DEFAULT_REGIME_MODEL_PATH
+from app.ml.train import (
+    train_lstm_signal_model,
+    train_meta_label_model,
+    train_online_signal_model,
+    train_signal_model_validated,
+    train_signal_models_by_regime,
+)
 from app.orderbook.service import refresh_all_configured_symbols
 from app.screener.scanner import top_long, top_short
 from app.screener.service import refresh as refresh_screener
@@ -21,6 +31,21 @@ ENGINE_CYCLE_JOB_ID = "engine_cycle"
 MACRO_REFRESH_JOB_ID = "macro_refresh"
 ORDERBOOK_REFRESH_JOB_ID = "orderbook_refresh"
 AUTO_RETRAIN_JOB_ID = "auto_retrain"
+AUTO_RETRAIN_LSTM_JOB_ID = "auto_retrain_lstm"
+AUTO_RETRAIN_ONLINE_JOB_ID = "auto_retrain_online"
+AUTO_RETRAIN_REGIME_JOB_ID = "auto_retrain_regime"
+
+
+def compute_auto_retrain_interval_seconds() -> int:
+    """Otomatik yeniden eğitim aralığını hesaplar — bkz. `Settings.ml_auto_retrain_seconds`
+    docstring'i (sabit takvim süresi yerine, eğitim penceresinin ne kadarının
+    YENİ veriyle değiştiğine dayalı bir gerekçe). `ml_auto_retrain_seconds`
+    açıkça verilmişse (None değilse) doğrudan onu döner."""
+    if settings.ml_auto_retrain_seconds is not None:
+        return settings.ml_auto_retrain_seconds
+    minutes = timeframe_to_minutes(settings.ml_train_timeframe)
+    interval = int(settings.ml_train_lookback * minutes * 60 * settings.ml_auto_retrain_refresh_fraction)
+    return max(interval, 3600)  # en az 1 saat
 
 
 def job_refresh_screener() -> None:
@@ -89,11 +114,11 @@ def job_refresh_orderbook() -> None:
 
 
 def job_auto_retrain() -> None:
-    """Periyodik iş (varsayılan KAPALI, bkz. `FOURKEYS_ML_AUTO_RETRAIN_ENABLED`):
+    """Periyodik iş (bkz. `FOURKEYS_ML_AUTO_RETRAIN_ENABLED`, varsayılan AÇIK):
     XGBoost'u (ve varsa meta-label modelini) screener'ın top long/short
-    listesiyle otomatik olarak yeniden eğitir. Aralık `ml_auto_retrain_seconds`
-    ile kontrol edilir (bkz. `app.core.config` — bu değerin gerekçesi ve
-    ampirik olarak doğrulanamadığı notu orada belgelidir)."""
+    listesiyle otomatik olarak yeniden eğitir. Aralık `compute_auto_retrain_interval_seconds()`
+    ile hesaplanır (bkz. `app.core.config.Settings.ml_auto_retrain_seconds`
+    docstring'i — veri hacmine dayalı gerekçe)."""
     try:
         exchange = get_exchange(settings.exchange_id)
         results = refresh_screener()
@@ -125,3 +150,98 @@ def job_auto_retrain() -> None:
     except Exception as exc:  # noqa: BLE001 - zamanlayıcı thread'i asla çökmemeli
         logger.exception("auto retrain job failed")
         status.record(AUTO_RETRAIN_JOB_ID, ok=False, detail=str(exc))
+
+
+def _auto_retrain_symbols() -> list[str] | None:
+    """`job_auto_retrain` ile AYNI sembol seçimi (screener top long/short) —
+    LSTM/online/regime otomatik yenileme job'ları da bunu paylaşır, böylece
+    tüm modeller AYNI evrenle senkron kalır."""
+    results = refresh_screener()
+    picks = top_long(results, settings.screener_top_n) + top_short(results, settings.screener_top_n)
+    return [r.symbol for r in picks] or None
+
+
+def job_auto_retrain_lstm() -> None:
+    """Periyodik iş: LSTM'i otomatik yeniden eğitir — YALNIZCA `ensemble_lstm_enabled`
+    açıksa VEYA model daha önce en az bir kez elle eğitilmişse (disk'te
+    dosyası varsa) çalışır; hiç kullanılmayan bir modeli sıfırdan eğitmeye
+    BAŞLAMAZ. Aralık `compute_auto_retrain_interval_seconds()` ile AYNI
+    (bkz. `Settings.ml_auto_retrain_seconds`).
+
+    Bilinen risk (README'de de belgeli): ağır eğitim işleri şu an ayrı bir
+    process'te DEĞİL, aynı uzun ömürlü uvicorn process'i içinde çalışıyor —
+    PyTorch'un bellek ayırıcısı belleği işletim sistemine tam geri vermeyebilir,
+    tekrarlanan LSTM eğitimleri kümülatif bellek artışına yol açabilir. Bu
+    job'un periyodu (varsayılan ~20 gün) bunu pratikte seyrek kılar, ama
+    kesin çözüm ayrı bir eğitim process'i/worker'ı (henüz yapılmadı)."""
+    if not (settings.ensemble_lstm_enabled or DEFAULT_LSTM_MODEL_PATH.exists()):
+        status.record(AUTO_RETRAIN_LSTM_JOB_ID, ok=True, detail="atlandı: LSTM hiç kullanılmıyor")
+        return
+    try:
+        exchange = get_exchange(settings.exchange_id)
+        symbols = _auto_retrain_symbols()
+        if symbols is None:
+            status.record(AUTO_RETRAIN_LSTM_JOB_ID, ok=True, detail="atlandı: screener'dan sembol gelmedi")
+            return
+
+        result = train_lstm_signal_model(exchange, symbols)
+        status.record(
+            AUTO_RETRAIN_LSTM_JOB_ID,
+            ok=True,
+            detail=f"LSTM: {result.rows_used} satır, oos_balanced_acc={result.out_of_sample.balanced_accuracy:.3f}",
+        )
+    except Exception as exc:  # noqa: BLE001 - zamanlayıcı thread'i asla çökmemeli
+        logger.exception("auto retrain (LSTM) job failed")
+        status.record(AUTO_RETRAIN_LSTM_JOB_ID, ok=False, detail=str(exc))
+
+
+def job_auto_retrain_online() -> None:
+    """Periyodik iş: online modeli (river ARF) otomatik yeniden eğitir —
+    YALNIZCA `ensemble_online_enabled` açıksa VEYA model daha önce en az bir
+    kez elle eğitilmişse çalışır. `river`'ın Hoeffding ağaçları XGBoost/LSTM'e
+    göre çok daha hafif eğitildiğinden (bkz. README) bu job'un OOM riski YOK."""
+    if not (settings.ensemble_online_enabled or DEFAULT_ONLINE_MODEL_PATH.exists()):
+        status.record(AUTO_RETRAIN_ONLINE_JOB_ID, ok=True, detail="atlandı: online model hiç kullanılmıyor")
+        return
+    try:
+        exchange = get_exchange(settings.exchange_id)
+        symbols = _auto_retrain_symbols()
+        if symbols is None:
+            status.record(AUTO_RETRAIN_ONLINE_JOB_ID, ok=True, detail="atlandı: screener'dan sembol gelmedi")
+            return
+
+        _, report = train_online_signal_model(exchange, symbols)
+        status.record(
+            AUTO_RETRAIN_ONLINE_JOB_ID,
+            ok=True,
+            detail=f"online: {report.rows_used} satır, overall_balanced_acc={report.overall_balanced_accuracy:.3f}",
+        )
+    except Exception as exc:  # noqa: BLE001 - zamanlayıcı thread'i asla çökmemeli
+        logger.exception("auto retrain (online) job failed")
+        status.record(AUTO_RETRAIN_ONLINE_JOB_ID, ok=False, detail=str(exc))
+
+
+def job_auto_retrain_regime() -> None:
+    """Periyodik iş: rejim (GMM) + rejim-başına XGBoost modellerini otomatik
+    yeniden eğitir — YALNIZCA daha önce en az bir kez elle eğitilmişse
+    (`GET /ml/train-regime` ile) çalışır; canlı karar motoruna henüz
+    BAĞLANMADIĞI için (bkz. README) bir ensemble bayrağı yok, tek koşul
+    dosyanın varlığı."""
+    if not DEFAULT_REGIME_MODEL_PATH.exists():
+        status.record(AUTO_RETRAIN_REGIME_JOB_ID, ok=True, detail="atlandı: rejim modeli hiç eğitilmemiş")
+        return
+    try:
+        exchange = get_exchange(settings.exchange_id)
+        symbols = _auto_retrain_symbols()
+        if symbols is None:
+            status.record(AUTO_RETRAIN_REGIME_JOB_ID, ok=True, detail="atlandı: screener'dan sembol gelmedi")
+            return
+
+        _, results = train_signal_models_by_regime(exchange, symbols)
+        summary = "; ".join(
+            f"rejim {r.regime}: {r.rows_used} satır" + (f" (hata: {r.error})" if r.error else "") for r in results
+        )
+        status.record(AUTO_RETRAIN_REGIME_JOB_ID, ok=True, detail=summary or "sonuç yok")
+    except Exception as exc:  # noqa: BLE001 - zamanlayıcı thread'i asla çökmemeli
+        logger.exception("auto retrain (regime) job failed")
+        status.record(AUTO_RETRAIN_REGIME_JOB_ID, ok=False, detail=str(exc))

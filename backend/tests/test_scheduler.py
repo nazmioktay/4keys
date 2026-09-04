@@ -151,6 +151,96 @@ def test_job_auto_retrain_records_failure(monkeypatch):
     assert result.error_count == 1
 
 
+def test_compute_auto_retrain_interval_seconds_derived_from_lookback(monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "ml_auto_retrain_seconds", None)
+    monkeypatch.setattr(settings, "ml_train_timeframe", "1h")
+    monkeypatch.setattr(settings, "ml_train_lookback", 10000)
+    monkeypatch.setattr(settings, "ml_auto_retrain_refresh_fraction", 0.05)
+
+    # 10000 saat * 3600sn * 0.05 = 1.800.000sn
+    assert jobs.compute_auto_retrain_interval_seconds() == 1_800_000
+
+
+def test_compute_auto_retrain_interval_seconds_respects_explicit_override(monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "ml_auto_retrain_seconds", 3600)
+    assert jobs.compute_auto_retrain_interval_seconds() == 3600
+
+
+def test_compute_auto_retrain_interval_seconds_has_a_floor(monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "ml_auto_retrain_seconds", None)
+    monkeypatch.setattr(settings, "ml_train_timeframe", "1h")
+    monkeypatch.setattr(settings, "ml_train_lookback", 10)
+    monkeypatch.setattr(settings, "ml_auto_retrain_refresh_fraction", 0.05)
+
+    assert jobs.compute_auto_retrain_interval_seconds() == 3600  # taban değer
+
+
+def test_job_auto_retrain_lstm_skips_when_unused(monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "ensemble_lstm_enabled", False)
+    monkeypatch.setattr(jobs, "DEFAULT_LSTM_MODEL_PATH", type("P", (), {"exists": staticmethod(lambda: False)})())
+
+    jobs.job_auto_retrain_lstm()
+
+    result = status.get_all()[jobs.AUTO_RETRAIN_LSTM_JOB_ID]
+    assert result.ok is True
+    assert "atlandı" in result.detail
+
+
+def test_job_auto_retrain_lstm_trains_when_already_used(monkeypatch):
+    from app.core.config import settings
+
+    class _FakeResult:
+        rows_used = 500
+
+        class out_of_sample:
+            balanced_accuracy = 0.4
+
+    monkeypatch.setattr(settings, "ensemble_lstm_enabled", False)
+    monkeypatch.setattr(jobs, "DEFAULT_LSTM_MODEL_PATH", type("P", (), {"exists": staticmethod(lambda: True)})())
+    monkeypatch.setattr(jobs, "get_exchange", lambda *_a, **_k: object())
+    monkeypatch.setattr(jobs, "refresh_screener", lambda: [object()])
+    monkeypatch.setattr(jobs, "top_long", lambda results, n: [type("R", (), {"symbol": "BTC/USDT:USDT"})()])
+    monkeypatch.setattr(jobs, "top_short", lambda results, n: [])
+    monkeypatch.setattr(jobs, "train_lstm_signal_model", lambda *a, **k: _FakeResult())
+
+    jobs.job_auto_retrain_lstm()
+
+    result = status.get_all()[jobs.AUTO_RETRAIN_LSTM_JOB_ID]
+    assert result.ok is True
+    assert "500" in result.detail
+
+
+def test_job_auto_retrain_online_skips_when_unused(monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "ensemble_online_enabled", False)
+    monkeypatch.setattr(jobs, "DEFAULT_ONLINE_MODEL_PATH", type("P", (), {"exists": staticmethod(lambda: False)})())
+
+    jobs.job_auto_retrain_online()
+
+    result = status.get_all()[jobs.AUTO_RETRAIN_ONLINE_JOB_ID]
+    assert result.ok is True
+    assert "atlandı" in result.detail
+
+
+def test_job_auto_retrain_regime_skips_when_never_trained(monkeypatch):
+    monkeypatch.setattr(jobs, "DEFAULT_REGIME_MODEL_PATH", type("P", (), {"exists": staticmethod(lambda: False)})())
+
+    jobs.job_auto_retrain_regime()
+
+    result = status.get_all()[jobs.AUTO_RETRAIN_REGIME_JOB_ID]
+    assert result.ok is True
+    assert "atlandı" in result.detail
+
+
 def test_start_scheduler_disabled_returns_none():
     scheduler = start_scheduler(enabled=False)
     assert scheduler is None
@@ -165,17 +255,24 @@ def test_start_scheduler_enabled_registers_both_jobs():
     assert get_scheduler() is scheduler
 
 
-def test_start_scheduler_does_not_register_auto_retrain_by_default():
+def test_start_scheduler_can_disable_auto_retrain(monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "ml_auto_retrain_enabled", False)
     scheduler = start_scheduler(enabled=True)
     assert scheduler.get_job(jobs.AUTO_RETRAIN_JOB_ID) is None
 
 
-def test_start_scheduler_registers_auto_retrain_when_enabled(monkeypatch):
-    from app.core.config import settings
-
-    monkeypatch.setattr(settings, "ml_auto_retrain_enabled", True)
+def test_start_scheduler_registers_all_four_retrain_jobs_by_default():
+    # ml_auto_retrain_enabled artık varsayılan AÇIK (kullanıcı isteği: tüm
+    # modeller otomatik yenilensin) — XGBoost + LSTM + online + regime job'ları
+    # hepsi kaydedilmeli (kendi içlerinde dosya-var-mı kontrolüyle gereksiz
+    # eğitimi atlıyorlar, ama job'un KENDİSİ her zaman kayıtlıdır).
     scheduler = start_scheduler(enabled=True)
     assert scheduler.get_job(jobs.AUTO_RETRAIN_JOB_ID) is not None
+    assert scheduler.get_job(jobs.AUTO_RETRAIN_LSTM_JOB_ID) is not None
+    assert scheduler.get_job(jobs.AUTO_RETRAIN_ONLINE_JOB_ID) is not None
+    assert scheduler.get_job(jobs.AUTO_RETRAIN_REGIME_JOB_ID) is not None
 
 
 def test_start_scheduler_is_idempotent():

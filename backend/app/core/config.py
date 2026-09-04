@@ -88,18 +88,29 @@ class Settings(BaseSettings):
     macro_refresh_seconds: int = 21600  # 6 saat — makro veriler (VIX, altın, faiz oranları vb.) günde birkaç kez yeterli
     orderbook_refresh_seconds: int = 1800  # 30 dakika — emir defterinin ANLIK görüntüsü, geçmişi yoktur (bkz. app.orderbook)
 
-    # --- Otomatik yeniden eğitim (bkz. app.scheduler.jobs.job_auto_retrain) ---
-    # Neden 24 saat: ml_train_lookback (10.000 saatlik mum, ~1.14 yıl) ile
-    # kıyaslandığında bir günde biriken ~24 yeni bar, toplam veri setinin
-    # ~%0.24'ü — bundan daha sık yeniden eğitmek (ör. saatlik) hesaplama
-    # maliyetini artırır ama modelin öğrendiği dağılımı neredeyse hiç
-    # değiştirmez. Bu, gerçek bir "backtest ile bulunmuş" optimum DEĞİL —
-    # canlı piyasa verisine bu ortamdan erişilemediği için ampirik olarak
-    # doğrulanamadı; rejim değişikliklerini makul bir gecikmeyle yakalayan,
-    # sektörde yaygın bir varsayılan kabul edilmelidir. `enabled=False`
-    # yapılıp elle (`/ml/train`) tetiklenmeye devam edilebilir.
-    ml_auto_retrain_enabled: bool = False
-    ml_auto_retrain_seconds: int = 86400  # 24 saat
+    # --- Otomatik yeniden eğitim (bkz. app.scheduler.jobs) ---
+    # Aralık, sabit bir takvim süresi yerine HESAPLANIR (bkz.
+    # `app.scheduler.jobs.compute_auto_retrain_interval_seconds`): eğitim
+    # penceresinin (`ml_train_lookback` bar, `ml_train_timeframe`) ne kadarı
+    # YENİ veriyle değişmiş olmalı ki yeniden eğitmeye değsin. Varsayılan
+    # `ml_auto_retrain_refresh_fraction=0.05` (%5) ile, varsayılan
+    # ml_train_lookback=10000 / ml_train_timeframe=1h için:
+    # 10000 saat * 3600sn * 0.05 = 1.800.000sn (~20.8 gün). Bu bir
+    # "backtest ile bulunmuş" optimum DEĞİL — sektörde yaygın "pencerenin
+    # ~%5'i tazelenince yeniden eğit" pratiğine dayanan, veri hacmine göre
+    # GEREKÇELENDİRİLMİŞ bir varsayılan (önceki sabit 24 saatten farkı:
+    # `ml_train_lookback`/`ml_train_timeframe` değişirse aralık da otomatik
+    # ölçeklenir). `ml_auto_retrain_seconds` açıkça verilirse (None değilse)
+    # bu hesaplamanın YERİNE geçer.
+    #
+    # Hangi modeller: XGBoost + (varsa) meta-label HER ZAMAN bu job'a dahildir
+    # (canlı karar motorunun birincil modeli). LSTM/PatchTST/online/regime
+    # modelleri yalnızca ZATEN EN AZ BİR KEZ elle eğitilmişse (disk'te dosyası
+    # varsa) veya ilgili ensemble bayrağı açıksa otomatik yenilenir — hiç
+    # kullanılmayan bir modeli sıfırdan otomatik eğitmeye başlamaz.
+    ml_auto_retrain_enabled: bool = True
+    ml_auto_retrain_seconds: int | None = None  # None = compute_auto_retrain_interval_seconds() kullanılır
+    ml_auto_retrain_refresh_fraction: float = 0.05
 
     # --- Ücretsiz makro veri kaynakları (bkz. app.macro.data) ---
     # FRED (ABD Merkez Bankası) API anahtarı — ücretsiz, anında alınır:

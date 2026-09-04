@@ -7,11 +7,18 @@ from app.core.config import settings
 
 from .jobs import (
     AUTO_RETRAIN_JOB_ID,
+    AUTO_RETRAIN_LSTM_JOB_ID,
+    AUTO_RETRAIN_ONLINE_JOB_ID,
+    AUTO_RETRAIN_REGIME_JOB_ID,
     ENGINE_CYCLE_JOB_ID,
     MACRO_REFRESH_JOB_ID,
     ORDERBOOK_REFRESH_JOB_ID,
     SCREENER_REFRESH_JOB_ID,
+    compute_auto_retrain_interval_seconds,
     job_auto_retrain,
+    job_auto_retrain_lstm,
+    job_auto_retrain_online,
+    job_auto_retrain_regime,
     job_refresh_macro,
     job_refresh_orderbook,
     job_refresh_screener,
@@ -72,14 +79,31 @@ def start_scheduler(enabled: bool | None = None) -> BackgroundScheduler | None:
             coalesce=True,
         )
         if settings.ml_auto_retrain_enabled:
-            scheduler.add_job(
-                job_auto_retrain,
-                "interval",
-                seconds=settings.ml_auto_retrain_seconds,
-                id=AUTO_RETRAIN_JOB_ID,
-                max_instances=1,
-                coalesce=True,
-            )
+            # Aynı hesaplanmış aralık (bkz. `compute_auto_retrain_interval_seconds`)
+            # 4 model ailesi için de kullanılır. `next_run_time` KASITLI olarak
+            # verilmez (APScheduler varsayılanı: ilk çalıştırma bir TAM aralık
+            # sonra) — uygulama her açılışta/redeploy'da (bkz. recreate-backend.sh
+            # sık restart deseni) ağır eğitimleri hemen tetiklemesin diye (bkz.
+            # önceki `job_auto_retrain`'deki aynı gerekçe). Job'lar zaten kendi
+            # içlerinde dosya-var-mı/ensemble-bayrağı kontrolüyle gereksiz
+            # eğitimleri atlıyor (bkz. app.scheduler.jobs); yine de her biri
+            # ayrı bir `id` ile farklı thread zamanlamasına düşer, aynı anda
+            # çakışmaları APScheduler'ın kendi thread havuzu yönetir.
+            interval_seconds = compute_auto_retrain_interval_seconds()
+            for job_id, job_func in (
+                (AUTO_RETRAIN_JOB_ID, job_auto_retrain),
+                (AUTO_RETRAIN_LSTM_JOB_ID, job_auto_retrain_lstm),
+                (AUTO_RETRAIN_ONLINE_JOB_ID, job_auto_retrain_online),
+                (AUTO_RETRAIN_REGIME_JOB_ID, job_auto_retrain_regime),
+            ):
+                scheduler.add_job(
+                    job_func,
+                    "interval",
+                    seconds=interval_seconds,
+                    id=job_id,
+                    max_instances=1,
+                    coalesce=True,
+                )
         scheduler.start()
         # İlk taramayı hemen tetikle ki motor döngüsü boş önbekleğe düşmesin.
         scheduler.modify_job(SCREENER_REFRESH_JOB_ID, next_run_time=datetime.now())

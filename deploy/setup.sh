@@ -61,11 +61,13 @@ docker build -t 4keys-backend ./backend
 
 echo "==> Backend container başlatılıyor (yalnızca localhost:8000, dışarı Nginx üzerinden)..."
 docker rm -f 4keys-backend 2>/dev/null || true
+docker volume create fourkeys_ml_artifacts >/dev/null
 docker run -d \
   --name 4keys-backend \
   --restart unless-stopped \
   -p 127.0.0.1:8000:8000 \
   --env-file backend/.env \
+  -v fourkeys_ml_artifacts:/app/app/ml/artifacts \
   4keys-backend
 
 echo "==> Frontend build ediliyor..."

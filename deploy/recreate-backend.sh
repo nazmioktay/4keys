@@ -20,6 +20,13 @@ ENV_FILE="$APP_DIR/backend/.env"
 
 docker rm -f 4keys-backend 2>/dev/null || true
 
+# Eğitilmiş modeller (XGBoost/LSTM/online/regime/meta-label) container
+# içindeki /app/app/ml/artifacts'te tutulur ve imaja (.gitignore'da olduğu
+# için) GÖMÜLMEZ — bu named volume olmadan her `docker rm` + yeni image ile
+# `docker run` modelleri SİLERDİ, otomatik/manuel her retrain'in sıfırdan
+# başlamasına yol açardı. Volume zaten varsa `create` no-op'tur.
+docker volume create fourkeys_ml_artifacts >/dev/null
+
 if docker network inspect "$NETWORK" >/dev/null 2>&1; then
   echo "==> 4keys-net ağı bulundu, backend ona bağlanacak (veritabanı erişimi için)."
   docker run -d \
@@ -28,6 +35,7 @@ if docker network inspect "$NETWORK" >/dev/null 2>&1; then
     --restart unless-stopped \
     --publish 127.0.0.1:8000:8000 \
     --env-file "$ENV_FILE" \
+    -v fourkeys_ml_artifacts:/app/app/ml/artifacts \
     4keys-backend
 else
   echo "==> 4keys-net ağı yok, veritabansız çalışılıyor."
@@ -36,6 +44,7 @@ else
     --restart unless-stopped \
     --publish 127.0.0.1:8000:8000 \
     --env-file "$ENV_FILE" \
+    -v fourkeys_ml_artifacts:/app/app/ml/artifacts \
     4keys-backend
 fi
 

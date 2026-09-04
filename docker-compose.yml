@@ -22,6 +22,16 @@ services:
       FOURKEYS_DATABASE_URL: postgresql+psycopg2://fourkeys:fourkeys@db:5432/fourkeys
     env_file:
       - ./backend/.env
+    volumes:
+      # Eğitilmiş modeller (XGBoost/LSTM/online/regime/meta-label, bkz.
+      # app/ml/artifacts/) `COPY . .` ile imaja gömülmüyor (.gitignore'da) —
+      # bu named volume olmadan HER `docker build` (ör. recreate-backend.sh)
+      # yeni bir boş image ile modelleri siliyordu. Artık container yeniden
+      # oluşturulsa/rebuild edilse bile bu volume korunur, eğitimler kalıcı
+      # olur ve otomatik yeniden eğitim (bkz. app.scheduler.jobs) yalnızca
+      # veri hacmine göre gerektiğinde tetiklenir — her redeploy'da sıfırdan
+      # değil.
+      - fourkeys_ml_artifacts:/app/app/ml/artifacts
     depends_on:
       db:
         condition: service_healthy
@@ -70,3 +80,4 @@ volumes:
   fourkeys_db_data:
   fourkeys_prometheus_data:
   fourkeys_grafana_data:
+  fourkeys_ml_artifacts:

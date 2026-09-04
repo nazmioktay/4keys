@@ -68,12 +68,14 @@ fi
 
 echo "==> Backend container'ı aynı ağa bağlı olarak yeniden oluşturuluyor..."
 docker rm -f 4keys-backend 2>/dev/null || true
+docker volume create fourkeys_ml_artifacts >/dev/null
 docker run -d \
   --name 4keys-backend \
   --network "$NETWORK" \
   --restart unless-stopped \
   -p 127.0.0.1:8000:8000 \
   --env-file "$ENV_FILE" \
+  -v fourkeys_ml_artifacts:/app/app/ml/artifacts \
   4keys-backend
 
 echo ""
