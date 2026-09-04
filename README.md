@@ -832,11 +832,12 @@ da scraping riskini kabul etmek gerekecek; kullanıcıyla ayrıca karar verilece
 - [x] Screener + motorları periyodik/zamanlanmış bir job'a bağlama (APScheduler, FastAPI lifespan)
 - [x] ML metodolojisi yükseltmesi: triple-barrier etiketleme + olasılık kalibrasyonu + meta-labeling ("Kripto Bot Tam Rehber" entegrasyonu)
 - [x] XGBoost (Faz A) — birincil model + walk-forward/purged CV + out-of-sample holdout + SHAP açıklanabilirlik
-- [~] LSTM (Faz B) — altyapı kuruldu (dropout + L2 + out-of-sample holdout ile), ancak ilk canlı sonuç overfit çıktı (bkz. yukarıdaki not); kullanıma alınmadı, rafta
+- [~] LSTM (Faz B) — altyapı kuruldu (dropout + L2 + erken durdurma + gradyan kırpma + sınıf ağırlıklandırma ile), ancak canlı sonuçlar hâlâ üretime hazır değil: ilk çoklu-sembol denemesi overfit çıktı; BTC-only lookback testinde ise balanced_accuracy tam olarak 1/3'e (rastgele seviye) oturdu — model çoğunluk sınıfını ezbere tahmin ediyordu (sınıf ağırlıklandırma bu yüzden eklendi, henüz yeniden test edilmedi); kullanıma alınmadı, rafta
 - [ ] Reinforcement Learning (Faz C, opsiyonel)
 - [x] Kalıcı veritabanı katmanı (TimescaleDB/PostgreSQL, opsiyonel) + Docker Compose
 - [x] Güvenlik protokolü sertleştirme: kill switch (manuel+otomatik), sabit kaldıraç tavanı, API anahtarı çekim izni kontrolü, sır tarama betiği
 - [ ] Redis canlı cache katmanı (çoklu-process ölçeklenme gerektiğinde)
+- [ ] Ağır eğitim işlerinin (LSTM/XGBoost) ayrı bir process'te (subprocess/worker) çalıştırılması — şu an aynı uzun ömürlü `uvicorn` process'i içinde çalışıyor; art arda birkaç ağır eğitim isteği, Python/PyTorch bellek ayırıcısının belleği işletim sistemine tam geri vermemesi nedeniyle kümülatif bir bellek artışına ve OOM'a yol açabiliyor (bkz. BTC-only lookback sweep testinde 10K/20K başarılı, 30K'de tekrar OOM). Geçici çözüm: ağır sweep'lerde adımlar arasında backend'i yeniden başlatmak (`recreate-backend.sh`)
 - [x] BIST/VIOP adapter'ı (Denizbank AlgoLab — oturum tabanlı, aynı Exchange arayüzü, aynı güvenlik kapıları)
 - [x] Frontend (React) — Portföy/Al-Sat/Araştırıcı/Ayarlar, gerçek backend'e bağlı
 - [x] Demo/sentetik veri modu (`FOURKEYS_EXCHANGE_ID=demo`) — ağ erişimi olmadan uçtan uca canlı gösterim

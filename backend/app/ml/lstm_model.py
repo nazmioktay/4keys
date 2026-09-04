@@ -132,7 +132,17 @@ class LSTMSignalModel:
         loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
         optimizer = torch.optim.Adam(self._net.parameters(), lr=learning_rate, weight_decay=weight_decay)
-        criterion = nn.CrossEntropyLoss()
+        # Sınıf ağırlıklandırma: canlı BTC-only testinde balanced_accuracy
+        # tam olarak 1/3'e (3 sınıflı rastgele seviye) oturduğu görüldü —
+        # ham accuracy yüksekken bu, modelin çoğunluk sınıfını (genelde
+        # "neutral") ezbere her seferinde tahmin ettiğinin klasik belirtisi.
+        # Ters frekans ağırlıklandırma, azınlık sınıflardaki (long/short)
+        # hatayı daha maliyetli hale getirip bu çöküşü önlemeyi hedefler.
+        class_counts = np.bincount(y_idx, minlength=len(self.classes_)).astype("float64")
+        class_counts[class_counts == 0] = 1.0
+        class_weights = class_counts.sum() / (len(class_counts) * class_counts)
+        weight_tensor = torch.from_numpy(class_weights.astype("float32"))
+        criterion = nn.CrossEntropyLoss(weight=weight_tensor)
 
         has_val = X_val is not None and y_val is not None and len(X_val) > 0
         X_val_tensor = y_val_tensor = None

@@ -11,6 +11,14 @@ set -euo pipefail
 # x deger sayisi kadar surebilir) ve EN SON calisan deger, canli modelin
 # kaydedilmis hali olarak kalir (train_lstm_signal_model her cagrida
 # model.save() yapiyor).
+#
+# UYARI (bellek): art arda calisan agir egitim istekleri, AYNI uzun omurlu
+# uvicorn process'inde belirgin bir kumulatif bellek artisina yol acabilir
+# (Python/PyTorch bellek ayiricisi her istek sonrasi belleği isletim
+# sistemine tam geri vermiyor). Uc deger tek seferde OOM'a yol actiysa,
+# `bash recreate-backend.sh` ile backend'i yeniden baslatip kalan
+# lookback degerlerini AYRI AYRI (sweep scriptini degil, tek tek
+# train-lstm-btc.sh benzeri bir cagriyi) denemek daha guvenli olur.
 # ============================================================
 
 for LOOKBACK in 10000 20000 30000; do
