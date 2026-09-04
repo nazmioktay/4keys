@@ -72,6 +72,24 @@ class RiskRules(BaseModel):
     vix_zscore_block_threshold: float = Field(2.5, gt=0, description="VIX z-skoru (macro_vix_norm) bu değeri aşarsa yeni pozisyon TAMAMEN engellenir.")
     vix_zscore_reduce_threshold: float = Field(1.5, gt=0, description="VIX z-skoru bu değeri aşarsa (block eşiğine kadar) pozisyon boyutu yarıya indirilir.")
 
+    # --- İşlem maliyetleri (komisyon + kayma/slippage) ---
+    # Önceden PnL yalnızca fiyat farkından hesaplanıyordu — gerçek bir
+    # işlemde her BACAK (açılış VE kapanış) komisyon ve kayma (piyasa
+    # emrinin gösterilen fiyattan biraz sapmayla dolması) maliyeti taşır.
+    # Varsayılanlar Binance Futures taker ücretine (~%0.04) ve mütevazı
+    # bir kayma tahminine (~%0.02) dayanır — kesin değerler değildir,
+    # ayarlanabilir.
+    commission_pct: float = Field(0.04, ge=0, description="Her işlem bacağı (açılış veya kapanış) için komisyon yüzdesi.")
+    slippage_pct: float = Field(0.02, ge=0, description="Her işlem bacağı için varsayılan kayma (slippage) yüzdesi.")
+
+    # --- Stop-loss uygulaması (canlı/paper trading) ---
+    # Önceden `assumed_stop_loss_pct` (bkz. DecisionEngine) yalnızca Kelly
+    # boyutlandırma HESABI için kullanılıyordu — pozisyona gerçekten
+    # KAYDEDİLMİYOR ve fiyat o seviyeyi geçse bile hiçbir zaman
+    # KONTROL EDİLMİYORDU. Artık her döngüde kontrol edilip aşılırsa
+    # pozisyon zorla kapatılır (bkz. DecisionEngine.evaluate).
+    stop_loss_enabled: bool = Field(True, description="Açık ise açılıştaki stop-loss seviyesi her döngüde kontrol edilir; aşılırsa pozisyon (modelin sinyalinden BAĞIMSIZ) zorla kapatılır.")
+
     @field_validator("entry_tranche_weights", "exit_tranche_weights")
     @classmethod
     def _validate_tranche_weights(cls, value: list[float]) -> list[float]:

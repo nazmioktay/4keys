@@ -67,7 +67,9 @@ def test_evaluate_risk_blocks_new_symbol_over_concurrent_limit():
 
 
 def test_portfolio_manager_open_close_updates_equity():
-    portfolio = PortfolioManager(starting_equity=1000, rules=RiskRules())
+    # commission_pct/slippage_pct=0: bu test saf fiyat farkı PnL'ini
+    # ölçüyor, işlem maliyetlerini değil (bkz. test_close_applies_transaction_costs).
+    portfolio = PortfolioManager(starting_equity=1000, rules=RiskRules(commission_pct=0, slippage_pct=0))
     decision = portfolio.propose_open("BTC/USDT", "long", entry_price=100, stop_loss_price=97)
     assert decision.allowed is True
     portfolio.open("BTC/USDT", "long", 100, decision.size_quote)
@@ -214,7 +216,8 @@ def test_propose_open_vix_regime_filter_disabled_by_default():
 
 
 def test_pnl_summary_totals_match_closed_history():
-    portfolio = PortfolioManager(starting_equity=1000, rules=RiskRules(entry_tranche_weights=[1.0]))
+    # commission_pct/slippage_pct=0: bu test saf fiyat farkı PnL'ini ölçüyor.
+    portfolio = PortfolioManager(starting_equity=1000, rules=RiskRules(entry_tranche_weights=[1.0], commission_pct=0, slippage_pct=0))
     portfolio.open("BTC/USDT", "long", entry_price=100, size_quote=1000)
     portfolio.close("BTC/USDT", exit_price=110)  # +%10 -> +100 quote
 
@@ -376,3 +379,100 @@ def test_decision_engine_uses_portfolio_manager_for_sizing():
         assert position.size_quote > 0
         # %1 risk, %3 varsayılan SL mesafesi -> boyut equity'nin küçük bir kısmı olmalı
         assert position.size_quote < portfolio.equity
+
+
+def test_close_applies_transaction_costs():
+    # commission_pct=0.05, slippage_pct=0.03 -> round-trip maliyet = (0.05+0.03)*2 = %0.16
+    portfolio = PortfolioManager(
+        starting_equity=1000,
+        rules=RiskRules(entry_tranche_weights=[1.0], commission_pct=0.05, slippage_pct=0.03),
+    )
+    portfolio.open("BTC/USDT", "long", entry_price=100, size_quote=1000)
+    record = portfolio.close("BTC/USDT", exit_price=110)  # brüt +%10
+    assert record is not None
+    assert record["pnl_pct"] == pytest.approx(10.0 - 0.16)
+
+
+def test_close_zero_cost_matches_gross_pnl():
+    portfolio = PortfolioManager(
+        starting_equity=1000, rules=RiskRules(entry_tranche_weights=[1.0], commission_pct=0, slippage_pct=0)
+    )
+    portfolio.open("BTC/USDT", "long", entry_price=100, size_quote=1000)
+    record = portfolio.close("BTC/USDT", exit_price=110)
+    assert record["pnl_pct"] == pytest.approx(10.0)
+
+
+def test_portfolio_position_stop_loss_breached_long():
+    position = PortfolioManager(starting_equity=1000).open("BTC/USDT", "long", entry_price=100, size_quote=100, stop_loss_price=95)
+    assert position.stop_loss_breached(96) is False
+    assert position.stop_loss_breached(95) is True
+    assert position.stop_loss_breached(94) is True
+
+
+def test_portfolio_position_stop_loss_breached_short():
+    position = PortfolioManager(starting_equity=1000).open("BTC/USDT", "short", entry_price=100, size_quote=100, stop_loss_price=105)
+    assert position.stop_loss_breached(104) is False
+    assert position.stop_loss_breached(105) is True
+    assert position.stop_loss_breached(106) is True
+
+
+def test_portfolio_position_no_stop_loss_never_breached():
+    position = PortfolioManager(starting_equity=1000).open("BTC/USDT", "long", entry_price=100, size_quote=100)
+    assert position.stop_loss_price is None
+    assert position.stop_loss_breached(0.01) is False
+
+
+def test_decision_engine_force_closes_on_stop_loss_breach():
+    """Model hâlâ "tut" (nötr güven eşiğinin altında) dese bile, fiyat
+    stop-loss seviyesini geçtiyse pozisyon zorla kapatılmalı."""
+
+    class _StubModel:
+        def predict(self, feature_row):
+            from app.ml.model import Prediction
+
+            return Prediction(direction="neutral", confidence=0.0)
+
+    class _CrashExchange(Exchange):
+        def list_symbols(self, quote_currency, market_type):
+            return ["UPUSDT"]
+
+        def fetch_ohlcv(self, symbol, timeframe, limit, since=None):
+            n = max(limit, 220)
+            rng = np.random.default_rng(0)
+            close = 100 + rng.normal(0, 0.1, n)
+            # Son ~30 bar düşük (90) — Ichimoku bulutu gibi ileri kaydırmalı
+            # göstergeler `latest_feature_vector`in EN SON bar yerine dropna
+            # sonrası kalan son geçerli bardan (biraz daha geriden) okumasına
+            # yol açabiliyor; tek bir bar yerine bir blok düşürmek testi
+            # bu ayrıntıya duyarsız kılıyor.
+            close[-30:] = 90.0  # ani düşüş -> stop-loss'u tetiklemeli
+            return pd.DataFrame(
+                {
+                    "timestamp": pd.date_range("2024-01-01", periods=n, freq="4h"),
+                    "open": close,
+                    "high": close + 1,
+                    "low": close - 1,
+                    "close": close,
+                    "volume": rng.uniform(800, 1200, n),
+                }
+            )
+
+    exchange = _CrashExchange()
+    portfolio = PortfolioManager(starting_equity=1000, rules=RiskRules(entry_tranche_weights=[1.0]))
+    portfolio.open("UPUSDT", "long", entry_price=100, size_quote=100, stop_loss_price=95)
+
+    engine = DecisionEngine(
+        exchange=exchange,
+        model=_StubModel(),
+        positions=PaperPositionStore(),
+        timeframe="4h",
+        lookback=220,
+        open_confidence=0.9,
+        close_confidence=0.9,
+        portfolio=portfolio,
+    )
+
+    action = engine.evaluate("UPUSDT")
+    assert action is not None
+    assert action.type == "close"
+    assert "stop-loss" in action.reason

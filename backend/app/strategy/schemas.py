@@ -40,6 +40,12 @@ class StrategyDefinition(BaseModel):
     exit: ConditionNode | None = None
     take_profit_pct: float | None = None
     stop_loss_pct: float | None = None
+    # İşlem maliyetleri (komisyon + kayma) — önceden hesaba katılmıyordu,
+    # bkz. app.portfolio.schemas.RiskRules'daki AYNI alanlar/gerekçe.
+    # Varsayılanlar Binance Futures taker ücretine (~%0.04) ve mütevazı
+    # bir kayma tahminine (~%0.02) dayanır.
+    commission_pct: float = 0.04
+    slippage_pct: float = 0.02
 
 
 class StrategyBacktestRequest(BaseModel):

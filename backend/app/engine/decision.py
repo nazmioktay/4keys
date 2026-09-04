@@ -164,6 +164,21 @@ class DecisionEngine:
         record_ml_prediction(symbol, prediction.direction, prediction.confidence)
         position = self.portfolio.get(symbol) if self.portfolio is not None else self.positions.get(symbol)
 
+        # Stop-loss: modelin sinyalinden BAĞIMSIZ, sabit bir risk kapısı —
+        # önceden `stop_loss_price` yalnızca Kelly boyutlandırma hesabında
+        # kullanılıp atılıyordu, fiyat o seviyeyi geçse bile HİÇBİR ZAMAN
+        # kontrol edilmiyordu (bkz. `RiskRules.stop_loss_enabled`,
+        # `PortfolioPosition.stop_loss_breached`). Model hâlâ "tut" diyor
+        # olsa bile bu kontrol önceliklidir.
+        if (
+            position is not None
+            and self.portfolio is not None
+            and self.portfolio.rules.stop_loss_enabled
+            and hasattr(position, "stop_loss_breached")
+            and position.stop_loss_breached(price)
+        ):
+            return Action(symbol, "close", f"stop-loss tetiklendi (seviye={position.stop_loss_price:.4f})", price, 1.0)
+
         if position is None:
             if prediction.direction in ("long", "short") and prediction.confidence >= self.open_confidence:
                 if self.meta_model is not None:
@@ -226,7 +241,7 @@ class DecisionEngine:
             reason = "; ".join(decision.reasons) or "risk kuralları nedeniyle reddedildi"
             return Action(symbol, "blocked", reason, price, 0.0)
 
-        self.portfolio.open(symbol, direction, price, decision.size_quote)
+        self.portfolio.open(symbol, direction, price, decision.size_quote, stop_loss_price=stop_loss_price)
         return None
 
     def apply(self, action: Action) -> Action:

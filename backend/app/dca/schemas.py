@@ -12,6 +12,10 @@ class DCAParams(BaseModel):
     take_profit_pct: float = Field(..., gt=0)
     stop_loss_pct: float | None = Field(default=None, gt=0)
     direction: Literal["long", "short"] = "long"
+    # İşlem maliyetleri (komisyon + kayma) — önceden hesaba katılmıyordu,
+    # bkz. app.portfolio.schemas.RiskRules'daki AYNI alanlar/gerekçe.
+    commission_pct: float = Field(0.04, ge=0)
+    slippage_pct: float = Field(0.02, ge=0)
 
 
 class DCABacktestResult(BaseModel):

@@ -38,6 +38,10 @@ def run_backtest(ohlcv: pd.DataFrame, strategy: StrategyDefinition, symbol: str)
             continue
 
         price = float(row["close"])
+        # Bariyer kontrolleri (take-profit/stop-loss/kural) BRÜT pnl_pct
+        # üzerinden yapılır — gerçek bir emir de bu seviyelere brüt fiyat
+        # hareketiyle ulaşır; işlem maliyeti SONRADAN, kaydedilen PnL'e
+        # yansıtılır (aşağıda).
         pnl_pct = _pnl_pct(strategy.direction, entry_price, price)
         exit_reason: str | None = None
 
@@ -49,17 +53,21 @@ def run_backtest(ohlcv: pd.DataFrame, strategy: StrategyDefinition, symbol: str)
             exit_reason = "stop_loss"
 
         if exit_reason:
+            # Round-trip maliyet (giriş BACAĞI + çıkış BACAĞI) — önceden
+            # PnL yalnızca brüt fiyat farkından hesaplanıyordu.
+            cost_pct = (strategy.commission_pct + strategy.slippage_pct) * 2
+            net_pnl_pct = pnl_pct - cost_pct
             trades.append(
                 TradeRecord(
                     entry_index=entry_index,
                     exit_index=i,
                     entry_price=entry_price,
                     exit_price=price,
-                    pnl_pct=round(pnl_pct, 3),
+                    pnl_pct=round(net_pnl_pct, 3),
                     exit_reason=exit_reason,
                 )
             )
-            equity_curve.append(equity_curve[-1] + pnl_pct)
+            equity_curve.append(equity_curve[-1] + net_pnl_pct)
             in_position = False
 
     trades_closed = len(trades)

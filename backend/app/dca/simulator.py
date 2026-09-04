@@ -19,9 +19,14 @@ def simulate_dca(prices: np.ndarray, params: DCAParams) -> DCABacktestResult:
     """Bir DCA botunun `prices` (kapanış fiyatları) üzerindeki davranışını simüle eder.
 
     Basitleştirmeler: mum içi fitil hareketleri değil kapanış fiyatları
-    kullanılır; komisyon ve slipaj hesaba katılmaz; bir seferde tek pozisyon
-    açıktır — bir işlem kapanınca hemen bir sonraki mumda yeni işlem açılır
-    (ASAP start condition davranışı).
+    kullanılır; bir seferde tek pozisyon açıktır — bir işlem kapanınca hemen
+    bir sonraki mumda yeni işlem açılır (ASAP start condition davranışı).
+
+    İşlem maliyeti (komisyon + kayma): her doldurulan emir (base order +
+    her bir safety order) ayrı bir giriş BACAĞI, artı kapanışta tek bir
+    çıkış BACAĞI olmak üzere, doldurulan bacak sayısı kadar
+    `commission_pct + slippage_pct` toplam pnl_pct'ten düşülür. Önceden bu
+    hiç hesaba katılmıyordu.
     """
     direction = params.direction
     n = len(prices)
@@ -64,26 +69,31 @@ def simulate_dca(prices: np.ndarray, params: DCAParams) -> DCABacktestResult:
                     max_capital_used = max(max_capital_used, total_invested)
 
             pnl_pct = _pnl_pct(direction, avg_price, price_j)
+            # Doldurulan bacaklar: base order + safety order'lar (giriş) + 1 çıkış.
+            filled_legs = safety_orders_filled + 2
+            cost_pct = (params.commission_pct + params.slippage_pct) * filled_legs
 
             if pnl_pct >= params.take_profit_pct:
-                profit_quote = total_invested * (pnl_pct / 100)
+                net_pnl_pct = pnl_pct - cost_pct
+                profit_quote = total_invested * (net_pnl_pct / 100)
                 realized_profit_quote += profit_quote
                 trades_closed += 1
                 wins += 1
                 durations.append(j - entry_index)
                 equity_curve.append(equity_curve[-1] + profit_quote)
-                trade_pnls_pct.append(round(pnl_pct, 4))
+                trade_pnls_pct.append(round(net_pnl_pct, 4))
                 i = j + 1
                 closed = True
                 break
 
             if params.stop_loss_pct is not None and pnl_pct <= -params.stop_loss_pct:
-                loss_quote = total_invested * (pnl_pct / 100)
+                net_pnl_pct = pnl_pct - cost_pct
+                loss_quote = total_invested * (net_pnl_pct / 100)
                 realized_profit_quote += loss_quote
                 trades_closed += 1
                 durations.append(j - entry_index)
                 equity_curve.append(equity_curve[-1] + loss_quote)
-                trade_pnls_pct.append(round(pnl_pct, 4))
+                trade_pnls_pct.append(round(net_pnl_pct, 4))
                 i = j + 1
                 closed = True
                 break

@@ -17,6 +17,7 @@ class PortfolioPosition:
     entry_price: float
     size_quote: float
     opened_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    stop_loss_price: float | None = None
 
     # --- Kademeli alım/satım durumu ---
     # Pozisyon açıldığı andaki kural ağırlıkları burada DONDURULUR — rules
@@ -28,12 +29,24 @@ class PortfolioPosition:
     exit_fill_index: int = 0
     exit_base_size_quote: float | None = None  # ilk satış diliminde DONDURULUR
 
-    def pnl_pct(self, current_price: float) -> float:
+    def pnl_pct(self, current_price: float, cost_pct: float = 0.0) -> float:
+        """`cost_pct`: açılış+kapanış BACAKLARININ toplam maliyeti (komisyon
+        + kayma, bkz. `RiskRules.commission_pct`/`slippage_pct`) — brüt
+        fiyat farkından düşülür. Varsayılan 0.0 (geriye dönük uyumluluk /
+        maliyetsiz brüt hesap gerektiren çağrılar için)."""
         change = (current_price / self.entry_price - 1) * 100
-        return change if self.direction == "long" else -change
+        gross = change if self.direction == "long" else -change
+        return gross - cost_pct
 
     def entry_fully_filled(self) -> bool:
         return self.entry_fill_index >= len(self.entry_tranche_weights)
+
+    def stop_loss_breached(self, current_price: float) -> bool:
+        if self.stop_loss_price is None:
+            return False
+        if self.direction == "long":
+            return current_price <= self.stop_loss_price
+        return current_price >= self.stop_loss_price
 
 
 class PortfolioManager:
@@ -163,11 +176,18 @@ class PortfolioManager:
         )
         return size_quote
 
-    def open(self, symbol: str, direction: str, entry_price: float, size_quote: float) -> PortfolioPosition:
+    def open(
+        self, symbol: str, direction: str, entry_price: float, size_quote: float, stop_loss_price: float | None = None
+    ) -> PortfolioPosition:
         """`size_quote`, kurallara göre hesaplanan TAM (hedef) pozisyon
         boyutudur — gerçekte ilk anda yalnızca `entry_tranche_weights[0]`
         kesri kadarı açılır; kalanı, sinyal sonraki döngü(ler)de de
-        kalıcıysa `add_entry_tranche` ile eklenir (bkz. `DecisionEngine`)."""
+        kalıcıysa `add_entry_tranche` ile eklenir (bkz. `DecisionEngine`).
+
+        `stop_loss_price` verilirse pozisyona KAYDEDİLİR — önceden yalnızca
+        Kelly boyutlandırma hesabında kullanılıp atılıyordu, fiyat o
+        seviyeyi geçse bile HİÇBİR ZAMAN kontrol edilmiyordu (bkz.
+        `stop_loss_breached`, `RiskRules.stop_loss_enabled`)."""
         weights = list(self.rules.entry_tranche_weights)
         first_fill = size_quote * weights[0]
         position = PortfolioPosition(
@@ -175,6 +195,7 @@ class PortfolioManager:
             direction=direction,
             entry_price=entry_price,
             size_quote=first_fill,
+            stop_loss_price=stop_loss_price,
             target_size_quote=size_quote,
             entry_tranche_weights=weights,
             entry_fill_index=1,
@@ -219,7 +240,12 @@ class PortfolioManager:
             else min(position.exit_base_size_quote * weights[position.exit_fill_index], position.size_quote)
         )
 
-        pnl_pct = position.pnl_pct(exit_price)
+        # Bu dilimin açılış BACAĞI + bu kapanış BACAĞI = round-trip maliyet
+        # (komisyon + kayma). Önceden PnL yalnızca brüt fiyat farkından
+        # hesaplanıyordu — gerçek bir işlemde bu maliyetler kârı zarara
+        # çevirebilir (bkz. RiskRules.commission_pct/slippage_pct).
+        cost_pct = (self.rules.commission_pct + self.rules.slippage_pct) * 2
+        pnl_pct = position.pnl_pct(exit_price, cost_pct=cost_pct)
         pnl_quote = close_size * pnl_pct / 100
         self.equity += pnl_quote
         self.realized_pnl_session += pnl_quote
