@@ -163,6 +163,9 @@ def train_lstm_signal_model(
     val_frac: float = 0.15,
     epochs: int = 30,
     patience: int = 5,
+    hidden_size: int = 64,
+    num_layers: int = 2,
+    dropout: float = 0.3,
 ) -> LSTMTrainingResult:
     """LSTM (Faz B) modelini kayan pencereli sekans veri setiyle eğitir
     (bkz. `app.ml.sequence_dataset.build_sequence_dataset`).
@@ -211,7 +214,7 @@ def train_lstm_signal_model(
     X_fit, y_fit = X_train_full[fit_mask], y_train_full[fit_mask]
     X_val, y_val = X_train_full[~fit_mask], y_train_full[~fit_mask]
 
-    model = LSTMSignalModel(seq_len=seq_len)
+    model = LSTMSignalModel(seq_len=seq_len, hidden_size=hidden_size, num_layers=num_layers, dropout=dropout)
     training_report = model.fit(X_fit, y_fit, epochs=epochs, X_val=X_val, y_val=y_val, patience=patience)
     X_train, y_train = X_train_full, y_train_full
 

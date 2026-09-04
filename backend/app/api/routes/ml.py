@@ -80,6 +80,9 @@ class TrainLSTMRequest(BaseModel):
     val_frac: float = 0.15
     epochs: int = 30
     patience: int = 5
+    hidden_size: int = 64
+    num_layers: int = 2
+    dropout: float = 0.3
 
 
 class TrainLSTMResponse(BaseModel):
@@ -275,6 +278,9 @@ def train_lstm(payload: TrainLSTMRequest) -> TrainLSTMResponse:
             val_frac=payload.val_frac,
             epochs=payload.epochs,
             patience=payload.patience,
+            hidden_size=payload.hidden_size,
+            num_layers=payload.num_layers,
+            dropout=payload.dropout,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
