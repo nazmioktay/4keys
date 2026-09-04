@@ -39,6 +39,8 @@ class LSTMTrainingReport:
     epochs_run: int
     final_train_loss: float
     final_train_accuracy: float
+    best_val_loss: float | None = None
+    stopped_early: bool = False
 
 
 class LSTMSignalModel:
@@ -79,12 +81,27 @@ class LSTMSignalModel:
         batch_size: int = 64,
         learning_rate: float = 1e-3,
         weight_decay: float = 1e-4,
+        X_val: np.ndarray | None = None,
+        y_val: np.ndarray | None = None,
+        patience: int = 5,
+        max_grad_norm: float = 1.0,
     ) -> LSTMTrainingReport:
         """`X`: şekil (n, seq_len, n_özellik), `y`: şekil (n,) etiket dizisi.
 
         `weight_decay` (Adam'ın L2 regularizasyonu) ve LSTM dropout'u
         birlikte, rehberin "Regularization: LSTM dropout ile aşırı uyum
         engellenir" önerisini karşılar.
+
+        `X_val`/`y_val` verilirse (kronolojik olarak eğitim setinin İÇİNDE,
+        gerçek out-of-sample holdout'tan AYRI bir doğrulama dilimi — bkz.
+        `app.ml.train.train_lstm_signal_model`), erken durdurma (early
+        stopping) devreye girer: doğrulama kaybı `patience` epoch boyunca
+        iyileşmezse eğitim durur ve EN İYİ doğrulama kaybına sahip ağırlıklar
+        geri yüklenir. Bu, sabit 30 epoch'un veri setinin ezberlenmeye
+        başladığı noktayı aşmasını (aşırı uyum) önlemeyi hedefler.
+        `max_grad_norm` ile gradyan kırpma (gradient clipping) her zaman
+        uygulanır — küçük, gürültülü veri setlerinde ani büyük güncellemelerin
+        (ve dolayısıyla ezberlemenin) önüne geçer.
         """
         self.classes_ = np.unique(y)
         self._label_to_idx = {label: i for i, label in enumerate(self.classes_)}
@@ -117,10 +134,23 @@ class LSTMSignalModel:
         optimizer = torch.optim.Adam(self._net.parameters(), lr=learning_rate, weight_decay=weight_decay)
         criterion = nn.CrossEntropyLoss()
 
-        self._net.train()
+        has_val = X_val is not None and y_val is not None and len(X_val) > 0
+        X_val_tensor = y_val_tensor = None
+        if has_val:
+            y_val_idx = np.array([self._label_to_idx.get(v, -1) for v in y_val])
+            X_val_tensor = torch.from_numpy(np.ascontiguousarray(self._normalize(X_val), dtype=np.float32))
+            y_val_tensor = torch.from_numpy(np.ascontiguousarray(y_val_idx, dtype=np.int64))
+
+        best_val_loss = float("inf")
+        best_state = None
+        epochs_without_improvement = 0
+        stopped_early = False
+
         final_loss = 0.0
         final_acc = 0.0
+        epochs_run = 0
         for _epoch in range(epochs):
+            self._net.train()
             total_loss = 0.0
             correct = 0
             total = 0
@@ -129,6 +159,7 @@ class LSTMSignalModel:
                 logits = self._net(batch_X)
                 loss = criterion(logits, batch_y)
                 loss.backward()
+                nn.utils.clip_grad_norm_(self._net.parameters(), max_grad_norm)
                 optimizer.step()
 
                 total_loss += loss.item() * len(batch_y)
@@ -136,9 +167,34 @@ class LSTMSignalModel:
                 total += len(batch_y)
             final_loss = total_loss / max(total, 1)
             final_acc = correct / max(total, 1)
+            epochs_run += 1
+
+            if has_val:
+                self._net.eval()
+                with torch.no_grad():
+                    val_logits = self._net(X_val_tensor)
+                    val_loss = criterion(val_logits, y_val_tensor).item()
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    best_state = {k: v.clone() for k, v in self._net.state_dict().items()}
+                    epochs_without_improvement = 0
+                else:
+                    epochs_without_improvement += 1
+                    if epochs_without_improvement >= patience:
+                        stopped_early = True
+                        break
+
+        if has_val and best_state is not None:
+            self._net.load_state_dict(best_state)
 
         self._is_fitted = True
-        return LSTMTrainingReport(epochs_run=epochs, final_train_loss=final_loss, final_train_accuracy=final_acc)
+        return LSTMTrainingReport(
+            epochs_run=epochs_run,
+            final_train_loss=final_loss,
+            final_train_accuracy=final_acc,
+            best_val_loss=best_val_loss if has_val else None,
+            stopped_early=stopped_early,
+        )
 
     def _require_fitted(self) -> None:
         if not self._is_fitted or self._net is None:

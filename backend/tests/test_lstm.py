@@ -98,6 +98,44 @@ def test_lstm_model_save_and_load_roundtrip(tmp_path):
     np.testing.assert_allclose(conf_original, conf_loaded, rtol=1e-5)
 
 
+def test_lstm_model_fit_with_validation_enables_early_stopping():
+    import torch
+
+    torch.manual_seed(0)
+    rng = np.random.default_rng(6)
+    n_samples, seq_len, n_features = 200, 10, 24
+    X = rng.normal(0, 1, (n_samples, seq_len, n_features)).astype("float32")
+    y = rng.choice([-1, 0, 1], size=n_samples)
+    X_val = rng.normal(0, 1, (40, seq_len, n_features)).astype("float32")
+    y_val = rng.choice([-1, 0, 1], size=40)
+
+    model = LSTMSignalModel(seq_len=seq_len, hidden_size=8, num_layers=1)
+    # patience=0: doğrulama kaybı bir sonraki epoch'ta İYİLEŞMEZSE (rastgele,
+    # öğrenilemeyen veride beklenen davranış) hemen durmalı; ilerlemeye devam
+    # etmesi ancak val kaybı MONOTON olarak azalırsa mümkün olur, ki bu
+    # rastgele/ilişkisiz veride son derece düşük olasılıklıdır.
+    report = model.fit(X, y, epochs=50, X_val=X_val, y_val=y_val, patience=0)
+
+    assert report.best_val_loss is not None
+    assert report.epochs_run <= 50
+    if report.epochs_run < 50:
+        assert report.stopped_early is True
+
+
+def test_lstm_model_fit_without_validation_runs_all_epochs():
+    rng = np.random.default_rng(7)
+    n_samples, seq_len, n_features = 100, 8, 24
+    X = rng.normal(0, 1, (n_samples, seq_len, n_features)).astype("float32")
+    y = rng.choice([-1, 0, 1], size=n_samples)
+
+    model = LSTMSignalModel(seq_len=seq_len, hidden_size=8, num_layers=1)
+    report = model.fit(X, y, epochs=3)
+
+    assert report.epochs_run == 3
+    assert report.stopped_early is False
+    assert report.best_val_loss is None
+
+
 def test_lstm_model_requires_fit_before_predict():
     model = LSTMSignalModel()
     with pytest.raises(RuntimeError):

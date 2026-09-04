@@ -76,7 +76,9 @@ class TrainLSTMRequest(BaseModel):
     take_profit_pct: float = 2.0
     stop_loss_pct: float = 2.0
     holdout_frac: float = 0.2
+    val_frac: float = 0.15
     epochs: int = 30
+    patience: int = 5
 
 
 class TrainLSTMResponse(BaseModel):
@@ -86,6 +88,8 @@ class TrainLSTMResponse(BaseModel):
     epochs_run: int
     final_train_loss: float
     final_train_accuracy: float
+    best_val_loss: float | None = None
+    stopped_early: bool = False
     out_of_sample_rows: int
     out_of_sample_accuracy: float
     out_of_sample_balanced_accuracy: float
@@ -266,7 +270,9 @@ def train_lstm(payload: TrainLSTMRequest) -> TrainLSTMResponse:
             take_profit_pct=payload.take_profit_pct,
             stop_loss_pct=payload.stop_loss_pct,
             holdout_frac=payload.holdout_frac,
+            val_frac=payload.val_frac,
             epochs=payload.epochs,
+            patience=payload.patience,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -279,6 +285,8 @@ def train_lstm(payload: TrainLSTMRequest) -> TrainLSTMResponse:
         epochs_run=result.training.epochs_run,
         final_train_loss=result.training.final_train_loss,
         final_train_accuracy=result.training.final_train_accuracy,
+        best_val_loss=result.training.best_val_loss,
+        stopped_early=result.training.stopped_early,
         out_of_sample_rows=oos.holdout_rows,
         out_of_sample_accuracy=oos.accuracy,
         out_of_sample_balanced_accuracy=oos.balanced_accuracy,

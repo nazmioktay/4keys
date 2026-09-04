@@ -160,7 +160,9 @@ def train_lstm_signal_model(
     take_profit_pct: float = 2.0,
     stop_loss_pct: float = 2.0,
     holdout_frac: float = 0.2,
+    val_frac: float = 0.15,
     epochs: int = 30,
+    patience: int = 5,
 ) -> LSTMTrainingResult:
     """LSTM (Faz B) modelini kayan pencereli sekans veri setiyle eğitir
     (bkz. `app.ml.sequence_dataset.build_sequence_dataset`).
@@ -170,7 +172,12 @@ def train_lstm_signal_model(
     HİÇBİR ZAMAN gösterilmez — yalnızca out-of-sample doğrulama için
     kullanılır. Walk-forward CV, LSTM'in eğitim maliyeti (her fold için
     sıfırdan sinir ağı eğitimi) nedeniyle burada uygulanmaz; bunun yerine
-    holdout + eğitim geçmişindeki (loss/accuracy) yakınsama izlenir.
+    kalan eğitim biriminin İÇİNDEN (holdout'a dokunmadan) kronolojik olarak
+    en yeni `val_frac` dilimi bir doğrulama seti olarak ayrılır ve erken
+    durdurma (bkz. `LSTMSignalModel.fit`) için kullanılır — sabit epoch
+    sayısının veri setini ezberlemeye başladığı noktayı aşmasını önlemek
+    içindir (ilk canlı LSTM denemesinde görülen büyük train/out-of-sample
+    farkının bir nedeni buydu).
     """
     X, y, time_frac = build_sequence_dataset(
         exchange,
@@ -192,11 +199,21 @@ def train_lstm_signal_model(
 
     cutoff = 1.0 - holdout_frac
     train_mask = time_frac <= cutoff
-    X_train, y_train = X[train_mask], y[train_mask]
+    X_train_full, y_train_full = X[train_mask], y[train_mask]
     X_holdout, y_holdout = X[~train_mask], y[~train_mask]
 
+    # Doğrulama dilimi, eğitim biriminin İÇİNDEN (holdout'tan tamamen ayrı)
+    # kronolojik olarak en yeni `val_frac` payı — erken durdurma bu dilimi
+    # görür ama gerçek out-of-sample metriği yalnızca holdout'tan hesaplanır.
+    train_time_frac = time_frac[train_mask]
+    val_cutoff = np.quantile(train_time_frac, 1.0 - val_frac) if len(train_time_frac) > 0 else 1.0
+    fit_mask = train_time_frac <= val_cutoff
+    X_fit, y_fit = X_train_full[fit_mask], y_train_full[fit_mask]
+    X_val, y_val = X_train_full[~fit_mask], y_train_full[~fit_mask]
+
     model = LSTMSignalModel(seq_len=seq_len)
-    training_report = model.fit(X_train, y_train, epochs=epochs)
+    training_report = model.fit(X_fit, y_fit, epochs=epochs, X_val=X_val, y_val=y_val, patience=patience)
+    X_train, y_train = X_train_full, y_train_full
 
     if len(X_holdout) > 0:
         pred, _ = model.predict_batch(X_holdout)
