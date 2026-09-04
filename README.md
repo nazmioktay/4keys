@@ -286,6 +286,8 @@ docker compose up
 | `GET /ml/predict?symbol=BTC/USDT:USDT` | Yön + kalibre güven tahmini (meta model varsa `meta_act`/`meta_confidence` de döner) |
 | `POST /ml/train-lstm` | LSTM (Faz B) modelini sekans veri setiyle eğitir (`seq_len`, `epochs` vb.) |
 | `GET /ml/predict-lstm?symbol=BTC/USDT:USDT` | LSTM ile yön + güven tahmini |
+| `POST /ml/train-patchtst` | PatchTST'ten esinlenilmiş patch-tabanlı Transformer'ı sekans veri setiyle eğitir (LSTM'e alternatif) |
+| `GET /ml/predict-patchtst?symbol=BTC/USDT:USDT` | PatchTST ile yön + güven tahmini |
 | `POST /engine/run-cycle` | Screener top listesi üzerinde bir karar döngüsü çalıştırır (paper-trading) |
 | `GET /engine/status` | Açık paper pozisyonlar ve kapanan işlem geçmişi |
 | `POST /dca/optimize` | Verilen sembol/sermaye için en iyi DCA parametre kombinasyonlarını bulur |
@@ -832,7 +834,10 @@ da scraping riskini kabul etmek gerekecek; kullanıcıyla ayrıca karar verilece
 - [x] Screener + motorları periyodik/zamanlanmış bir job'a bağlama (APScheduler, FastAPI lifespan)
 - [x] ML metodolojisi yükseltmesi: triple-barrier etiketleme + olasılık kalibrasyonu + meta-labeling ("Kripto Bot Tam Rehber" entegrasyonu)
 - [x] XGBoost (Faz A) — birincil model + walk-forward/purged CV + out-of-sample holdout + SHAP açıklanabilirlik
-- [~] LSTM (Faz B) — altyapı kuruldu (dropout + L2 + erken durdurma + gradyan kırpma + sınıf ağırlıklandırma ile), ancak canlı sonuçlar hâlâ üretime hazır değil: ilk çoklu-sembol denemesi overfit çıktı; BTC-only lookback testinde ise balanced_accuracy tam olarak 1/3'e (rastgele seviye) oturdu — model çoğunluk sınıfını ezbere tahmin ediyordu (sınıf ağırlıklandırma bu yüzden eklendi, henüz yeniden test edilmedi); kullanıma alınmadı, rafta
+- [~] LSTM (Faz B) — altyapı kuruldu (dropout + L2 + erken durdurma + gradyan kırpma + sınıf ağırlıklandırma ile). Sınıf ağırlıklandırma sonrası BTC-only sınamada balanced_accuracy rastgele seviyeden (%33) %38.7'ye çıktı ve ezberleme (train/out-of-sample farkı) pratik olarak ortadan kalktı — ama ne lookback artırma (10K→20K) ne de model kapasitesini küçültme (hidden_size=32,num_layers=1) bu ~%38-39 tavanını aşabildi; sınırlayıcı faktörün veri miktarı/model boyutu değil, mimari/özellik seti olabileceğine işaret ediyor. Kullanıma alınmadı, rafta
+- [~] PatchTST (`app/ml/patchtst_model.py`) — LSTM'in taktığı bu tavanı aşıp aşamayacağını test etmek için eklenen, patch-tabanlı Transformer sınıflandırıcı (PatchTST'ten ESİNLENİLMİŞ, BASİTLEŞTİRİLMİŞ bir uygulama — kanal-bağımsız değil, kanal-karışık). LSTM ile AYNI eğitim disiplinini (holdout + erken durdurma + gradyan kırpma + sınıf ağırlıklandırma, `app.ml.train._train_sequence_model` üzerinden ortaklaştırıldı) paylaşır, adil karşılaştırma için. Henüz sunucuda test edilmedi (`deploy/train-patchtst-btc.sh`)
+- [x] LSTM/PatchTST'in makro/order-book özelliklerini (13 kolon) hiç görmediği tutarsızlık düzeltildi — önceden `build_sequence_dataset` yalnızca 39 teknik özelliği kullanıyordu; artık XGBoost eğitim yolu (`app.ml.dataset`) ve canlı karar motoruyla (`app.engine.decision`) AYNI `ALL_FEATURE_COLUMNS` (53) kullanılıyor, macro/order-book geçmişi olmayan barlarda `fillna(0.0)` ile nötrleniyor (satır elenmiyor)
+- [x] `/ml/train-lstm` ve `/ml/train-patchtst` artık isteğe bağlı bir `feature_columns` alt kümesi kabul ediyor (varsayılan `ALL_FEATURE_COLUMNS`) — `/ml/explain`'in SHAP önem sıralamasından seçilen en değerli N özellikle küçük veri setlerinde boyut/örnek oranını iyileştirme denemeleri için
 - [ ] Reinforcement Learning (Faz C, opsiyonel)
 - [x] Kalıcı veritabanı katmanı (TimescaleDB/PostgreSQL, opsiyonel) + Docker Compose
 - [x] Güvenlik protokolü sertleştirme: kill switch (manuel+otomatik), sabit kaldıraç tavanı, API anahtarı çekim izni kontrolü, sır tarama betiği

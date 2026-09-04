@@ -7,35 +7,70 @@ from torch import nn
 
 from .model import Prediction
 
-DEFAULT_LSTM_MODEL_PATH = Path(__file__).parent / "artifacts" / "lstm_model.pt"
+DEFAULT_PATCHTST_MODEL_PATH = Path(__file__).parent / "artifacts" / "patchtst_model.pt"
 
 _LABEL_TO_DIRECTION = {1: "long", -1: "short", 0: "neutral"}
 
 
-class _LSTMNet(nn.Module):
-    """Çok katmanlı, dropout'lu LSTM sınıflandırıcı — rehberin "LSTM dropout
-    ile aşırı uyum engellenir" (2.4 Overfitting) önerisinin karşılığı."""
+class _PatchTSTNet(nn.Module):
+    """PatchTST'ten (Nie ve ark., 2023) ESİNLENİLMİŞ, BASİTLEŞTİRİLMİŞ bir
+    patch-tabanlı Transformer sınıflandırıcı.
 
-    def __init__(self, input_size: int, hidden_size: int = 64, num_layers: int = 2, num_classes: int = 3, dropout: float = 0.3) -> None:
+    Orijinal PatchTST kanal-bağımsızdır (her özellik/kanal ayrı ayrı,
+    ağırlık paylaşımıyla işlenir). Burada, LSTM ile aynı çok-değişkenli
+    girdi arayüzünü (seq_len, n_özellik) koruyabilmek için BİLİNÇLİ OLARAK
+    basitleştirildi: her patch, o zaman aralığındaki TÜM özellikleri
+    birlikte (kanal-karışık) düzleştirip tek bir token'a projekte eder.
+    Bu, orijinal makaledeki "kanal-bağımsız" tasarımın tam bir uygulaması
+    DEĞİLDİR — LSTM'in "sekansı sırayla, adım adım okuma" varsayımı yerine
+    "sekansı örtüşmeyen zaman dilimlerine (patch) bölüp dikkat mekanizmasıyla
+    birlikte değerlendirme" fikrini test etmek için yeterli, ucuz bir
+    yaklaşımdır.
+    """
+
+    def __init__(
+        self,
+        input_size: int,
+        seq_len: int,
+        patch_len: int = 5,
+        stride: int = 5,
+        d_model: int = 64,
+        nhead: int = 4,
+        num_layers: int = 2,
+        num_classes: int = 3,
+        dropout: float = 0.3,
+    ) -> None:
         super().__init__()
-        self.lstm = nn.LSTM(
-            input_size=input_size,
-            hidden_size=hidden_size,
-            num_layers=num_layers,
+        self.patch_len = patch_len
+        self.stride = stride
+        self.num_patches = max((seq_len - patch_len) // stride + 1, 1)
+
+        self.patch_proj = nn.Linear(patch_len * input_size, d_model)
+        self.pos_embedding = nn.Parameter(torch.zeros(1, self.num_patches, d_model))
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=d_model,
+            nhead=nhead,
+            dim_feedforward=d_model * 4,
+            dropout=dropout,
             batch_first=True,
-            dropout=dropout if num_layers > 1 else 0.0,
         )
+        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
         self.dropout = nn.Dropout(dropout)
-        self.fc = nn.Linear(hidden_size, num_classes)
+        self.fc = nn.Linear(d_model, num_classes)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        _, (hidden, _) = self.lstm(x)
-        last_hidden = hidden[-1]  # (batch, hidden_size) — en üst katmanın son zaman adımı
-        return self.fc(self.dropout(last_hidden))
+        # x: (batch, seq_len, n_özellik) -> patch'ler: (batch, num_patches, n_özellik, patch_len)
+        patches = x.unfold(dimension=1, size=self.patch_len, step=self.stride)
+        batch, num_patches, n_features, patch_len = patches.shape
+        patches = patches.reshape(batch, num_patches, n_features * patch_len)
+        tokens = self.patch_proj(patches) + self.pos_embedding[:, :num_patches, :]
+        encoded = self.encoder(tokens)
+        pooled = encoded.mean(dim=1)  # patch'ler arası ortalama havuzlama
+        return self.fc(self.dropout(pooled))
 
 
 @dataclass
-class LSTMTrainingReport:
+class PatchTSTTrainingReport:
     epochs_run: int
     final_train_loss: float
     final_train_accuracy: float
@@ -43,25 +78,42 @@ class LSTMTrainingReport:
     stopped_early: bool = False
 
 
-class LSTMSignalModel:
-    """OHLCV özellik sekanslarından yön (long/short/neutral) tahmini yapan
-    LSTM (Long Short-Term Memory) tabanlı model — rehberin Faz B'si.
+class PatchTSTSignalModel:
+    """LSTM'e (`app.ml.lstm_model.LSTMSignalModel`) alternatif, patch-tabanlı
+    Transformer mimarisiyle yön (long/short/neutral) tahmini yapan model.
 
-    XGBoost (Faz A) her barı BAĞIMSIZ bir satır olarak görürken, LSTM son
-    `seq_len` barın özellik vektörünü SIRAYLA okur ve önceki adımlardan
-    öğrendiklerini bir gizli duruma (hidden state) taşır — sekans/zaman
-    örüntülerini yakalamak için tasarlanmıştır (bkz. rehber tablosu,
-    "Güçlü olduğu alan: Sekans ve zaman örüntüleri").
+    BTC-only sınamalarda LSTM'in hem lookback artırma hem de model
+    kapasitesini küçültme ile ~%38-39 balanced_accuracy tavanına takılı
+    kaldığı görüldü (bkz. README) — bu, LSTM'in kullanılan öznitelik
+    setinden/etiketlerden daha fazlasını çıkaramadığına işaret ediyor.
+    PatchTST tarzı dikkat mekanizması, LSTM'in sıralı/tekrarlayan
+    varsayımından farklı bir örüntü ailesini yakalayabilir mi diye
+    denemek için eklendi — otomatik olarak "daha iyi" varsayılmaz, aynı
+    out-of-sample disipliniyle (holdout + erken durdurma + sınıf
+    ağırlıklandırma) LSTM ile karşılaştırılmalıdır.
 
-    Girdi şekli: (n_örnek, seq_len, n_özellik) — bkz. `app.ml.sequence_dataset`.
+    Girdi şekli: (n_örnek, seq_len, n_özellik) — `LSTMSignalModel` ile
+    AYNI, `app.ml.sequence_dataset` çıktısı doğrudan kullanılabilir.
     """
 
-    def __init__(self, seq_len: int = 20, hidden_size: int = 64, num_layers: int = 2, dropout: float = 0.3) -> None:
+    def __init__(
+        self,
+        seq_len: int = 20,
+        patch_len: int = 5,
+        stride: int = 5,
+        d_model: int = 64,
+        nhead: int = 4,
+        num_layers: int = 2,
+        dropout: float = 0.3,
+    ) -> None:
         self.seq_len = seq_len
-        self.hidden_size = hidden_size
+        self.patch_len = patch_len
+        self.stride = stride
+        self.d_model = d_model
+        self.nhead = nhead
         self.num_layers = num_layers
         self.dropout = dropout
-        self._net: _LSTMNet | None = None
+        self._net: _PatchTSTNet | None = None
         self._is_fitted = False
         self.classes_: np.ndarray | None = None
         self._label_to_idx: dict[float, int] = {}
@@ -69,13 +121,23 @@ class LSTMSignalModel:
         self._feature_mean: np.ndarray | None = None
         self._feature_std: np.ndarray | None = None
         self._n_features: int | None = None
-        # Eğitimde kullanılan gerçek özellik sütun listesi (bkz.
-        # `app.ml.train._train_sequence_model`) — tahmin sırasında AYNI
-        # sütunlarla, AYNI sırayla besleme yapılabilmesi için kaydedilir.
         self.feature_columns: list[str] | None = None
 
     def _normalize(self, X: np.ndarray) -> np.ndarray:
         return (X - self._feature_mean) / self._feature_std
+
+    def _build_net(self, n_features: int, num_classes: int) -> _PatchTSTNet:
+        return _PatchTSTNet(
+            input_size=n_features,
+            seq_len=self.seq_len,
+            patch_len=self.patch_len,
+            stride=self.stride,
+            d_model=self.d_model,
+            nhead=self.nhead,
+            num_layers=self.num_layers,
+            num_classes=num_classes,
+            dropout=self.dropout,
+        )
 
     def fit(
         self,
@@ -89,24 +151,12 @@ class LSTMSignalModel:
         y_val: np.ndarray | None = None,
         patience: int = 5,
         max_grad_norm: float = 1.0,
-    ) -> LSTMTrainingReport:
+    ) -> PatchTSTTrainingReport:
         """`X`: şekil (n, seq_len, n_özellik), `y`: şekil (n,) etiket dizisi.
 
-        `weight_decay` (Adam'ın L2 regularizasyonu) ve LSTM dropout'u
-        birlikte, rehberin "Regularization: LSTM dropout ile aşırı uyum
-        engellenir" önerisini karşılar.
-
-        `X_val`/`y_val` verilirse (kronolojik olarak eğitim setinin İÇİNDE,
-        gerçek out-of-sample holdout'tan AYRI bir doğrulama dilimi — bkz.
-        `app.ml.train.train_lstm_signal_model`), erken durdurma (early
-        stopping) devreye girer: doğrulama kaybı `patience` epoch boyunca
-        iyileşmezse eğitim durur ve EN İYİ doğrulama kaybına sahip ağırlıklar
-        geri yüklenir. Bu, sabit 30 epoch'un veri setinin ezberlenmeye
-        başladığı noktayı aşmasını (aşırı uyum) önlemeyi hedefler.
-        `max_grad_norm` ile gradyan kırpma (gradient clipping) her zaman
-        uygulanır — küçük, gürültülü veri setlerinde ani büyük güncellemelerin
-        (ve dolayısıyla ezberlemenin) önüne geçer.
-        """
+        Erken durdurma, gradyan kırpma ve sınıf ağırlıklandırma —
+        `LSTMSignalModel.fit` ile AYNI mantıkla, adil bir karşılaştırma
+        için — burada da uygulanır (bkz. o dosyadaki notlar)."""
         self.classes_ = np.unique(y)
         self._label_to_idx = {label: i for i, label in enumerate(self.classes_)}
         self._idx_to_label = {i: label for label, i in self._label_to_idx.items()}
@@ -119,29 +169,15 @@ class LSTMSignalModel:
 
         n_features = X.shape[2]
         self._n_features = n_features
-        self._net = _LSTMNet(
-            input_size=n_features,
-            hidden_size=self.hidden_size,
-            num_layers=self.num_layers,
-            num_classes=len(self.classes_),
-            dropout=self.dropout,
-        )
+        self._net = self._build_net(n_features, len(self.classes_))
 
-        # `torch.tensor(...)` her zaman kopyalar; `torch.from_numpy` bu
-        # ölçekte (10K mum × ~20 sembol) gereksiz bir tam kopyayı (yüzlerce
-        # MB) önlemek için tercih edilir — bkz. bellek notu yukarıda.
         X_tensor = torch.from_numpy(np.ascontiguousarray(X_norm, dtype=np.float32))
         y_tensor = torch.from_numpy(np.ascontiguousarray(y_idx, dtype=np.int64))
         dataset = torch.utils.data.TensorDataset(X_tensor, y_tensor)
         loader = torch.utils.data.DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
         optimizer = torch.optim.Adam(self._net.parameters(), lr=learning_rate, weight_decay=weight_decay)
-        # Sınıf ağırlıklandırma: canlı BTC-only testinde balanced_accuracy
-        # tam olarak 1/3'e (3 sınıflı rastgele seviye) oturduğu görüldü —
-        # ham accuracy yüksekken bu, modelin çoğunluk sınıfını (genelde
-        # "neutral") ezbere her seferinde tahmin ettiğinin klasik belirtisi.
-        # Ters frekans ağırlıklandırma, azınlık sınıflardaki (long/short)
-        # hatayı daha maliyetli hale getirip bu çöküşü önlemeyi hedefler.
+
         class_counts = np.bincount(y_idx, minlength=len(self.classes_)).astype("float64")
         class_counts[class_counts == 0] = 1.0
         class_weights = class_counts.sum() / (len(class_counts) * class_counts)
@@ -202,7 +238,7 @@ class LSTMSignalModel:
             self._net.load_state_dict(best_state)
 
         self._is_fitted = True
-        return LSTMTrainingReport(
+        return PatchTSTTrainingReport(
             epochs_run=epochs_run,
             final_train_loss=final_loss,
             final_train_accuracy=final_acc,
@@ -212,7 +248,7 @@ class LSTMSignalModel:
 
     def _require_fitted(self) -> None:
         if not self._is_fitted or self._net is None:
-            raise RuntimeError("LSTM modeli henüz eğitilmedi. Önce fit() veya load() çağırın.")
+            raise RuntimeError("PatchTST modeli henüz eğitilmedi. Önce fit() veya load() çağırın.")
 
     def predict_batch(self, X: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """`X`: şekil (n, seq_len, n_özellik). Döner: (tahmin edilen etiket dizisi, güven dizisi)."""
@@ -233,14 +269,17 @@ class LSTMSignalModel:
         label = int(predictions[0])
         return Prediction(direction=_LABEL_TO_DIRECTION[label], confidence=float(confidences[0]))
 
-    def save(self, path: Path = DEFAULT_LSTM_MODEL_PATH) -> None:
+    def save(self, path: Path = DEFAULT_PATCHTST_MODEL_PATH) -> None:
         self._require_fitted()
         path.parent.mkdir(parents=True, exist_ok=True)
         torch.save(
             {
                 "state_dict": self._net.state_dict(),
                 "seq_len": self.seq_len,
-                "hidden_size": self.hidden_size,
+                "patch_len": self.patch_len,
+                "stride": self.stride,
+                "d_model": self.d_model,
+                "nhead": self.nhead,
                 "num_layers": self.num_layers,
                 "dropout": self.dropout,
                 "n_features": self._n_features,
@@ -252,10 +291,13 @@ class LSTMSignalModel:
             path,
         )
 
-    def load(self, path: Path = DEFAULT_LSTM_MODEL_PATH) -> None:
+    def load(self, path: Path = DEFAULT_PATCHTST_MODEL_PATH) -> None:
         checkpoint = torch.load(path, weights_only=False)
         self.seq_len = checkpoint["seq_len"]
-        self.hidden_size = checkpoint["hidden_size"]
+        self.patch_len = checkpoint["patch_len"]
+        self.stride = checkpoint["stride"]
+        self.d_model = checkpoint["d_model"]
+        self.nhead = checkpoint["nhead"]
         self.num_layers = checkpoint["num_layers"]
         self.dropout = checkpoint["dropout"]
         self.classes_ = checkpoint["classes"]
@@ -266,19 +308,13 @@ class LSTMSignalModel:
         self._feature_std = checkpoint["feature_std"]
         self._n_features = checkpoint["n_features"]
 
-        self._net = _LSTMNet(
-            input_size=checkpoint["n_features"],
-            hidden_size=self.hidden_size,
-            num_layers=self.num_layers,
-            num_classes=len(self.classes_),
-            dropout=self.dropout,
-        )
+        self._net = self._build_net(checkpoint["n_features"], len(self.classes_))
         self._net.load_state_dict(checkpoint["state_dict"])
         self._net.eval()
         self._is_fitted = True
 
     @classmethod
-    def load_from(cls, path: Path = DEFAULT_LSTM_MODEL_PATH) -> "LSTMSignalModel":
+    def load_from(cls, path: Path = DEFAULT_PATCHTST_MODEL_PATH) -> "PatchTSTSignalModel":
         model = cls()
         model.load(path)
         return model

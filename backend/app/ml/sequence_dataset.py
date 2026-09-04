@@ -4,7 +4,9 @@ import numpy as np
 from app.exchanges.base import Exchange
 
 from .dataset import LabelingMethod, _compute_labels, _persist_feature_snapshots
-from .features import FEATURE_COLUMNS, build_features
+from .features import ALL_FEATURE_COLUMNS, FEATURE_COLUMNS, build_features
+from .macro_features import load_macro_history, merge_macro_features
+from .orderbook_features import load_orderbook_history, merge_orderbook_features
 
 logger = logging.getLogger(__name__)
 
@@ -20,15 +22,27 @@ def build_sequence_dataset(
     labeling_method: LabelingMethod = "threshold",
     take_profit_pct: float = 2.0,
     stop_loss_pct: float = 2.0,
+    feature_columns: list[str] | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """LSTM eğitimi için kayan pencereli (sliding window) sekans veri seti
-    kurar. `app.ml.dataset.build_training_dataset`'ten farkı: XGBoost tekil
-    özellik satırlarıyla çalışırken, LSTM her tahmin için son `seq_len`
-    barın özellik vektörünü sırayla (zaman bilgisini koruyarak) görür.
+    """LSTM/PatchTST eğitimi için kayan pencereli (sliding window) sekans
+    veri seti kurar. `app.ml.dataset.build_training_dataset`'ten farkı:
+    XGBoost tekil özellik satırlarıyla çalışırken, sekans modelleri her
+    tahmin için son `seq_len` barın özellik vektörünü sırayla (zaman
+    bilgisini koruyarak) görür.
 
     Her sembol kendi içinde bağımsız işlenir ve pencereler yalnızca o
     sembolün KENDİ kronolojik/kesintisiz serisinden kurulur — semboller
     arası pencere sızıntısı olmaz.
+
+    `feature_columns` verilmezse `ALL_FEATURE_COLUMNS` (teknik + makro +
+    order-book, XGBoost eğitim yolu — `app.ml.dataset` — ile AYNI özellik
+    kümesi) kullanılır. Önceki sürüm burada makro/order-book özelliklerini
+    HİÇ görmüyordu (yalnızca 39 teknik özellik) — XGBoost ve canlı karar
+    motoruyla (`app.engine.decision`) tutarsız bir gerçek eksiklikti,
+    düzeltildi. `feature_columns` bir alt küme olarak verilirse (ör.
+    `/ml/explain`'in SHAP önem sıralamasından seçilen en değerli N özellik),
+    yalnızca o sütunlarla eğitim yapılır — küçük veri setlerinde
+    boyut/örnek oranını iyileştirmek için.
 
     Döner: (X, y, time_frac)
     - X: şekil (n_pencere, seq_len, n_özellik)
@@ -38,6 +52,15 @@ def build_sequence_dataset(
       (bkz. `app.ml.validation.split_out_of_sample`, burada numpy
       maskesiyle eşdeğer mantık uygulanır).
     """
+    columns = feature_columns or ALL_FEATURE_COLUMNS
+    # Makro/order-book geçmişi olmayan barlarda (ör. testlerde ya da henüz
+    # backfill edilmemiş erken dönemlerde) o kolonlar NaN kalır — XGBoost
+    # yolundaki (`app.ml.dataset._build_symbol_frames`) DAVRANIŞLA TUTARLI
+    # olması için yalnızca HER ZAMAN yoğun olan teknik özellikler (bkz.
+    # `FEATURE_COLUMNS`) `dropna` zorunluluğuna tabidir; makro/order-book
+    # NaN'ları satırı elemez, aşağıda `fillna(0.0)` ile nötrlenir.
+    dense_columns = [c for c in columns if c in FEATURE_COLUMNS]
+    macro_history = load_macro_history()
     # Not (bellek): önceki sürüm her pencereyi ayrı bir küçük numpy dizisi
     # olarak bir Python listesine ekliyordu (n_pencere adet nesne, her biri
     # kendi bellek tahsisi + Python nesne başlığıyla), sonra `np.stack` bunu
@@ -60,16 +83,18 @@ def build_sequence_dataset(
                 continue
             features = build_features(ohlcv)
             _persist_feature_snapshots(symbol, timeframe, features)
+            features = merge_macro_features(features, macro_history)
+            features = merge_orderbook_features(features, load_orderbook_history(symbol))
             labels = _compute_labels(ohlcv, labeling_method, horizon, threshold_pct, take_profit_pct, stop_loss_pct)
             frame = features.copy()
             frame["label"] = labels
-            frame = frame.dropna(subset=FEATURE_COLUMNS + ["label"]).reset_index(drop=True)
+            frame = frame.dropna(subset=dense_columns + ["label"]).reset_index(drop=True)
 
             n = len(frame)
             if n < seq_len + 1:
                 continue
 
-            feat_values = frame[FEATURE_COLUMNS].to_numpy(dtype="float32")
+            feat_values = frame[columns].fillna(0.0).to_numpy(dtype="float32")
             label_values = frame["label"].to_numpy()
 
             windows = np.lib.stride_tricks.sliding_window_view(feat_values, seq_len, axis=0)
@@ -87,7 +112,7 @@ def build_sequence_dataset(
 
     if not per_symbol_X:
         return (
-            np.empty((0, seq_len, len(FEATURE_COLUMNS)), dtype="float32"),
+            np.empty((0, seq_len, len(columns)), dtype="float32"),
             np.empty((0,)),
             np.empty((0,)),
         )

@@ -8,9 +8,11 @@ from app.core.config import settings
 from app.exchanges.base import Exchange
 
 from .dataset import LabelingMethod, build_training_dataset, build_training_dataset_with_time
+from .features import ALL_FEATURE_COLUMNS
 from .lstm_model import LSTMSignalModel, LSTMTrainingReport
 from .meta_label import MetaLabelModel, build_meta_dataset
 from .model import Algorithm, SignalModel
+from .patchtst_model import PatchTSTSignalModel, PatchTSTTrainingReport
 from .sequence_dataset import build_sequence_dataset
 from .validation import OutOfSampleReport, WalkForwardReport, evaluate_out_of_sample, run_walk_forward_validation, split_out_of_sample
 
@@ -148,6 +150,110 @@ class LSTMTrainingResult:
     out_of_sample: OutOfSampleReport
 
 
+def _train_sequence_model(
+    model,
+    exchange: Exchange,
+    symbols: list[str],
+    timeframe: str | None,
+    lookback: int | None,
+    seq_len: int,
+    horizon: int,
+    threshold_pct: float,
+    labeling_method: LabelingMethod,
+    take_profit_pct: float,
+    stop_loss_pct: float,
+    holdout_frac: float,
+    val_frac: float,
+    epochs: int,
+    patience: int,
+    feature_columns: list[str] | None,
+    model_kind: str,
+):
+    """LSTM/PatchTST gibi sekans modellerinin ortak eğitim iskeleti —
+    veri kurma, holdout/doğrulama bölme, erken durdurma ile fit ve
+    out-of-sample raporlama. `app.ml.lstm_model.LSTMSignalModel` ve
+    `app.ml.patchtst_model.PatchTSTSignalModel` AYNI `fit`/`predict_batch`/
+    `save` arayüzünü paylaştığı için burada ortaklaştırıldı (bkz. o
+    dosyalardaki fit() docstring'leri — erken durdurma/gradyan
+    kırpma/sınıf ağırlıklandırma mantığı ikisinde de aynı).
+
+    XGBoost'un `train_signal_model_validated`'ı gibi, kronolojik olarak en
+    yeni `holdout_frac` dilimi (varsayılan son %20) fit() sırasında modele
+    HİÇBİR ZAMAN gösterilmez — yalnızca out-of-sample doğrulama için
+    kullanılır. Walk-forward CV burada uygulanmaz (her fold sıfırdan bir
+    sinir ağı eğitimi gerektirir, maliyetli); bunun yerine kalan eğitim
+    biriminin İÇİNDEN (holdout'a dokunmadan) kronolojik olarak en yeni
+    `val_frac` dilimi bir doğrulama seti olarak ayrılır ve erken durdurma
+    için kullanılır.
+
+    Gerçekte kullanılan özellik listesi (`feature_columns` verilmezse
+    `ALL_FEATURE_COLUMNS`) modele kaydedilir (`model.feature_columns`) —
+    tahmin sırasında (`/ml/predict-lstm`/`predict-patchtst`) AYNI liste
+    kullanılmalı; aksi halde özellik sayısı/sırası tutarsızlığı çalışma
+    zamanı hatasına yol açar.
+    """
+    resolved_columns = feature_columns or ALL_FEATURE_COLUMNS
+    X, y, time_frac = build_sequence_dataset(
+        exchange,
+        symbols,
+        timeframe or settings.ml_train_timeframe,
+        lookback or settings.ml_train_lookback,
+        seq_len=seq_len,
+        horizon=horizon,
+        threshold_pct=threshold_pct,
+        labeling_method=labeling_method,
+        take_profit_pct=take_profit_pct,
+        stop_loss_pct=stop_loss_pct,
+        feature_columns=resolved_columns,
+    )
+
+    if len(X) < 60:
+        raise ValueError(
+            f"{model_kind} eğitimi için yeterli veri yok ({len(X)} pencere). Daha fazla sembol, daha uzun geçmiş veya daha kısa seq_len deneyin."
+        )
+
+    cutoff = 1.0 - holdout_frac
+    train_mask = time_frac <= cutoff
+    X_train_full, y_train_full = X[train_mask], y[train_mask]
+    X_holdout, y_holdout = X[~train_mask], y[~train_mask]
+
+    # Doğrulama dilimi, eğitim biriminin İÇİNDEN (holdout'tan tamamen ayrı)
+    # kronolojik olarak en yeni `val_frac` payı — erken durdurma bu dilimi
+    # görür ama gerçek out-of-sample metriği yalnızca holdout'tan hesaplanır.
+    train_time_frac = time_frac[train_mask]
+    val_cutoff = np.quantile(train_time_frac, 1.0 - val_frac) if len(train_time_frac) > 0 else 1.0
+    fit_mask = train_time_frac <= val_cutoff
+    X_fit, y_fit = X_train_full[fit_mask], y_train_full[fit_mask]
+    X_val, y_val = X_train_full[~fit_mask], y_train_full[~fit_mask]
+
+    model.feature_columns = resolved_columns
+    training_report = model.fit(X_fit, y_fit, epochs=epochs, X_val=X_val, y_val=y_val, patience=patience)
+    X_train, y_train = X_train_full, y_train_full
+
+    if len(X_holdout) > 0:
+        pred, _ = model.predict_batch(X_holdout)
+        accuracy = float((pred == y_holdout).mean())
+        # sınıf başına dengeli doğruluk (balanced accuracy) — basit ortalama
+        classes = np.unique(y_holdout)
+        per_class_acc = [float((pred[y_holdout == c] == c).mean()) for c in classes if (y_holdout == c).sum() > 0]
+        balanced_accuracy = float(np.mean(per_class_acc)) if per_class_acc else 0.0
+        oos_report = OutOfSampleReport(holdout_rows=len(X_holdout), accuracy=accuracy, balanced_accuracy=balanced_accuracy)
+    else:
+        oos_report = OutOfSampleReport(0, 0.0, 0.0)
+
+    model.save()
+    logger.info(
+        "%s model trained on %d pencere; train_loss=%.4f train_acc=%.3f; oos_acc=%.3f (holdout=%d pencere)",
+        model_kind,
+        len(X_train),
+        training_report.final_train_loss,
+        training_report.final_train_accuracy,
+        oos_report.accuracy,
+        oos_report.holdout_rows,
+    )
+    return model, len(X_train), training_report, oos_report
+
+
 def train_lstm_signal_model(
     exchange: Exchange,
     symbols: list[str],
@@ -166,79 +272,92 @@ def train_lstm_signal_model(
     hidden_size: int = 64,
     num_layers: int = 2,
     dropout: float = 0.3,
+    feature_columns: list[str] | None = None,
 ) -> LSTMTrainingResult:
-    """LSTM (Faz B) modelini kayan pencereli sekans veri setiyle eğitir
-    (bkz. `app.ml.sequence_dataset.build_sequence_dataset`).
-
-    XGBoost'un `train_signal_model_validated`'ı gibi, kronolojik olarak en
-    yeni `holdout_frac` dilimi (varsayılan son %20) fit() sırasında modele
-    HİÇBİR ZAMAN gösterilmez — yalnızca out-of-sample doğrulama için
-    kullanılır. Walk-forward CV, LSTM'in eğitim maliyeti (her fold için
-    sıfırdan sinir ağı eğitimi) nedeniyle burada uygulanmaz; bunun yerine
-    kalan eğitim biriminin İÇİNDEN (holdout'a dokunmadan) kronolojik olarak
-    en yeni `val_frac` dilimi bir doğrulama seti olarak ayrılır ve erken
-    durdurma (bkz. `LSTMSignalModel.fit`) için kullanılır — sabit epoch
-    sayısının veri setini ezberlemeye başladığı noktayı aşmasını önlemek
-    içindir (ilk canlı LSTM denemesinde görülen büyük train/out-of-sample
-    farkının bir nedeni buydu).
-    """
-    X, y, time_frac = build_sequence_dataset(
+    """LSTM (Faz B) modelini kayan pencereli sekans veri setiyle eğitir —
+    bkz. `_train_sequence_model` (ortak iskelet)."""
+    model = LSTMSignalModel(seq_len=seq_len, hidden_size=hidden_size, num_layers=num_layers, dropout=dropout)
+    model, rows_used, training_report, oos_report = _train_sequence_model(
+        model,
         exchange,
         symbols,
-        timeframe or settings.ml_train_timeframe,
-        lookback or settings.ml_train_lookback,
-        seq_len=seq_len,
-        horizon=horizon,
-        threshold_pct=threshold_pct,
-        labeling_method=labeling_method,
-        take_profit_pct=take_profit_pct,
-        stop_loss_pct=stop_loss_pct,
+        timeframe,
+        lookback,
+        seq_len,
+        horizon,
+        threshold_pct,
+        labeling_method,
+        take_profit_pct,
+        stop_loss_pct,
+        holdout_frac,
+        val_frac,
+        epochs,
+        patience,
+        feature_columns,
+        "LSTM",
     )
+    return LSTMTrainingResult(model=model, rows_used=rows_used, training=training_report, out_of_sample=oos_report)
 
-    if len(X) < 60:
-        raise ValueError(
-            f"LSTM eğitimi için yeterli veri yok ({len(X)} pencere). Daha fazla sembol, daha uzun geçmiş veya daha kısa seq_len deneyin."
-        )
 
-    cutoff = 1.0 - holdout_frac
-    train_mask = time_frac <= cutoff
-    X_train_full, y_train_full = X[train_mask], y[train_mask]
-    X_holdout, y_holdout = X[~train_mask], y[~train_mask]
+@dataclass
+class PatchTSTTrainingResult:
+    model: PatchTSTSignalModel
+    rows_used: int
+    training: PatchTSTTrainingReport
+    out_of_sample: OutOfSampleReport
 
-    # Doğrulama dilimi, eğitim biriminin İÇİNDEN (holdout'tan tamamen ayrı)
-    # kronolojik olarak en yeni `val_frac` payı — erken durdurma bu dilimi
-    # görür ama gerçek out-of-sample metriği yalnızca holdout'tan hesaplanır.
-    train_time_frac = time_frac[train_mask]
-    val_cutoff = np.quantile(train_time_frac, 1.0 - val_frac) if len(train_time_frac) > 0 else 1.0
-    fit_mask = train_time_frac <= val_cutoff
-    X_fit, y_fit = X_train_full[fit_mask], y_train_full[fit_mask]
-    X_val, y_val = X_train_full[~fit_mask], y_train_full[~fit_mask]
 
-    model = LSTMSignalModel(seq_len=seq_len, hidden_size=hidden_size, num_layers=num_layers, dropout=dropout)
-    training_report = model.fit(X_fit, y_fit, epochs=epochs, X_val=X_val, y_val=y_val, patience=patience)
-    X_train, y_train = X_train_full, y_train_full
-
-    if len(X_holdout) > 0:
-        pred, _ = model.predict_batch(X_holdout)
-        accuracy = float((pred == y_holdout).mean())
-        # sınıf başına dengeli doğruluk (balanced accuracy) — basit ortalama
-        classes = np.unique(y_holdout)
-        per_class_acc = [float((pred[y_holdout == c] == c).mean()) for c in classes if (y_holdout == c).sum() > 0]
-        balanced_accuracy = float(np.mean(per_class_acc)) if per_class_acc else 0.0
-        oos_report = OutOfSampleReport(holdout_rows=len(X_holdout), accuracy=accuracy, balanced_accuracy=balanced_accuracy)
-    else:
-        oos_report = OutOfSampleReport(0, 0.0, 0.0)
-
-    model.save()
-    logger.info(
-        "LSTM model trained on %d pencere; train_loss=%.4f train_acc=%.3f; oos_acc=%.3f (holdout=%d pencere)",
-        len(X_train),
-        training_report.final_train_loss,
-        training_report.final_train_accuracy,
-        oos_report.accuracy,
-        oos_report.holdout_rows,
+def train_patchtst_signal_model(
+    exchange: Exchange,
+    symbols: list[str],
+    timeframe: str | None = None,
+    lookback: int | None = None,
+    seq_len: int = 20,
+    horizon: int = 5,
+    threshold_pct: float = 1.0,
+    labeling_method: LabelingMethod = "threshold",
+    take_profit_pct: float = 2.0,
+    stop_loss_pct: float = 2.0,
+    holdout_frac: float = 0.2,
+    val_frac: float = 0.15,
+    epochs: int = 30,
+    patience: int = 5,
+    patch_len: int = 5,
+    stride: int = 5,
+    d_model: int = 64,
+    nhead: int = 4,
+    num_layers: int = 2,
+    dropout: float = 0.3,
+    feature_columns: list[str] | None = None,
+) -> PatchTSTTrainingResult:
+    """PatchTST'ten esinlenilmiş patch-tabanlı Transformer modelini eğitir
+    (bkz. `app.ml.patchtst_model` — LSTM'e alternatif, LSTM'in BTC-only
+    sınamalarda hem lookback artırma hem model küçültme ile ~%38-39
+    balanced_accuracy tavanına takılı kalması üzerine eklendi). Ortak
+    eğitim iskeleti için bkz. `_train_sequence_model`."""
+    model = PatchTSTSignalModel(
+        seq_len=seq_len, patch_len=patch_len, stride=stride, d_model=d_model, nhead=nhead, num_layers=num_layers, dropout=dropout
     )
-    return LSTMTrainingResult(model=model, rows_used=len(X_train), training=training_report, out_of_sample=oos_report)
+    model, rows_used, training_report, oos_report = _train_sequence_model(
+        model,
+        exchange,
+        symbols,
+        timeframe,
+        lookback,
+        seq_len,
+        horizon,
+        threshold_pct,
+        labeling_method,
+        take_profit_pct,
+        stop_loss_pct,
+        holdout_frac,
+        val_frac,
+        epochs,
+        patience,
+        feature_columns,
+        "PatchTST",
+    )
+    return PatchTSTTrainingResult(model=model, rows_used=rows_used, training=training_report, out_of_sample=oos_report)
 
 
 @dataclass

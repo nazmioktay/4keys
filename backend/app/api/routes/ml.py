@@ -13,9 +13,16 @@ from app.ml.lstm_model import DEFAULT_LSTM_MODEL_PATH, LSTMSignalModel
 from app.ml.macro_features import latest_macro_feature_row
 from app.ml.orderbook_features import latest_orderbook_feature_row
 from app.ml.model import DEFAULT_MODEL_PATH, Algorithm, SignalModel
+from app.ml.patchtst_model import DEFAULT_PATCHTST_MODEL_PATH, PatchTSTSignalModel
 from app.ml.sequence_dataset import build_sequence_dataset
 from app.ml.symbol_selection import select_training_symbols
-from app.ml.train import sweep_lookback_values, train_lstm_signal_model, train_meta_label_model, train_signal_model_validated
+from app.ml.train import (
+    sweep_lookback_values,
+    train_lstm_signal_model,
+    train_meta_label_model,
+    train_patchtst_signal_model,
+    train_signal_model_validated,
+)
 from app.screener.scanner import scan_market, top_long, top_short
 
 router = APIRouter(prefix="/ml", tags=["ml"])
@@ -83,6 +90,7 @@ class TrainLSTMRequest(BaseModel):
     hidden_size: int = 64
     num_layers: int = 2
     dropout: float = 0.3
+    feature_columns: list[str] | None = None  # None -> ALL_FEATURE_COLUMNS; /ml/explain'in SHAP sıralamasından bir alt küme verilebilir
 
 
 class TrainLSTMResponse(BaseModel):
@@ -100,6 +108,48 @@ class TrainLSTMResponse(BaseModel):
 
 
 class PredictLSTMResponse(BaseModel):
+    symbol: str
+    direction: str
+    confidence: float
+
+
+class TrainPatchTSTRequest(BaseModel):
+    symbols: list[str] | None = None
+    lookback: int | None = None
+    seq_len: int = 20
+    horizon: int = 5
+    threshold_pct: float = 1.0
+    labeling_method: LabelingMethod = "threshold"
+    take_profit_pct: float = 2.0
+    stop_loss_pct: float = 2.0
+    holdout_frac: float = 0.2
+    val_frac: float = 0.15
+    epochs: int = 30
+    patience: int = 5
+    patch_len: int = 5
+    stride: int = 5
+    d_model: int = 64
+    nhead: int = 4
+    num_layers: int = 2
+    dropout: float = 0.3
+    feature_columns: list[str] | None = None
+
+
+class TrainPatchTSTResponse(BaseModel):
+    rows_used: int
+    symbols_used: int
+    seq_len: int
+    epochs_run: int
+    final_train_loss: float
+    final_train_accuracy: float
+    best_val_loss: float | None = None
+    stopped_early: bool = False
+    out_of_sample_rows: int
+    out_of_sample_accuracy: float
+    out_of_sample_balanced_accuracy: float
+
+
+class PredictPatchTSTResponse(BaseModel):
     symbol: str
     direction: str
     confidence: float
@@ -281,6 +331,7 @@ def train_lstm(payload: TrainLSTMRequest) -> TrainLSTMResponse:
             hidden_size=payload.hidden_size,
             num_layers=payload.num_layers,
             dropout=payload.dropout,
+            feature_columns=payload.feature_columns,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -309,12 +360,95 @@ def predict_lstm(symbol: str = Query(..., description="Örn: BTC/USDT:USDT")) ->
     exchange = get_exchange(settings.exchange_id)
     model = LSTMSignalModel.load_from()
 
-    X, _y, _t = build_sequence_dataset(exchange, [symbol], settings.ml_train_timeframe, settings.ml_train_lookback, seq_len=model.seq_len)
+    X, _y, _t = build_sequence_dataset(
+        exchange,
+        [symbol],
+        settings.ml_train_timeframe,
+        settings.ml_train_lookback,
+        seq_len=model.seq_len,
+        feature_columns=model.feature_columns,
+    )
     if len(X) == 0:
         raise HTTPException(status_code=422, detail="Tahmin için yeterli veri yok (seq_len'e ulaşmıyor).")
 
     prediction = model.predict(X[-1])
     return PredictLSTMResponse(symbol=symbol, direction=prediction.direction, confidence=prediction.confidence)
+
+
+@router.post("/train-patchtst", response_model=TrainPatchTSTResponse)
+def train_patchtst(payload: TrainPatchTSTRequest) -> TrainPatchTSTResponse:
+    """PatchTST'ten esinlenilmiş, patch-tabanlı Transformer sınıflandırıcıyı
+    eğitir (bkz. `app.ml.patchtst_model`) — LSTM'e (Faz B) alternatif bir
+    mimari denemesi. LSTM ile AYNI arayüzü/disiplini (holdout + erken
+    durdurma + sınıf ağırlıklandırma) paylaşır, adil karşılaştırma için."""
+    exchange = get_exchange(settings.exchange_id)
+    symbols = _resolve_symbols(exchange, payload.symbols)
+    if not symbols:
+        raise HTTPException(status_code=400, detail="Eğitim için sembol bulunamadı.")
+
+    try:
+        result = train_patchtst_signal_model(
+            exchange,
+            symbols,
+            lookback=payload.lookback,
+            seq_len=payload.seq_len,
+            horizon=payload.horizon,
+            threshold_pct=payload.threshold_pct,
+            labeling_method=payload.labeling_method,
+            take_profit_pct=payload.take_profit_pct,
+            stop_loss_pct=payload.stop_loss_pct,
+            holdout_frac=payload.holdout_frac,
+            val_frac=payload.val_frac,
+            epochs=payload.epochs,
+            patience=payload.patience,
+            patch_len=payload.patch_len,
+            stride=payload.stride,
+            d_model=payload.d_model,
+            nhead=payload.nhead,
+            num_layers=payload.num_layers,
+            dropout=payload.dropout,
+            feature_columns=payload.feature_columns,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    oos = result.out_of_sample
+    return TrainPatchTSTResponse(
+        rows_used=result.rows_used,
+        symbols_used=len(symbols),
+        seq_len=payload.seq_len,
+        epochs_run=result.training.epochs_run,
+        final_train_loss=result.training.final_train_loss,
+        final_train_accuracy=result.training.final_train_accuracy,
+        best_val_loss=result.training.best_val_loss,
+        stopped_early=result.training.stopped_early,
+        out_of_sample_rows=oos.holdout_rows,
+        out_of_sample_accuracy=oos.accuracy,
+        out_of_sample_balanced_accuracy=oos.balanced_accuracy,
+    )
+
+
+@router.get("/predict-patchtst", response_model=PredictPatchTSTResponse)
+def predict_patchtst(symbol: str = Query(..., description="Örn: BTC/USDT:USDT")) -> PredictPatchTSTResponse:
+    if not Path(DEFAULT_PATCHTST_MODEL_PATH).exists():
+        raise HTTPException(status_code=409, detail="PatchTST modeli henüz eğitilmedi. Önce /ml/train-patchtst çağırın.")
+
+    exchange = get_exchange(settings.exchange_id)
+    model = PatchTSTSignalModel.load_from()
+
+    X, _y, _t = build_sequence_dataset(
+        exchange,
+        [symbol],
+        settings.ml_train_timeframe,
+        settings.ml_train_lookback,
+        seq_len=model.seq_len,
+        feature_columns=model.feature_columns,
+    )
+    if len(X) == 0:
+        raise HTTPException(status_code=422, detail="Tahmin için yeterli veri yok (seq_len'e ulaşmıyor).")
+
+    prediction = model.predict(X[-1])
+    return PredictPatchTSTResponse(symbol=symbol, direction=prediction.direction, confidence=prediction.confidence)
 
 
 @router.post("/train-meta", response_model=TrainMetaResponse)
