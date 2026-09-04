@@ -6,3 +6,16 @@ datasources:
     access: proxy
     url: http://4keys-prometheus:9090
     isDefault: true
+  - name: 4keys-postgres
+    uid: 4keys-postgres
+    type: postgres
+    access: proxy
+    url: 4keys-db:5432
+    database: fourkeys
+    user: fourkeys
+    secureJsonData:
+      password: fourkeys
+    jsonData:
+      sslmode: disable
+      postgresVersion: 1600
+      timescaledb: true

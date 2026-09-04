@@ -5,11 +5,13 @@ import PaperTrading from "./pages/PaperTrading.jsx";
 import Screener from "./pages/Screener.jsx";
 import Assistant from "./pages/Assistant.jsx";
 import Settings from "./pages/Settings.jsx";
+import Backtest from "./pages/Backtest.jsx";
 
 const TABS = [
   { to: "/", label: "Portföy", icon: "◔", end: true },
   { to: "/trade", label: "Al-Sat", icon: "⇅" },
   { to: "/paper-trading", label: "Paper Trading", icon: "◫" },
+  { to: "/backtest", label: "Backtest", icon: "⏱" },
   { to: "/assistant", label: "AI Asistan", icon: "✦" },
   { to: "/screener", label: "Araştırıcı", icon: "▤" },
   { to: "/settings", label: "Ayarlar", icon: "⚙" },
@@ -27,6 +29,7 @@ export default function App() {
         <Route path="/" element={<Portfolio />} />
         <Route path="/trade" element={<Trade />} />
         <Route path="/paper-trading" element={<PaperTrading />} />
+        <Route path="/backtest" element={<Backtest />} />
         <Route path="/assistant" element={<Assistant />} />
         <Route path="/screener" element={<Screener />} />
         <Route path="/settings" element={<Settings />} />

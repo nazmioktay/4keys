@@ -1,0 +1,96 @@
+{
+  "title": "4keys — Sistem Backtest (BTCUSDT.P)",
+  "uid": "4keys-backtest",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "",
+  "time": { "from": "now-2y", "to": "now" },
+  "annotations": {
+    "list": [
+      {
+        "name": "İşlem girişleri",
+        "enable": true,
+        "iconColor": "green",
+        "datasource": { "type": "postgres", "uid": "4keys-postgres" },
+        "target": {
+          "format": "table",
+          "rawSql": "SELECT entry_time AS time, (direction || ' aç @ ' || round(entry_price::numeric, 2)) AS text, direction AS tags FROM backtest_trades WHERE run_id = (SELECT MAX(id) FROM backtest_runs) ORDER BY entry_time"
+        }
+      },
+      {
+        "name": "İşlem çıkışları",
+        "enable": true,
+        "iconColor": "red",
+        "datasource": { "type": "postgres", "uid": "4keys-postgres" },
+        "target": {
+          "format": "table",
+          "rawSql": "SELECT exit_time AS time, (exit_reason || ' kapan @ ' || round(exit_price::numeric, 2) || ' (' || round(pnl_pct::numeric, 2) || '%)') AS text, exit_reason AS tags FROM backtest_trades WHERE run_id = (SELECT MAX(id) FROM backtest_runs) ORDER BY exit_time"
+        }
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Son backtest özeti",
+      "type": "stat",
+      "datasource": { "type": "postgres", "uid": "4keys-postgres" },
+      "gridPos": { "h": 6, "w": 24, "x": 0, "y": 0 },
+      "fieldConfig": {
+        "defaults": { "thresholds": { "mode": "absolute", "steps": [{ "color": "text", "value": null }] } },
+        "overrides": [
+          { "matcher": { "id": "byName", "options": "total_pnl_pct" }, "properties": [{ "id": "unit", "value": "percent" }, { "id": "thresholds", "value": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 0 }] } }] },
+          { "matcher": { "id": "byName", "options": "daily_pnl_pct" }, "properties": [{ "id": "unit", "value": "percent" }] },
+          { "matcher": { "id": "byName", "options": "monthly_pnl_pct" }, "properties": [{ "id": "unit", "value": "percent" }] },
+          { "matcher": { "id": "byName", "options": "win_rate_pct" }, "properties": [{ "id": "unit", "value": "percent" }] },
+          { "matcher": { "id": "byName", "options": "max_drawdown_pct" }, "properties": [{ "id": "unit", "value": "percent" }] }
+        ]
+      },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "horizontal", "textMode": "value_and_name" },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "4keys-postgres" },
+          "format": "table",
+          "rawSql": "SELECT trades_closed, win_rate_pct, total_pnl_pct, daily_pnl_pct, monthly_pnl_pct, max_drawdown_pct FROM backtest_runs ORDER BY created_at DESC LIMIT 1"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "BTCUSDT.P (1h) — mum grafiği + al/sat işaretleri (annotation)",
+      "type": "candlestick",
+      "datasource": { "type": "postgres", "uid": "4keys-postgres" },
+      "gridPos": { "h": 12, "w": 24, "x": 0, "y": 6 },
+      "fieldConfig": { "defaults": {}, "overrides": [] },
+      "options": {
+        "mode": "candles",
+        "candleStyle": "candles",
+        "colorStrategy": "open-close",
+        "fields": { "open": "open", "high": "high", "low": "low", "close": "close" }
+      },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "4keys-postgres" },
+          "format": "table",
+          "rawSql": "SELECT time AS \"time\", open, high, low, close FROM ohlcv_raw WHERE symbol = 'BTC/USDT:USDT' AND timeframe = '1h' ORDER BY time"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "Backtest kümülatif equity (son çalıştırma)",
+      "type": "timeseries",
+      "datasource": { "type": "postgres", "uid": "4keys-postgres" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 18 },
+      "fieldConfig": { "defaults": { "unit": "currencyUSD" }, "overrides": [] },
+      "targets": [
+        {
+          "datasource": { "type": "postgres", "uid": "4keys-postgres" },
+          "format": "time_series",
+          "rawSql": "SELECT exit_time AS \"time\", equity_after AS \"equity\" FROM backtest_trades WHERE run_id = (SELECT MAX(id) FROM backtest_runs) ORDER BY exit_time"
+        }
+      ]
+    }
+  ]
+}

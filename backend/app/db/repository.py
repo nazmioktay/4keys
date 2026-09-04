@@ -7,7 +7,16 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.ml.features import FEATURE_COLUMNS
 
-from .models import FeatureSnapshot, MacroSnapshot, OHLCVRaw, OrderbookSnapshot, SignalRecord, TradeRecord
+from .models import (
+    BacktestRun,
+    BacktestTradeRow,
+    FeatureSnapshot,
+    MacroSnapshot,
+    OHLCVRaw,
+    OrderbookSnapshot,
+    SignalRecord,
+    TradeRecord,
+)
 from .session import is_enabled, session_scope
 
 # `feature_snapshots` tablosunun kolonları, ML modelinin kullandığı
@@ -370,6 +379,137 @@ def get_recent_trades(limit: int = 50) -> list[dict]:
     except SQLAlchemyError:
         logger.exception("failed to read recent trades")
         return []
+
+
+def save_ohlcv_bulk(symbol: str, timeframe: str, ohlcv: pd.DataFrame) -> int:
+    """`ohlcv_raw`'a bir OHLCV DataFrame'ini (timestamp/open/high/low/close/
+    volume kolonları) tek seferde yazar — `app.backtest.system_runner`,
+    Grafana'nın candlestick panelinin okuyabilmesi için backtest'te
+    kullanılan geçmişi buraya "backfill" eder (bkz.
+    `record_feature_snapshots_bulk` aynı ON CONFLICT DO NOTHING deseni).
+    Zaten kayıtlı (time, symbol, timeframe) satırlar sessizce atlanır."""
+    if not is_enabled() or ohlcv.empty:
+        return 0
+
+    rows = [
+        {
+            "time": _to_pydatetime(pd.Timestamp(record["timestamp"])),
+            "symbol": symbol,
+            "timeframe": timeframe,
+            "open": float(record["open"]),
+            "high": float(record["high"]),
+            "low": float(record["low"]),
+            "close": float(record["close"]),
+            "volume": float(record["volume"]),
+        }
+        for record in ohlcv[["timestamp", "open", "high", "low", "close", "volume"]].to_dict("records")
+    ]
+    if not rows:
+        return 0
+
+    try:
+        with session_scope() as db:
+            table = OHLCVRaw.__table__
+            dialect = db.bind.dialect.name if db.bind is not None else ""
+            if dialect == "postgresql":
+                from sqlalchemy.dialects.postgresql import insert as upsert_insert
+            elif dialect == "sqlite":
+                from sqlalchemy.dialects.sqlite import insert as upsert_insert
+            else:
+                upsert_insert = None
+
+            if upsert_insert is not None:
+                stmt = upsert_insert(table).values(rows)
+                stmt = stmt.on_conflict_do_nothing(index_elements=["time", "symbol", "timeframe"])
+                db.execute(stmt)
+            else:
+                for row in rows:
+                    try:
+                        db.add(OHLCVRaw(**row))
+                        db.flush()
+                    except IntegrityError:
+                        db.rollback()
+        return len(rows)
+    except SQLAlchemyError:
+        logger.exception("bulk ohlcv persist failed for %s", symbol)
+        return 0
+
+
+def save_backtest_run(run: dict, trades: list[dict]) -> int | None:
+    """Bir sistem backtest çalıştırmasının özetini + işlem listesini
+    kaydeder, oluşturulan `BacktestRun.id`'yi döner (DB kapalıysa None).
+    Frontend'in `GET /backtest/system/latest` ile geri okuması VE
+    Grafana'nın candlestick/PnL panelleri bu tabloları kullanır."""
+    if not is_enabled():
+        return None
+    try:
+        with session_scope() as db:
+            run_row = BacktestRun(**run)
+            db.add(run_row)
+            db.flush()  # id'yi almak için
+            run_id = run_row.id
+            for trade in trades:
+                db.add(BacktestTradeRow(run_id=run_id, **trade))
+        return run_id
+    except SQLAlchemyError:
+        logger.exception("backtest run persist failed")
+        return None
+
+
+def get_latest_backtest_run(symbol: str | None = None) -> dict | None:
+    if not is_enabled():
+        return None
+    try:
+        with session_scope() as db:
+            query = select(BacktestRun).order_by(BacktestRun.created_at.desc())
+            if symbol:
+                query = query.where(BacktestRun.symbol == symbol)
+            run = db.execute(query.limit(1)).scalar_one_or_none()
+            if run is None:
+                return None
+            trades = db.execute(
+                select(BacktestTradeRow)
+                .where(BacktestTradeRow.run_id == run.id)
+                .order_by(BacktestTradeRow.exit_time.asc())
+            ).scalars().all()
+            return {
+                "id": run.id,
+                "created_at": run.created_at.isoformat(),
+                "symbol": run.symbol,
+                "timeframe": run.timeframe,
+                "candles_used": run.candles_used,
+                "period_start": run.period_start.isoformat(),
+                "period_end": run.period_end.isoformat(),
+                "initial_balance": run.initial_balance,
+                "final_equity": run.final_equity,
+                "trades_closed": run.trades_closed,
+                "win_rate_pct": run.win_rate_pct,
+                "total_pnl_quote": run.total_pnl_quote,
+                "total_pnl_pct": run.total_pnl_pct,
+                "daily_pnl_quote": run.daily_pnl_quote,
+                "daily_pnl_pct": run.daily_pnl_pct,
+                "monthly_pnl_quote": run.monthly_pnl_quote,
+                "monthly_pnl_pct": run.monthly_pnl_pct,
+                "max_drawdown_pct": run.max_drawdown_pct,
+                "trades": [
+                    {
+                        "direction": t.direction,
+                        "entry_time": t.entry_time.isoformat(),
+                        "exit_time": t.exit_time.isoformat(),
+                        "entry_price": t.entry_price,
+                        "exit_price": t.exit_price,
+                        "pnl_pct": t.pnl_pct,
+                        "pnl_quote": t.pnl_quote,
+                        "equity_after": t.equity_after,
+                        "exit_reason": t.exit_reason,
+                        "duration_candles": t.duration_candles,
+                    }
+                    for t in trades
+                ],
+            }
+    except SQLAlchemyError:
+        logger.exception("failed to read latest backtest run")
+        return None
 
 
 def get_recent_signals(limit: int = 50, symbol: str | None = None, source: str | None = None) -> list[dict]:

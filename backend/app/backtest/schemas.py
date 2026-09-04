@@ -85,3 +85,57 @@ class BacktestRequest(BaseModel):
     @property
     def kind(self) -> Literal["dca", "strategy"]:
         return "dca" if self.dca_params is not None else "strategy"
+
+
+class SystemBacktestRequest(BaseModel):
+    """`app.backtest.system_runner`: DCA/JSON-strateji motorlarından FARKLI
+    olarak burada canlıdaki AYNI ML modeli (XGBoost + varsa meta-label
+    filtresi) gerçek geçmiş mumlar üzerinde bar-bar tekrar oynatılır —
+    "sistemin kendisinin" geçmişte nasıl performans gösterdiğini ölçer."""
+
+    symbol: str = Field(default="BTC/USDT:USDT", description="Varsayılan: futures perpetual BTC/USDT (ml_primary_symbol)")
+    timeframe: str | None = Field(default=None, description="Boş bırakılırsa ml_train_timeframe (1h) kullanılır")
+    candles: int = Field(default=10000, ge=300, le=20000)
+    initial_balance: float = Field(default=1000.0, gt=0)
+    open_confidence: float = Field(default=0.6, ge=0.5, le=1.0)
+    close_confidence: float = Field(default=0.55, ge=0.5, le=1.0)
+    stop_loss_pct: float | None = Field(default=3.0, gt=0, description="null ise stop-loss uygulanmaz")
+    commission_pct: float = Field(default=0.04, ge=0)
+    slippage_pct: float = Field(default=0.02, ge=0)
+    use_meta_label: bool = Field(default=True, description="Eğitilmiş bir meta-label modeli varsa sinyal filtresi olarak kullanılır")
+
+
+class SystemTradeRecord(BaseModel):
+    direction: str  # "long" | "short"
+    entry_time: str
+    exit_time: str
+    entry_price: float
+    exit_price: float
+    pnl_pct: float
+    pnl_quote: float
+    equity_after: float
+    exit_reason: str  # "signal" | "stop_loss"
+    duration_candles: int
+
+
+class SystemBacktestReport(BaseModel):
+    id: int | None = None
+    created_at: str | None = None
+    symbol: str
+    timeframe: str
+    candles_used: int
+    period_start: str
+    period_end: str
+    initial_balance: float
+    final_equity: float
+    trades_closed: int
+    win_rate_pct: float
+    total_pnl_quote: float
+    total_pnl_pct: float
+    daily_pnl_quote: float
+    daily_pnl_pct: float
+    monthly_pnl_quote: float
+    monthly_pnl_pct: float
+    max_drawdown_pct: float
+    trades: list[SystemTradeRecord]
+    warnings: list[str] = Field(default_factory=list)

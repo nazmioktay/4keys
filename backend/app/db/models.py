@@ -168,6 +168,55 @@ class OrderbookSnapshot(Base):
     spread_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
+class BacktestRun(Base):
+    """`app.backtest.system_runner` ile üretilen bir "sistem backtest"i
+    (canlıdaki AYNI ML modeli, gerçek geçmiş mumlar üzerinde tekrar
+    oynatılır) çalıştırmasının özeti — Grafana'da candlestick/PnL
+    panelleri ve frontend'deki Backtest sayfası bu tablodan okur."""
+
+    __tablename__ = "backtest_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
+    symbol: Mapped[str] = mapped_column(String, index=True)
+    timeframe: Mapped[str] = mapped_column(String)
+    candles_used: Mapped[int] = mapped_column(Integer)
+    period_start: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    period_end: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    initial_balance: Mapped[float] = mapped_column(Float)
+    final_equity: Mapped[float] = mapped_column(Float)
+    trades_closed: Mapped[int] = mapped_column(Integer)
+    win_rate_pct: Mapped[float] = mapped_column(Float)
+    total_pnl_quote: Mapped[float] = mapped_column(Float)
+    total_pnl_pct: Mapped[float] = mapped_column(Float)
+    daily_pnl_quote: Mapped[float] = mapped_column(Float)
+    daily_pnl_pct: Mapped[float] = mapped_column(Float)
+    monthly_pnl_quote: Mapped[float] = mapped_column(Float)
+    monthly_pnl_pct: Mapped[float] = mapped_column(Float)
+    max_drawdown_pct: Mapped[float] = mapped_column(Float)
+
+
+class BacktestTradeRow(Base):
+    """Bir `BacktestRun`e ait tek bir simüle edilmiş işlem — Grafana
+    annotation sorgusu (giriş/çıkış noktaları) ve frontend işlem listesi
+    burayı okur."""
+
+    __tablename__ = "backtest_trades"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    run_id: Mapped[int] = mapped_column(Integer, index=True)
+    direction: Mapped[str] = mapped_column(String)
+    entry_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    exit_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    entry_price: Mapped[float] = mapped_column(Float)
+    exit_price: Mapped[float] = mapped_column(Float)
+    pnl_pct: Mapped[float] = mapped_column(Float)
+    pnl_quote: Mapped[float] = mapped_column(Float)
+    equity_after: Mapped[float] = mapped_column(Float)
+    exit_reason: Mapped[str] = mapped_column(String)
+    duration_candles: Mapped[int] = mapped_column(Integer)
+
+
 class TradeRecord(Base):
     """Gerçekleşen (kapanan) her işlem — Bölüm 3.4-3.6'daki `trades` tablosu.
 
