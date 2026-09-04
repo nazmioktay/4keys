@@ -14,6 +14,7 @@ from app.ml.macro_features import latest_macro_feature_row
 from app.ml.orderbook_features import latest_orderbook_feature_row
 from app.ml.model import DEFAULT_MODEL_PATH, Algorithm, SignalModel
 from app.ml.sequence_dataset import build_sequence_dataset
+from app.ml.symbol_selection import select_training_symbols
 from app.ml.train import sweep_lookback_values, train_lstm_signal_model, train_meta_label_model, train_signal_model_validated
 from app.screener.scanner import scan_market, top_long, top_short
 
@@ -155,9 +156,16 @@ def _model_exists() -> bool:
 def _resolve_symbols(exchange, symbols: list[str] | None) -> list[str]:
     if symbols:
         return symbols
+    # Eskiden burada screener'ın Top-N Long + Top-N Short çıktısı doğrudan
+    # eğitim evreni olarak kullanılıyordu — bu liste yalnızca kısa vadeli
+    # teknik skora göre seçiliyor, likidite/uyumluluk kontrolü yoktu ("zayıf
+    # seçilmiş bir grup"). Şimdi bu ham liste yalnızca ADAY havuzu olarak
+    # kullanılıyor; asıl seçim BTC-öncelikli + likidite/korelasyon
+    # filtresinden geçen `select_training_symbols`'a devrediliyor.
     results = scan_market(exchange)
     picks = top_long(results, settings.screener_top_n) + top_short(results, settings.screener_top_n)
-    return [r.symbol for r in picks]
+    candidates = [r.symbol for r in picks]
+    return select_training_symbols(exchange, candidates)
 
 
 @router.post("/train", response_model=TrainResponse)

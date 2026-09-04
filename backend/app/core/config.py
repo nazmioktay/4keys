@@ -20,6 +20,19 @@ class Settings(BaseSettings):
     ml_train_timeframe: str = "1h"
     ml_train_lookback: int = 10000
 
+    # --- Eğitim sembol seçimi: BTC-öncelikli + uyumluluk filtresi ---
+    # Önceden eğitim evreni doğrudan screener'ın Top-N Long + Top-N Short
+    # çıktısıydı — bu liste yalnızca kısa vadeli teknik skora göre seçiliyor,
+    # likidite/hacim eşiği yok. Kullanıcı bunun "zayıf seçilmiş bir grup"
+    # olduğunu ve öncelikle BTC/USDT üzerinden eğitim yapılıp diğer
+    # sembollerin yalnızca bu eğitime UYUMLU olmaları hâlinde katılmaları
+    # gerektiğini belirtti (bkz. sohbet). Uyumluluk = BTC ile getiri
+    # korelasyonu (aynı rejimde hareket ediyor mu) + minimum likidite.
+    ml_primary_symbol: str = "BTC/USDT:USDT"
+    ml_train_max_symbols: int = 5
+    ml_min_correlation_with_primary: float = 0.4
+    ml_min_quote_volume_24h: float = 5_000_000.0
+
     # --- Feature snapshot biriktirme (LSTM/RL için ileride kullanılacak
     # zaman serisi veri seti) --- Virgülle ayrılmış sembol listesi; her
     # tarama döngüsünde bu sembollerin ML özellik vektörü (bkz.

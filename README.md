@@ -850,6 +850,7 @@ da scraping riskini kabul etmek gerekecek; kullanıcıyla ayrıca karar verilece
 - [x] Confidence-weighted pozisyon boyutlandırma (tahminin güvenine göre ek ölçekleme)
 - [x] VIX rejim filtresi (opsiyonel — aşırı piyasa stresinde boyut küçültme/engelleme)
 - [ ] Sembol-çapraz doğrulama (bir grup sembolde eğitip hiç görmediği sembollerde test etme) — henüz yapılmadı
+- [x] BTC-öncelikli eğitim sembol seçimi (`app/ml/symbol_selection.py`) — eskiden eğitim evreni doğrudan screener'ın Top-N Long+Short çıktısıydı (yalnızca kısa vadeli teknik skora göre, likidite/uyumluluk kontrolü yoktu — "zayıf seçilmiş bir grup"). Artık BTC/USDT (`ml_primary_symbol`) her zaman ilk sırada eğitiliyor; diğer semboller yalnızca (1) minimum likidite (`ml_min_quote_volume_24h`) ve (2) BTC ile getiri korelasyonu (`ml_min_correlation_with_primary`, varsayılan 0.4) eşiğini geçerlerse ek olarak katılıyor. Toplam sembol sayısı `ml_train_max_symbols` (varsayılan 5) ile sınırlandırılıp eğitim süresi kısaltıldı (önceden 20 sembole kadar çıkabiliyordu)
 - [ ] Meta-labeling/karar eşiklerinin (`open_confidence`/`close_confidence`) backtestle optimizasyonu — ML karar motoruna özel bir backtest harness'i gerektiriyor, henüz yok (`/backtest` modülü şu an yalnızca DCA/JSON-strateji motorlarını destekliyor)
 - [ ] `/ml/sweep-lookback` sonuçlarının periyodik/otomatik izlenmesi — henüz yok, elle çalıştırılıyor; Grafana panel/alert olarak da karşılık bulabilir (bkz. aşağıdaki Grafana maddeleri)
 - [ ] Ensemble (XGBoost + LSTM + RL oy birliği) — LSTM ve RL henüz üretime hazır olmadığından ertelendi
