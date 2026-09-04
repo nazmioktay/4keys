@@ -92,6 +92,7 @@ class TrainLSTMRequest(BaseModel):
     num_layers: int = 2
     dropout: float = 0.3
     feature_columns: list[str] | None = None  # None -> ALL_FEATURE_COLUMNS; /ml/explain'in SHAP sıralamasından bir alt küme verilebilir
+    seed: int | None = 42  # tekrarlanabilirlik için; None -> eski rastgele davranış
 
 
 class TrainLSTMResponse(BaseModel):
@@ -134,6 +135,7 @@ class TrainPatchTSTRequest(BaseModel):
     num_layers: int = 2
     dropout: float = 0.3
     feature_columns: list[str] | None = None
+    seed: int | None = 42
 
 
 class TrainPatchTSTResponse(BaseModel):
@@ -333,6 +335,7 @@ def train_lstm(payload: TrainLSTMRequest) -> TrainLSTMResponse:
             num_layers=payload.num_layers,
             dropout=payload.dropout,
             feature_columns=payload.feature_columns,
+            seed=payload.seed,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -409,6 +412,7 @@ def train_patchtst(payload: TrainPatchTSTRequest) -> TrainPatchTSTResponse:
             num_layers=payload.num_layers,
             dropout=payload.dropout,
             feature_columns=payload.feature_columns,
+            seed=payload.seed,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

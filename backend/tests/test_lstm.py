@@ -78,6 +78,27 @@ def test_lstm_model_fit_predict_roundtrip():
     assert 0 <= single_prediction.confidence <= 1
 
 
+def test_lstm_model_fit_same_seed_produces_same_result():
+    rng = np.random.default_rng(30)
+    n_samples, seq_len, n_features = 100, 8, 24
+    X = rng.normal(0, 1, (n_samples, seq_len, n_features)).astype("float32")
+    y = rng.choice([-1, 0, 1], size=n_samples)
+
+    model_a = LSTMSignalModel(seq_len=seq_len, hidden_size=8, num_layers=1)
+    report_a = model_a.fit(X, y, epochs=3, seed=123)
+    model_b = LSTMSignalModel(seq_len=seq_len, hidden_size=8, num_layers=1)
+    report_b = model_b.fit(X, y, epochs=3, seed=123)
+
+    # BTC-only etiketleme taramasında aynı hiperparametrelerin farklı
+    # çalıştırmalarda dalgalanması (bkz. README) seed'siz ağırlık
+    # başlatma + batch karıştırmadan kaynaklanıyordu — aynı seed AYNI
+    # sonucu üretmeli.
+    assert report_a.final_train_loss == pytest.approx(report_b.final_train_loss)
+    pred_a, _ = model_a.predict_batch(X[:5])
+    pred_b, _ = model_b.predict_batch(X[:5])
+    assert (pred_a == pred_b).all()
+
+
 def test_lstm_model_save_and_load_roundtrip(tmp_path):
     rng = np.random.default_rng(4)
     n_samples, seq_len, n_features = 100, 8, 24

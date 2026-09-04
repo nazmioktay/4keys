@@ -169,6 +169,7 @@ def _train_sequence_model(
     feature_columns: list[str] | None,
     model_kind: str,
     persist: bool = True,
+    seed: int | None = 42,
 ):
     """LSTM/PatchTST gibi sekans modellerinin ortak eğitim iskeleti —
     veri kurma, holdout/doğrulama bölme, erken durdurma ile fit ve
@@ -228,7 +229,7 @@ def _train_sequence_model(
     X_val, y_val = X_train_full[~fit_mask], y_train_full[~fit_mask]
 
     model.feature_columns = resolved_columns
-    training_report = model.fit(X_fit, y_fit, epochs=epochs, X_val=X_val, y_val=y_val, patience=patience)
+    training_report = model.fit(X_fit, y_fit, epochs=epochs, X_val=X_val, y_val=y_val, patience=patience, seed=seed)
     X_train, y_train = X_train_full, y_train_full
 
     if len(X_holdout) > 0:
@@ -276,11 +277,14 @@ def train_lstm_signal_model(
     dropout: float = 0.3,
     feature_columns: list[str] | None = None,
     persist: bool = True,
+    seed: int | None = 42,
 ) -> LSTMTrainingResult:
     """LSTM (Faz B) modelini kayan pencereli sekans veri setiyle eğitir —
     bkz. `_train_sequence_model` (ortak iskelet). `persist=False`,
     üretim modelini DEĞİŞTİRMEDEN deneme yapmak için (bkz.
-    `sweep_labeling_lstm`)."""
+    `sweep_labeling_lstm`). `seed` (varsayılan 42) sonucu tekrarlanabilir
+    kılar — etiketleme taramasında aynı hiperparametrelerin farklı
+    çalıştırmalarda dalgalanmasının (bkz. README) nedeni buydu."""
     model = LSTMSignalModel(seq_len=seq_len, hidden_size=hidden_size, num_layers=num_layers, dropout=dropout)
     model, rows_used, training_report, oos_report = _train_sequence_model(
         model,
@@ -301,6 +305,7 @@ def train_lstm_signal_model(
         feature_columns,
         "LSTM",
         persist=persist,
+        seed=seed,
     )
     return LSTMTrainingResult(model=model, rows_used=rows_used, training=training_report, out_of_sample=oos_report)
 
@@ -335,6 +340,8 @@ def train_patchtst_signal_model(
     num_layers: int = 2,
     dropout: float = 0.3,
     feature_columns: list[str] | None = None,
+    persist: bool = True,
+    seed: int | None = 42,
 ) -> PatchTSTTrainingResult:
     """PatchTST'ten esinlenilmiş patch-tabanlı Transformer modelini eğitir
     (bkz. `app.ml.patchtst_model` — LSTM'e alternatif, LSTM'in BTC-only
@@ -362,6 +369,8 @@ def train_patchtst_signal_model(
         patience,
         feature_columns,
         "PatchTST",
+        persist=persist,
+        seed=seed,
     )
     return PatchTSTTrainingResult(model=model, rows_used=rows_used, training=training_report, out_of_sample=oos_report)
 

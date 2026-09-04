@@ -89,6 +89,7 @@ class LSTMSignalModel:
         y_val: np.ndarray | None = None,
         patience: int = 5,
         max_grad_norm: float = 1.0,
+        seed: int | None = 42,
     ) -> LSTMTrainingReport:
         """`X`: şekil (n, seq_len, n_özellik), `y`: şekil (n,) etiket dizisi.
 
@@ -106,7 +107,16 @@ class LSTMSignalModel:
         `max_grad_norm` ile gradyan kırpma (gradient clipping) her zaman
         uygulanır — küçük, gürültülü veri setlerinde ani büyük güncellemelerin
         (ve dolayısıyla ezberlemenin) önüne geçer.
+
+        `seed` (varsayılan 42): ağırlık başlatma ve batch karıştırmayı
+        (`DataLoader(shuffle=True)`, torch'un global RNG'sini kullanır)
+        tekrarlanabilir kılar — BTC-only etiketleme taramasında (bkz.
+        README) aynı hiperparametrelerin farklı çalıştırmalarda
+        %37-44 arası dalgalanması bu eksiklikten kaynaklanıyordu.
+        `None` verilirse eski (rastgele/tekrarlanamaz) davranışa döner.
         """
+        if seed is not None:
+            torch.manual_seed(seed)
         self.classes_ = np.unique(y)
         self._label_to_idx = {label: i for i, label in enumerate(self.classes_)}
         self._idx_to_label = {i: label for label, i in self._label_to_idx.items()}

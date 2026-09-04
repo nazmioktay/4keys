@@ -151,12 +151,16 @@ class PatchTSTSignalModel:
         y_val: np.ndarray | None = None,
         patience: int = 5,
         max_grad_norm: float = 1.0,
+        seed: int | None = 42,
     ) -> PatchTSTTrainingReport:
         """`X`: şekil (n, seq_len, n_özellik), `y`: şekil (n,) etiket dizisi.
 
-        Erken durdurma, gradyan kırpma ve sınıf ağırlıklandırma —
-        `LSTMSignalModel.fit` ile AYNI mantıkla, adil bir karşılaştırma
-        için — burada da uygulanır (bkz. o dosyadaki notlar)."""
+        Erken durdurma, gradyan kırpma, sınıf ağırlıklandırma VE `seed`
+        ile tekrarlanabilirlik — `LSTMSignalModel.fit` ile AYNI mantıkla,
+        adil bir karşılaştırma için — burada da uygulanır (bkz. o
+        dosyadaki notlar)."""
+        if seed is not None:
+            torch.manual_seed(seed)
         self.classes_ = np.unique(y)
         self._label_to_idx = {label: i for i, label in enumerate(self.classes_)}
         self._idx_to_label = {i: label for label, i in self._label_to_idx.items()}
