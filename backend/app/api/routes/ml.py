@@ -69,6 +69,7 @@ class ExplainResponse(BaseModel):
 
 class TrainLSTMRequest(BaseModel):
     symbols: list[str] | None = None  # None -> screener top long+short kullanılır
+    lookback: int | None = None  # None -> settings.ml_train_lookback; tek sembol testlerinde daha yüksek değer denenebilir
     seq_len: int = 20
     horizon: int = 5
     threshold_pct: float = 1.0
@@ -263,6 +264,7 @@ def train_lstm(payload: TrainLSTMRequest) -> TrainLSTMResponse:
         result = train_lstm_signal_model(
             exchange,
             symbols,
+            lookback=payload.lookback,
             seq_len=payload.seq_len,
             horizon=payload.horizon,
             threshold_pct=payload.threshold_pct,
