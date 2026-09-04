@@ -196,8 +196,41 @@ olarak — "önce veri, sonra daha fazla özellik" sırası):**
   order book = **53** kolon. Endpoint'ler: `GET/POST /orderbook/latest`,
   `/orderbook/history`, `/orderbook/refresh`.
 
-**Faz C — Reinforcement Learning (opsiyonel)** — henüz kurulmadı, rehberin
-kendisi de zorunlu değil diyor.
+**Faz C — Reinforcement Learning (opsiyonel)** ⚠️ Yalnızca HAZIRLIK
+yapıldı (ortam + veri pipeline'ı), gerçek bir ajan (PPO/DQN) HENÜZ
+EĞİTİLMEDİ — rehberin kendisi de RL'i zorunlu tutmuyor.
+- `app/rl/environment.py::TradingEnv` — bağımlılıksız (gymnasium
+  GEREKTİRMEYEN, ama aynı `reset()`/`step()` sözleşmesini izleyen) basit
+  tek-pozisyonlu (flat/long/short) alım-satım ortamı. Gerçek bir ajan
+  eğitilmek istendiğinde `stable-baselines3` + `gymnasium` eklenip bu
+  sınıf ince bir sarmalayıcıya dönüştürülebilir.
+- **Gözlem**: o barın 53 özelliği (`ALL_FEATURE_COLUMNS`) + [güncel
+  pozisyon yönü, pozisyonun açık olduğu bar sayısı (normalize)].
+- **Ödül**: 1-bar yürütme gecikmeli mark-to-market getiri EKSİ pozisyon
+  değiştirildiğinde işlem maliyeti (`transaction_cost_pct`) — maliyetsiz
+  bir ortamda ajanın gürültüyü "kâr" sanıp anlamsızca sık işlem yapmasını
+  (RL'e özgü bir overfitting biçimi) engellemek için.
+- **Ezberlemeyi önleme**: her eğitim epizodu, verinin KENDİSİ değil,
+  İÇİNDEKİ RASTGELE bir pencerede başlar (bootstrap benzeri — ajan tek
+  bir sabit sırayı ezberleyemez); kronolojik son `holdout_frac` (%20)
+  eğitim epizotlarına HİÇBİR ZAMAN dahil edilmez (`reset(use_holdout=True)`
+  yalnızca değerlendirme için, XGBoost/LSTM'deki aynı out-of-sample
+  disiplini).
+- `app/rl/dataset.py::build_episode_data` — bir sembol için kronolojik
+  özellik matrisi + kapanış fiyatı dizisini hazırlar (aynı 53 özellik,
+  makro/order-book eksikse 0.0/nötr ile doldurulur — RL ağı XGBoost'un
+  aksine NaN kabul etmez).
+- `app/rl/train.py::evaluate_random_policy` — henüz gerçek bir ajan
+  olmadığı için, TAMAMEN RASTGELE bir politikanın "şans seviyesi"
+  referansını ölçer (XGBoost'taki "%33 rastgele tahmin" referansının
+  RL karşılığı) — hem ortamın doğru çalıştığını doğrular hem de gelecekte
+  eğitilecek gerçek ajanın aşması gereken tabanı verir.
+- `GET /rl/random-baseline?symbol=...&episodes=20` — yukarıdakini canlı
+  veriyle çalıştırır.
+- **Sırada**: `stable-baselines3` bağımlılığının eklenmesi (kullanıcı
+  onayı gerekir — yeni, nispeten büyük bir bağımlılık), gerçek bir PPO
+  ajanının eğitimi, ve ajanın XGBoost/rastgele referanslarla
+  karşılaştırılması.
 
 **Overfitting koruması** (rehber "2.4 Overfitting"):
 - `app/ml/validation.py::walk_forward_splits` — **Walk-Forward Validation**:
