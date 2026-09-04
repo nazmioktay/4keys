@@ -16,3 +16,5 @@ shap>=0.46
 requests>=2.31
 yfinance>=0.2
 torch>=2.2
+starlette-exporter>=0.23
+prometheus-client>=0.20

@@ -7,6 +7,7 @@ from app.db import repository as db
 from app.exchanges.base import Exchange
 from app.ml.features import latest_feature_vector
 from app.ml.macro_features import latest_macro_feature_row
+from app.monitoring.metrics import record_ml_prediction
 from app.ml.meta_label import MetaLabelModel
 from app.ml.model import Prediction, SignalModel
 from app.ml.orderbook_features import latest_orderbook_feature_row
@@ -96,6 +97,7 @@ class DecisionEngine:
             return None
         prediction, price, feature_row = result
         db.record_signal(symbol, source="ml", direction=prediction.direction, confidence=prediction.confidence, price=price)
+        record_ml_prediction(symbol, prediction.direction, prediction.confidence)
         position = self.portfolio.get(symbol) if self.portfolio is not None else self.positions.get(symbol)
 
         if position is None:

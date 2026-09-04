@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 
 from app.core.config import settings
 from app.db import repository as db
+from app.monitoring.metrics import portfolio_equity, portfolio_open_positions, portfolio_realized_pnl_session, record_trade_closed
 from app.security import kill_switch
 
 from .risk_manager import calculate_kelly_position_size, calculate_position_size, evaluate_risk
@@ -66,6 +67,11 @@ class PortfolioManager:
 
     def get(self, symbol: str) -> PortfolioPosition | None:
         return self.positions.get(symbol)
+
+    def _update_gauges(self) -> None:
+        portfolio_equity.set(self.equity)
+        portfolio_open_positions.set(len(self.positions))
+        portfolio_realized_pnl_session.set(self.realized_pnl_session)
 
     def trade_stats(self) -> TradeStats:
         """Kapanmış işlem geçmişinden kazanma oranı ve ortalama kazanç/kayıp hesaplar."""
@@ -139,6 +145,7 @@ class PortfolioManager:
             exit_tranche_weights=list(self.rules.exit_tranche_weights),
         )
         self.positions[symbol] = position
+        self._update_gauges()
         return position
 
     def add_entry_tranche(self, symbol: str, price: float) -> PortfolioPosition | None:
@@ -199,10 +206,12 @@ class PortfolioManager:
         }
         self.closed_history.append(record)
         db.record_trade({k: v for k, v in record.items() if k not in ("partial", "tranche")})
+        record_trade_closed(position.direction, pnl_pct)
 
         if fully_closed:
             self.positions.pop(symbol, None)
         self._maybe_trip_kill_switch()
+        self._update_gauges()
         return record
 
     def close(self, symbol: str, exit_price: float) -> dict | None:

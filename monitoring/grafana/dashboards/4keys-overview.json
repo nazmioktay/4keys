@@ -1,0 +1,99 @@
+{
+  "title": "4keys — Genel Bakış",
+  "uid": "4keys-overview",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "panels": [
+    {
+      "id": 1,
+      "title": "İstek oranı (path başına)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        { "expr": "sum(rate(starlette_requests_total{app_name=\"4keys-backend\"}[5m])) by (path)", "legendFormat": "{{path}}" }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Hata oranı (5xx)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        {
+          "expr": "sum(rate(starlette_requests_total{app_name=\"4keys-backend\", status_code=~\"5..\"}[5m])) by (path)",
+          "legendFormat": "{{path}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "P95 gecikme (saniye)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(starlette_request_duration_seconds_bucket{app_name=\"4keys-backend\"}[5m])) by (le, path))",
+          "legendFormat": "{{path}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "İşlenmekte olan istekler",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "targets": [
+        { "expr": "sum(starlette_requests_in_progress{app_name=\"4keys-backend\"})", "legendFormat": "aktif istek" }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Portföy equity",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
+      "targets": [{ "expr": "fourkeys_portfolio_equity", "legendFormat": "equity" }]
+    },
+    {
+      "id": 6,
+      "title": "Açık pozisyon sayısı",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 6, "x": 12, "y": 16 },
+      "targets": [{ "expr": "fourkeys_portfolio_open_positions", "legendFormat": "açık" }]
+    },
+    {
+      "id": 7,
+      "title": "Oturum içi gerçekleşen PNL",
+      "type": "stat",
+      "gridPos": { "h": 8, "w": 6, "x": 18, "y": 16 },
+      "targets": [{ "expr": "fourkeys_portfolio_realized_pnl_session", "legendFormat": "PNL" }]
+    },
+    {
+      "id": 8,
+      "title": "Kapanan işlemler (kazanç/kayıp)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 24 },
+      "targets": [
+        { "expr": "sum(rate(fourkeys_trades_closed_total[1h])) by (result)", "legendFormat": "{{result}}" }
+      ]
+    },
+    {
+      "id": 9,
+      "title": "ML tahmin güveni (son değer, sembol başına)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 24 },
+      "targets": [
+        { "expr": "fourkeys_ml_prediction_confidence", "legendFormat": "{{symbol}} · {{direction}}" }
+      ]
+    },
+    {
+      "id": 10,
+      "title": "Zamanlayıcı işlerinin son durumu",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 32 },
+      "targets": [{ "expr": "fourkeys_scheduler_job_last_run_ok", "format": "table", "instant": true }]
+    }
+  ]
+}

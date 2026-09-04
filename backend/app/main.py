@@ -5,6 +5,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
+from starlette_exporter import PrometheusMiddleware, handle_metrics
 
 from app.api.routes import backtest, bank, bist, dca, engine, macro, ml, orderbook, portfolio, rl, scheduler, screener, security, strategy, trading
 from app.api.routes import db as db_routes
@@ -57,6 +58,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+# Prometheus/Grafana izlenebilirliği (bkz. deploy/add-monitoring.sh,
+# monitoring/grafana/dashboards/fastapi-observability.json — starlette-exporter
+# ile uyumlu, topluluğun hazır "FastAPI Observability" panosu temel alındı).
+# `group_paths=True`: /ml/predict?symbol=X gibi query param'lı istekler tek
+# bir path etiketi altında toplanır (aksi halde her sembol ayrı zaman
+# serisi/kardinalite oluştururdu).
+app.add_middleware(PrometheusMiddleware, app_name="4keys-backend", group_paths=True, prefix="starlette")
+app.add_route("/metrics", handle_metrics)
 
 app.include_router(screener.router)
 app.include_router(ml.router)

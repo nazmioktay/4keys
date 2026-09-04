@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
+from app.monitoring.metrics import record_scheduler_job
+
 
 @dataclass
 class JobRunStatus:
@@ -22,6 +24,7 @@ def record(job_id: str, ok: bool, detail: str = "") -> None:
     current.run_count += 1
     if not ok:
         current.error_count += 1
+    record_scheduler_job(job_id, ok)
 
 
 def get_all() -> dict[str, JobRunStatus]:

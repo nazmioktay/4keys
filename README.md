@@ -421,6 +421,32 @@ docker compose up
   pozisyonların dilim durumu, kademeli dilimler dahil kapanan işlem
   geçmişi, Kelly çeşidi + dilim ağırlıklarını düzenleyen parametrik form.
 
+### Modül — Prometheus + Grafana İzlenebilirliği ✅ (2026-09)
+- `starlette-exporter` (`app/main.py`) — HTTP istek sayısı/gecikmesi/hata
+  oranı otomatik toplanır, `GET /metrics`'te Prometheus formatında sunulur.
+  `group_paths=True`: `/ml/predict?symbol=X` gibi query param'lı istekler
+  tek path etiketi altında toplanır (kardinalite patlamasını önler).
+- `app/monitoring/metrics.py` — iş mantığına özgü metrikler: portföy
+  equity/açık pozisyon/oturum PNL'i (Gauge), kapanan işlemler (Counter,
+  kazanç/kayıp/nötr etiketli), ML tahmin güveni (sembol+yön etiketli),
+  zamanlayıcı işlerinin son çalışma durumu — hepsi aynı registry'de,
+  ekstra kablolama gerekmez.
+- **Docker Compose** (`docker-compose.yml`, yerel geliştirme): Prometheus
+  (`:9090`) + Grafana (`:3001`, anonim Viewer erişimi açık — yerel geliştirme
+  kolaylığı için, production'da KAPALI, bkz. `deploy/add-monitoring.sh`).
+- **Production** (`deploy/add-monitoring.sh`): `4keys-net` ağına
+  `4keys-prometheus` + `4keys-grafana` container'larını ekler; Grafana
+  admin şifresi varsayılan `admin` — **ilk girişte değiştirilmeli**.
+  Prometheus yalnızca `127.0.0.1`'e bağlanır (dışa kapalı); Grafana `:3001`
+  dışa açık — HTTPS/Nginx reverse-proxy henüz eklenmedi (ileride yapılacak).
+- **Hazır dashboard**: `monitoring/grafana/dashboards/4keys-overview.json`
+  — istek oranı, hata oranı, p95 gecikme, işlenmekte olan istek sayısı
+  (topluluğun `starlette-exporter` için bilinen "FastAPI Observability"
+  panosundaki standart panellerin karşılığı) + 4keys'e özgü paneller
+  (portföy equity, açık pozisyon, kapanan işlemler, ML güven skoru,
+  zamanlayıcı iş durumu). Grafana açılışta otomatik provizyon edilir
+  (`monitoring/grafana/provisioning*/`), elle dashboard import gerekmez.
+
 ### Modül 6 — Binance & Denizbank API Hazırlığı ✅
 **Binance canlı işlem** (`app/exchanges/binance.py`, `app/trading/`):
 - `BinanceExchange` artık opsiyonel `api_key`/`api_secret` ile kimlik
