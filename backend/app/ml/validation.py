@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Protocol
 
 import numpy as np
@@ -37,6 +37,14 @@ class OutOfSampleReport:
     holdout_rows: int
     accuracy: float
     balanced_accuracy: float
+    # Sınıf başına GERÇEK ve TAHMİN EDİLEN satır sayıları — `balanced_accuracy`
+    # tek bir sayıya sıkıştığı için "model çoğunluk sınıfına ÇÖKTÜ mü" sorusunu
+    # gizleyebiliyordu (balanced_accuracy TAM OLARAK 1/3 ise, bu modelin HER
+    # ZAMAN tek bir sınıfı tahmin ettiğinin matematiksel imzasıdır — bkz.
+    # session notu: XGBoost'un tekrar tekrar aldığı 0.333 sonucu). Bu alanlar
+    # olmadan bu teşhis yalnızca dolaylı yapılabiliyordu.
+    true_class_counts: dict[str, int] = field(default_factory=dict)
+    predicted_class_counts: dict[str, int] = field(default_factory=dict)
 
 
 def split_out_of_sample(
@@ -138,8 +146,12 @@ def run_walk_forward_validation(
 def evaluate_out_of_sample(model: _FittableModel, X_holdout: pd.DataFrame, y_holdout: pd.Series) -> OutOfSampleReport:
     """Eğitimde hiç görülmemiş holdout dilimi üzerinde nihai doğrulama."""
     pred, _ = model.predict_batch(X_holdout)
+    true_counts = pd.Series(y_holdout).value_counts()
+    pred_counts = pd.Series(pred).value_counts()
     return OutOfSampleReport(
         holdout_rows=len(X_holdout),
         accuracy=float(accuracy_score(y_holdout, pred)),
         balanced_accuracy=float(balanced_accuracy_score(y_holdout, pred)),
+        true_class_counts={str(k): int(v) for k, v in true_counts.items()},
+        predicted_class_counts={str(k): int(v) for k, v in pred_counts.items()},
     )

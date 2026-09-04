@@ -20,7 +20,7 @@ class _TrendExchange(Exchange):
         return ["UPUSDT", "DOWNUSDT"]
 
     def fetch_ohlcv(self, symbol, timeframe, limit, since=None):
-        n = max(limit, 400)
+        n = max(limit, 1500)
         base = np.linspace(100, 400, n) if symbol == "UPUSDT" else np.linspace(400, 100, n)
         close = base + np.random.default_rng(0).normal(0, 1.0, n)
         return pd.DataFrame(
@@ -43,13 +43,20 @@ def test_train_meta_endpoint_returns_response_matching_its_schema(monkeypatch):
     # Birincil modeli gerçekten (küçük veriyle) eğitip belleğe alır —
     # dosya sistemine/DEFAULT_MODEL_PATH'e dokunmadan `_model_exists` ve
     # `SignalModel.load_from`'u bu modeli döndürecek şekilde mockluyoruz.
-    X, y = build_training_dataset(_TrendExchange(), ["UPUSDT", "DOWNUSDT"], "1h", 400, horizon=5, threshold_pct=0.5)
+    # Not: 400 mumluk küçük set kalibrasyon eşiği yükseltildikten sonra
+    # (bkz. app.ml.model — sınıf başına cv katı başına en az 10 örnek)
+    # kalibrasyonsuz moda düşüyor, bu da birincil modelin ham (fazla
+    # "kesin") tahminleriyle meta etiketin tek sınıfa (`nunique()<2`)
+    # sıkışmasına yol açabiliyordu — bu test yalnızca YANIT ŞEMASINI
+    # doğrulamak için var, kalibrasyon davranışına duyarlı olmasın diye
+    # veri büyütüldü.
+    X, y = build_training_dataset(_TrendExchange(), ["UPUSDT", "DOWNUSDT"], "1h", 1500, horizon=5, threshold_pct=0.5)
     primary = SignalModel(algorithm="xgboost")
     primary.fit(X, y)
 
     monkeypatch.setattr(ml_routes, "get_exchange", lambda *_a, **_k: _TrendExchange())
     monkeypatch.setattr(ml_routes.settings, "ml_train_timeframe", "1h")
-    monkeypatch.setattr(ml_routes.settings, "ml_train_lookback", 400)
+    monkeypatch.setattr(ml_routes.settings, "ml_train_lookback", 1500)
     monkeypatch.setattr(ml_routes, "_model_exists", lambda: True)
     monkeypatch.setattr(SignalModel, "load_from", classmethod(lambda cls, path=None: primary))
 

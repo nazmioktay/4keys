@@ -90,8 +90,13 @@ def test_dataset_builds_with_triple_barrier_method():
 
 
 def test_signal_model_calibrates_with_enough_class_diversity():
+    # Kalibrasyon eşiği artık her sınıftan cv katı başına en az 10 örnek
+    # gerektiriyor (bkz. app.ml.model — küçük sınıflarda kalibrasyonun
+    # gürültüyü öğrenip modeli çoğunluk sınıfına ittiği bulgusu üzerine
+    # yükseltildi); 300 mumluk eski küçük set artık bunu karşılamıyor,
+    # bu yüzden lookback büyütüldü.
     exchange = _TrendExchange(seed=3)
-    X, y = build_training_dataset(exchange, ["UPUSDT"], "4h", 300, horizon=5, threshold_pct=0.5)
+    X, y = build_training_dataset(exchange, ["UPUSDT"], "4h", 1500, horizon=5, threshold_pct=0.5)
     model = SignalModel(calibrate=True)
     model.fit(X, y)
     assert model.is_calibrated

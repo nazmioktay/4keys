@@ -166,6 +166,7 @@ class SignalModel:
         self._pipeline = self._base_pipeline
         self._calibrate = calibrate
         self._calibration_method = calibration_method
+        self._calibration_cv = 3
         self._is_fitted = False
         self.is_calibrated = False
 
@@ -186,10 +187,28 @@ class SignalModel:
         # sayısı cv'den azsa (küçük/dengesiz eğitim setlerinde olur) hata verir.
         # Bu durumda kalibrasyonu atlayıp ham (kalibre edilmemiş) modele düşülür —
         # sessizce yanlış/aşırı güvenli skorlar üretmektense bu tercih edilir.
-        can_calibrate = bool(self._calibrate and len(class_counts) >= 2 and min_class_count >= 3)
+        #
+        # Eşik önceden yalnızca `min_class_count >= 3` idi — bu, cv=3 katlı
+        # kalibrasyonda AZINLIK sınıfa fold başına ~1 örnek düşmesine izin
+        # veriyordu. Bu kadar az örnekle fit edilen kalibrasyon eğrisi
+        # gürültüyü öğrenir ve genelde azınlık sınıfın olasılığını
+        # SİSTEMATİK OLARAK bastırıp modeli her zaman çoğunluk sınıfını
+        # tahmin etmeye iter — `balanced_accuracy` TAM OLARAK 1/3 (3 sınıflı
+        # bir problemde rastgele seviye) veren tekrarlanan XGBoost
+        # çöküşlerinin araştırılmasında bulunan, olası bir katkı nedeni.
+        # `sample_weight` ile eğitim (bkz. `_XGBClassifierWrapper.fit`) HAM
+        # modeli dengesizliğe karşı korusa da, kalibrasyon adımı bunu
+        # geri BOZABİLİR. Eşik, cv katı başına istatistiksel olarak anlamlı
+        # bir örnek sayısı (>=10/kat) gerektirecek şekilde yükseltildi.
+        _MIN_SAMPLES_PER_FOLD = 10
+        can_calibrate = bool(
+            self._calibrate and len(class_counts) >= 2 and min_class_count >= self._calibration_cv * _MIN_SAMPLES_PER_FOLD
+        )
 
         if can_calibrate:
-            calibrated = CalibratedClassifierCV(clone(self._base_pipeline), method=self._calibration_method, cv=3)
+            calibrated = CalibratedClassifierCV(
+                clone(self._base_pipeline), method=self._calibration_method, cv=self._calibration_cv
+            )
             calibrated.fit(X_features, y)
             self._pipeline = calibrated
         else:

@@ -9,6 +9,8 @@ class _FakePrimaryResult:
 
     class out_of_sample:
         balanced_accuracy = 0.42
+        true_class_counts = {"1.0": 50, "0.0": 30, "-1.0": 20}
+        predicted_class_counts = {"1.0": 45, "0.0": 35, "-1.0": 20}
 
 
 class _FakeLSTMResult:
@@ -112,6 +114,8 @@ def test_train_all_models_skips_meta_when_primary_rejected(monkeypatch):
 
         class out_of_sample:
             balanced_accuracy = 0.333
+            true_class_counts = {"1.0": 40, "0.0": 40, "-1.0": 40}
+            predicted_class_counts = {"0.0": 120}
 
     monkeypatch.setattr(train_module, "train_signal_model_validated", lambda *a, **k: _RejectedPrimary())
     monkeypatch.setattr(train_module, "train_lstm_signal_model", lambda *a, **k: _FakeLSTMResult())

@@ -915,7 +915,11 @@ def train_all_models(exchange: Exchange, symbols: list[str]) -> list[TrainAllSte
 
     try:
         primary = train_signal_model_validated(exchange, symbols, horizon=3, threshold_pct=1.0)
-        detail = f"{primary.rows_used} satır, oos_balanced_acc={primary.out_of_sample.balanced_accuracy:.3f}"
+        detail = (
+            f"{primary.rows_used} satır, oos_balanced_acc={primary.out_of_sample.balanced_accuracy:.3f}, "
+            f"gerçek={primary.out_of_sample.true_class_counts}, "
+            f"tahmin={primary.out_of_sample.predicted_class_counts}"
+        )
         if not primary.accepted:
             detail = f"REDDEDİLDİ: {primary.rejection_reason} ({detail})"
         results.append(TrainAllStepResult("xgboost", True, detail))

@@ -38,6 +38,41 @@ class TrendExchange(Exchange):
         )
 
 
+def _synthetic_features_and_labels(n_per_class: int) -> tuple[pd.DataFrame, pd.Series]:
+    """Sınıf başına TAM olarak `n_per_class` örneği olan, öğrenilebilir bir
+    sentetik özellik/etiket seti kurar (kalibrasyon eşiği testleri için —
+    gerçek `build_training_dataset` çıktısındaki sınıf sayılarının tam
+    kontrolü zor olduğundan doğrudan kurulur)."""
+    from app.ml.features import ALL_FEATURE_COLUMNS
+
+    rng = np.random.default_rng(0)
+    rows = []
+    labels = []
+    for label, offset in ((-1.0, -3.0), (0.0, 0.0), (1.0, 3.0)):
+        for _ in range(n_per_class):
+            row = {col: rng.normal(offset, 0.5) for col in ALL_FEATURE_COLUMNS}
+            rows.append(row)
+            labels.append(label)
+    X = pd.DataFrame(rows)
+    y = pd.Series(labels)
+    return X, y
+
+
+def test_signal_model_skips_calibration_below_per_fold_sample_threshold():
+    # cv=3, eşik = 3*10 = 30/sınıf gerekiyor; 20/sınıf bunun altında kalmalı.
+    X, y = _synthetic_features_and_labels(n_per_class=20)
+    model = SignalModel(calibrate=True)
+    model.fit(X, y)
+    assert model.is_calibrated is False
+
+
+def test_signal_model_calibrates_above_per_fold_sample_threshold():
+    X, y = _synthetic_features_and_labels(n_per_class=40)
+    model = SignalModel(calibrate=True)
+    model.fit(X, y)
+    assert model.is_calibrated is True
+
+
 def test_signal_model_defaults_to_xgboost():
     model = SignalModel()
     assert model.algorithm == "xgboost"

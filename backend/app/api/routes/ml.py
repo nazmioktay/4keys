@@ -66,6 +66,8 @@ class TrainResponse(BaseModel):
     out_of_sample_rows: int
     out_of_sample_accuracy: float
     out_of_sample_balanced_accuracy: float
+    out_of_sample_true_class_counts: dict[str, int] = {}
+    out_of_sample_predicted_class_counts: dict[str, int] = {}
     accepted: bool = True
     rejection_reason: str | None = None
 
@@ -277,6 +279,8 @@ def train(payload: TrainRequest) -> TrainResponse:
         out_of_sample_rows=oos.holdout_rows,
         out_of_sample_accuracy=oos.accuracy,
         out_of_sample_balanced_accuracy=oos.balanced_accuracy,
+        out_of_sample_true_class_counts=oos.true_class_counts,
+        out_of_sample_predicted_class_counts=oos.predicted_class_counts,
         accepted=result.accepted,
         rejection_reason=result.rejection_reason,
     )
