@@ -85,8 +85,21 @@ class _XGBClassifierWrapper(ClassifierMixin, BaseEstimator):
         self._label_to_idx = {label: i for i, label in enumerate(self.classes_)}
         self._idx_to_label = {i: label for label, i in self._label_to_idx.items()}
         y_idx = np.array([self._label_to_idx[v] for v in y])
+
+        # Sınıf ağırlıklandırma: rejim-bazlı eğitimde (bkz. app.ml.regime)
+        # küçültülmüş alt kümelerde balanced_accuracy'nin tam olarak 1/3'e
+        # (rastgele seviye) oturduğu görüldü — LSTM'de daha önce çözülen
+        # AYNI çoğunluk-sınıf çöküşü. Ters frekans ağırlıklandırma burada
+        # da (dahili olarak, Pipeline/CalibratedClassifierCV'ye harici bir
+        # sample_weight parametresi geçirmenin kırılganlığından kaçınmak
+        # için wrapper'ın kendi fit() adımında) uygulanıyor.
+        class_counts = np.bincount(y_idx, minlength=len(self.classes_)).astype("float64")
+        class_counts[class_counts == 0] = 1.0
+        class_weights = class_counts.sum() / (len(class_counts) * class_counts)
+        sample_weight = class_weights[y_idx]
+
         self._model = self._make_xgb()
-        self._model.fit(X, y_idx)
+        self._model.fit(X, y_idx, sample_weight=sample_weight)
         return self
 
     def predict_proba(self, X):
