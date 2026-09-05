@@ -7,7 +7,8 @@ from app.ml.features import build_features
 from app.ml.meta_label import MetaLabelModel
 from app.ml.model import SignalModel
 
-from .data import fetch_full_history
+from app.exchanges.cache import fetch_ohlcv_cached
+
 from .schemas import SystemBacktestReport, SystemBacktestRequest
 
 _DIRECTION_MAP = {1: "long", -1: "short", 0: "neutral"}
@@ -48,7 +49,15 @@ def run_system_backtest(
       canlı/paper motorunda bunlar var, ama orası ayrı bir katman).
     """
     timeframe = request.timeframe or "1h"
-    ohlcv = fetch_full_history(exchange, request.symbol, timeframe, max_candles=request.candles)
+    # `fetch_full_history` (DCA/JSON-strateji backtest'inde kullanılan)
+    # BİLEREK 2017'den İLERİYE doğru sayfalar (o motorların amacı piyasa
+    # döngülerinin en başından itibaren geniş bir test istemesi) — bu
+    # sistem backtest'i için YANLIŞ: model GÜNCEL veriyle eğitiliyor, o
+    # yüzden test de GÜNCEL (en son `request.candles` mum) olmalı, yoksa
+    # (bu bug'da olduğu gibi) 2019-2020 gibi alakasız bir dönem test
+    # edilir. `fetch_ohlcv_cached` (eğitimle AYNI yol) en son mumları
+    # döner ve DB önbelleğinden faydalanır.
+    ohlcv = fetch_ohlcv_cached(exchange, request.symbol, timeframe, request.candles)
 
     if len(ohlcv) < _MIN_CANDLES:
         raise ValueError(
@@ -199,10 +208,9 @@ def run_system_backtest(
         for t in trades
     ]
 
-    # Grafana'nın candlestick paneli için kullanılan geçmişi `ohlcv_raw`'a
-    # backfill eder (DB kapalıysa no-op). Kalıcılık bir yan etkidir; backtest
-    # sonucu DB olmadan da hesaplanıp dönebilir.
-    db.save_ohlcv_bulk(request.symbol, timeframe, ohlcv)
+    # `fetch_ohlcv_cached` kullanılan geçmişi zaten `ohlcv_raw`'a yazdı
+    # (Grafana'nın candlestick paneli buradan okur) — burada ayrıca
+    # yazmaya gerek yok.
     run_id = db.save_backtest_run(run_row, trade_rows)
 
     return SystemBacktestReport(

@@ -44,6 +44,63 @@ class FakeOscillatingExchange(Exchange):
         return df.loc[mask].iloc[:limit].reset_index(drop=True)
 
 
+class FakeLongHistoryExchange(Exchange):
+    """`_FAR_PAST_MS` (2017) ile "şimdi" arasında ÇOK daha uzun bir geçmişi
+    olan test borsası — `run_system_backtest`'in gerçekten EN SON
+    `request.candles` mumu (2017'den itibaren en ESKİ değil) çektiğini
+    doğrulamak için (bkz. gerçek üretim regresyonu: backtest raporu
+    2019-2020 gibi alakasız bir dönem gösteriyordu, çünkü `fetch_full_history`
+    bilerek en eski geçmişten başlıyor)."""
+
+    def __init__(self, total_candles: int) -> None:
+        idx = pd.date_range("2017-01-01", periods=total_candles, freq="1h", tz="UTC").tz_convert(None)
+        rng = np.random.default_rng(11)
+        close = 20000 + np.cumsum(rng.normal(0, 5, total_candles))
+        self.full_df = pd.DataFrame(
+            {
+                "timestamp": idx,
+                "open": close,
+                "high": close + 20,
+                "low": close - 20,
+                "close": close,
+                "volume": rng.uniform(800, 1200, total_candles),
+            }
+        )
+
+    def list_symbols(self, quote_currency, market_type):
+        return ["BTC/USDT:USDT"]
+
+    def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int, since: int | None = None) -> pd.DataFrame:
+        df = self.full_df
+        if since is None:
+            return df.iloc[-limit:].reset_index(drop=True)
+        since_ts = pd.Timestamp(since, unit="ms")
+        mask = df["timestamp"] >= since_ts
+        return df.loc[mask].iloc[:limit].reset_index(drop=True)
+
+
+def test_run_system_backtest_uses_most_recent_candles_not_earliest(monkeypatch):
+    from app.db.session import reset_for_tests
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "database_url", "")
+    reset_for_tests()
+
+    # 5 yıldan fazla (2017'den itibaren) veri var, ama yalnızca son 600
+    # mum istiyoruz — rapor 2017'ye değil, verinin EN SONUNA yakın olmalı.
+    exchange = FakeLongHistoryExchange(total_candles=50000)
+    train_ohlcv = exchange.full_df.iloc[-1000:-600].reset_index(drop=True)
+    model = _trained_model(train_ohlcv)
+
+    request = SystemBacktestRequest(symbol="BTC/USDT:USDT", timeframe="1h", candles=600, initial_balance=1000.0)
+    report = run_system_backtest(exchange, model, None, request)
+
+    expected_period_end = exchange.full_df["timestamp"].iloc[-1]
+    actual_period_end = pd.Timestamp(report.period_end)
+    assert actual_period_end.year == expected_period_end.year
+    assert (expected_period_end - actual_period_end).days < 30  # ısınma barları yüzünden küçük bir kayma olabilir
+
+
 def _trained_model(ohlcv: pd.DataFrame) -> SignalModel:
     features = build_features(ohlcv).dropna().reset_index(drop=True)
     # Basit, gerçekçi olmayan ama deterministik bir etiket: getiri işaretine göre.
