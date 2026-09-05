@@ -26,8 +26,8 @@ const DEFAULT_PARAMS = {
   use_ensemble: true,
   atr_period: 14,
   atr_stop_loss_mult: 1.5,
-  atr_take_profit_mult: 1.5,
-  atr_trailing_mult: 0.5,
+  atr_take_profit_mult: null,
+  atr_trailing_mult: null,
 };
 
 export default function Backtest() {
@@ -85,7 +85,8 @@ export default function Backtest() {
 function ParamsCard({ params, setParams, onRun, running }) {
   const set = (key) => (e) => {
     const raw = e.target.value;
-    const value = e.target.type === "checkbox" ? e.target.checked : e.target.type === "number" ? Number(raw) : raw;
+    const value =
+      e.target.type === "checkbox" ? e.target.checked : e.target.type === "number" ? (raw === "" ? null : Number(raw)) : raw;
     setParams({ ...params, [key]: value });
   };
 
@@ -140,11 +141,11 @@ function ParamsCard({ params, setParams, onRun, running }) {
           <input type="number" step="0.1" value={params.atr_stop_loss_mult ?? ""} onChange={set("atr_stop_loss_mult")} />
         </div>
         <div>
-          <label className="field">Kâr-alma (x ATR)</label>
+          <label className="field">Kâr-alma (x ATR, boş = kapalı/dinamik çıkış)</label>
           <input type="number" step="0.1" value={params.atr_take_profit_mult ?? ""} onChange={set("atr_take_profit_mult")} />
         </div>
         <div>
-          <label className="field">Trailing stop (x ATR)</label>
+          <label className="field">Trailing stop (x ATR, boş = kapalı/dinamik çıkış)</label>
           <input type="number" step="0.1" value={params.atr_trailing_mult ?? ""} onChange={set("atr_trailing_mult")} />
         </div>
         <div>

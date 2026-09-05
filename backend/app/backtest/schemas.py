@@ -108,14 +108,32 @@ class SystemBacktestRequest(BaseModel):
 
     # --- ATR tabanlı risk yönetimi ---
     # Sabit yüzdelik stop-loss YERİNE: volatiliteye göre ölçeklenen ATR
-    # (Average True Range) tabanlı stop-loss + kâr-alma + trailing stop —
-    # kullanıcı isteği. Trailing stop yalnızca SIKILAŞTIRIR (giriş
-    # anındaki sabit stop'tan daha gevşek bir seviyeye asla dönmez).
+    # (Average True Range) tabanlı stop-loss (opsiyonel olarak kâr-alma +
+    # trailing stop da desteklenir, ama VARSAYILAN OLARAK KAPALI).
+    #
+    # Neden: ilk denemede (kullanıcı isteğiyle) kâr-alma=1.5xATR +
+    # trailing=0.5xATR VARSAYILAN AÇIKTI — gerçek üretim testinde toplam
+    # PnL %88'den %32'ye, kazanma oranı %90'dan %57'ye düştü. Stop-loss
+    # yalnızca KAYBEDEN işlemleri sınırlar (kazananları asla kesmez), ama
+    # kâr-alma ve (özellikle 0.5xATR gibi dar bir) trailing MEKANİK olarak
+    # kazanan bir işlemi SABİT bir mesafede keser — modelin kendi (canlı
+    # ensemble) sinyali hâlâ o yönde güçlüyken bile. Eski (ATR öncesi)
+    # "dinamik" yöntemde çıkış kararını her barda YENİDEN üretilen model
+    # sinyali veriyordu (bkz. `close_confidence`), sabit bir mesafe değil
+    # — bu, kazananların "koşmasına" izin veriyordu. Bu yüzden varsayılan
+    # olarak kâr-alma/trailing KAPALI: çıkış yine birincil olarak dinamik
+    # sinyale dayanıyor, stop-loss ise SADECE ATR ile ölçeklenen (eski
+    # sabit yüzdelik `stop_loss_pct=3.0`'tan daha isabetli) bir güvenlik
+    # ağı olarak kalıyor. İsteyen kullanıcı bu alanları elle açabilir.
     atr_period: int = Field(default=14, ge=2, le=100)
     atr_stop_loss_mult: float | None = Field(default=1.5, gt=0, description="null ise stop-loss uygulanmaz")
-    atr_take_profit_mult: float | None = Field(default=1.5, gt=0, description="null ise kâr-alma uygulanmaz")
+    atr_take_profit_mult: float | None = Field(
+        default=None, gt=0, description="null (varsayılan) ise kâr-alma uygulanmaz, çıkış dinamik sinyale bağlı kalır"
+    )
     atr_trailing_mult: float | None = Field(
-        default=0.5, gt=0, description="En iyi fiyattan bu kadar ATR geride trailing stop; null ise trailing yok"
+        default=None,
+        gt=0,
+        description="En iyi fiyattan bu kadar ATR geride trailing stop; null (varsayılan) ise trailing yok",
     )
 
 

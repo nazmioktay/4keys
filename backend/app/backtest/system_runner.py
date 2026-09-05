@@ -24,6 +24,10 @@ _DIRECTION_MAP = {1: "long", -1: "short", 0: "neutral"}
 # gereksinimine göre büyütülmüş hali).
 _MIN_CANDLES = 250
 
+def _fmt_mult(mult: float | None) -> str:
+    return f"{mult}xATR" if mult is not None else "kapalı"
+
+
 _SIZE_EXPLANATION = (
     "Kademeli alım/satım, Kelly boyutlandırma ve VIX rejim filtresi burada simüle edilmez — her işlemde "
     "o anki equity'nin TAMAMI ile tek giriş/tek çıkış yapılır (gerçek canlı/paper motorunda "
@@ -324,8 +328,12 @@ def run_system_backtest(
             "birincil (XGBoost) model" + (" + meta-label filtresi" if meta_model is not None and request.use_meta_label else "") + " kullanılır."
         ),
         _SIZE_EXPLANATION,
-        f"Risk yönetimi: ATR({request.atr_period}) tabanlı — stop-loss={request.atr_stop_loss_mult}xATR, "
-        f"kâr-alma={request.atr_take_profit_mult}xATR, trailing={request.atr_trailing_mult}xATR (null = kapalı).",
+        (
+            f"Risk yönetimi: ATR({request.atr_period}) tabanlı — "
+            f"stop-loss={_fmt_mult(request.atr_stop_loss_mult)}, kâr-alma={_fmt_mult(request.atr_take_profit_mult)}, "
+            f"trailing={_fmt_mult(request.atr_trailing_mult)}. Kâr-alma/trailing varsayılan olarak KAPALI — çıkış "
+            "birincil olarak dinamik model sinyaline (close_confidence) bağlı kalır, sabit bir mesafede kesilmez."
+        ),
     ]
     if trades_closed < 10:
         warnings.append(f"Yalnızca {trades_closed} işlem kapandı — istatistiksel güvenilirlik düşük.")
