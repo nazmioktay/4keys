@@ -79,9 +79,14 @@ def train_signal_model_validated(
     lookback: int | None = None,
     horizon: int = 5,
     threshold_pct: float = 1.0,
-    labeling_method: LabelingMethod = "threshold",
-    take_profit_pct: float = 2.0,
-    stop_loss_pct: float = 2.0,
+    # Varsayılan "atr_triple_barrier": bkz. app.api.routes.ml.TrainRequest
+    # aynı gerekçe — birincil (XGBoost) modelin etiketi artık gerçek ATR
+    # tabanlı çıkış mantığıyla hizalı. LSTM/online/regime/meta-label
+    # BİLEREK "threshold" ile bırakıldı (bu geçiş yalnızca birincil model
+    # için, tek seferde tüm modelleri değiştirmek etkiyi ölçmeyi zorlaştırır).
+    labeling_method: LabelingMethod = "atr_triple_barrier",
+    take_profit_pct: float = 1.5,  # atr_triple_barrier'da ATR ÇARPANI
+    stop_loss_pct: float = 1.5,  # atr_triple_barrier'da ATR ÇARPANI
     calibrate: bool = True,
     calibration_method: Literal["sigmoid", "isotonic"] = "sigmoid",
     algorithm: Algorithm = "xgboost",
@@ -101,7 +106,7 @@ def train_signal_model_validated(
     gibi yalnızca KARŞILAŞTIRMA amaçlı, art arda birden çok deneme yapan
     çağrılarda production modelinin yanlışlıkla üzerine yazılmasını önler.
     """
-    X, y, time_frac = build_training_dataset_with_time(
+    X, y, time_frac, bar_timestamp = build_training_dataset_with_time(
         exchange,
         symbols,
         timeframe or settings.ml_train_timeframe,
@@ -120,6 +125,7 @@ def train_signal_model_validated(
 
     X_train, y_train, X_holdout, y_holdout = split_out_of_sample(X, y, time_frac, holdout_frac)
     train_time_frac = time_frac[X_train.index]
+    holdout_start_time = bar_timestamp.loc[X_holdout.index].min() if len(X_holdout) > 0 else None
 
     def _factory() -> SignalModel:
         return SignalModel(algorithm=algorithm, calibrate=calibrate, calibration_method=calibration_method)
@@ -146,8 +152,16 @@ def train_signal_model_validated(
             f"({settings.ml_min_balanced_accuracy}) altında — model KAYDEDİLMEDİ, önceki model (varsa) korunuyor."
         )
         logger.warning("model rejected (algorithm=%s): %s", algorithm, rejection_reason)
+        if persist:
+            write_model_status(DEFAULT_MODEL_PATH, enabled=False, balanced_accuracy=oos_report.balanced_accuracy, reason=rejection_reason)
     elif persist:
         model.save()
+        write_model_status(
+            DEFAULT_MODEL_PATH,
+            enabled=True,
+            balanced_accuracy=oos_report.balanced_accuracy,
+            holdout_start_time=holdout_start_time.isoformat() if holdout_start_time is not None else None,
+        )
 
     logger.info(
         "model trained (algorithm=%s) on %d rows; walk-forward mean_acc=%.3f overfit_gap=%.3f; oos_acc=%.3f (holdout=%d rows); accepted=%s",
@@ -808,7 +822,7 @@ def train_online_signal_model(
     (veya BTC-öncelikli az sayıda sembol) kullanmak bu basitleştirmeyi
     önemsiz kılar.
     """
-    X, y, _time_frac = build_training_dataset_with_time(
+    X, y, _time_frac, _bar_timestamp = build_training_dataset_with_time(
         exchange,
         symbols,
         timeframe or settings.ml_train_timeframe,

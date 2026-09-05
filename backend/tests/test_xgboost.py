@@ -122,7 +122,7 @@ def test_shap_values_only_supported_for_xgboost():
 
 def test_split_out_of_sample_never_leaks_future_rows_into_train():
     exchange = TrendExchange(seed=4)
-    X, y, time_frac = build_training_dataset_with_time(exchange, ["UPUSDT"], "4h", 400, horizon=5, threshold_pct=0.5)
+    X, y, time_frac, _bar_timestamp = build_training_dataset_with_time(exchange, ["UPUSDT"], "4h", 400, horizon=5, threshold_pct=0.5)
     X_train, y_train, X_holdout, y_holdout = split_out_of_sample(X, y, time_frac, holdout_frac=0.2)
 
     assert len(X_train) + len(X_holdout) == len(X)
@@ -143,7 +143,16 @@ def test_walk_forward_splits_are_purged_and_chronological():
         assert min_test_time - max_train_time >= 0.02 - 1e-9
 
 
-def test_train_signal_model_validated_produces_walk_forward_and_oos_reports():
+def test_train_signal_model_validated_produces_walk_forward_and_oos_reports(tmp_path, monkeypatch):
+    from app.ml import train as train_module
+
+    # Gerçek paylaşılan app/ml/artifacts/ dosyasına (hem .joblib hem
+    # write_model_status'un .status.json'ına) yazmamak için — diğer test
+    # dosyaları (ör. test_system_backtest.py) DEFAULT_MODEL_PATH'i
+    # gerçekten okur; burada bırakılacak bir holdout_start_time kaydı o
+    # testleri sessizce kırar (bkz. test_backtest_* holdout testleri).
+    monkeypatch.setattr(train_module, "DEFAULT_MODEL_PATH", tmp_path / "signal_model.joblib")
+
     exchange = TrendExchange(seed=5)
     result = train_signal_model_validated(
         exchange,
@@ -176,11 +185,12 @@ def test_train_signal_model_validated_persist_false_does_not_touch_disk(tmp_path
     assert saved_paths == []
 
 
-def test_train_signal_model_validated_rejects_and_skips_save_below_quality_threshold(monkeypatch):
+def test_train_signal_model_validated_rejects_and_skips_save_below_quality_threshold(tmp_path, monkeypatch):
     """`Settings.ml_min_balanced_accuracy`'nin ALTINDA kalan bir model
     diske KAYDEDİLMEMELİ (önceki model korunmalı) ve `accepted=False`
     ile açıkça işaretlenmeli — bkz. app.ml.train kalite kapısı."""
     from app.core.config import settings
+    from app.ml import train as train_module
     from app.ml.model import SignalModel
 
     # Eşiği kasıtlı olarak imkansız derecede yüksek (1.01) yaparak, gerçekte
@@ -188,6 +198,9 @@ def test_train_signal_model_validated_rejects_and_skips_save_below_quality_thres
     # — testin kırılganlığını (gerçek balanced_accuracy'nin rastgele altında/
     # üstünde çıkmasına bağlı olmadan) önler.
     monkeypatch.setattr(settings, "ml_min_balanced_accuracy", 1.01)
+    # write_model_status'un GERÇEK paylaşılan app/ml/artifacts/ konumuna
+    # yazmasını önlemek için (bkz. test_lstm.py aynı deseni kullanır).
+    monkeypatch.setattr(train_module, "DEFAULT_MODEL_PATH", tmp_path / "signal_model.joblib")
 
     saved_paths = []
     monkeypatch.setattr(SignalModel, "save", lambda self, path=None: saved_paths.append(path))
@@ -203,12 +216,14 @@ def test_train_signal_model_validated_rejects_and_skips_save_below_quality_thres
     assert saved_paths == []  # reddedilen model KAYDEDİLMEDİ
 
 
-def test_train_signal_model_validated_accepts_and_saves_above_quality_threshold(monkeypatch):
+def test_train_signal_model_validated_accepts_and_saves_above_quality_threshold(tmp_path, monkeypatch):
     from app.core.config import settings
+    from app.ml import train as train_module
     from app.ml.model import SignalModel
 
     # Eşiği 0'a çekerek (her zaman geçilir) kabul/kaydetme yolunu test eder.
     monkeypatch.setattr(settings, "ml_min_balanced_accuracy", 0.0)
+    monkeypatch.setattr(train_module, "DEFAULT_MODEL_PATH", tmp_path / "signal_model.joblib")
 
     saved_paths = []
     monkeypatch.setattr(SignalModel, "save", lambda self, path=None: saved_paths.append(path))
@@ -221,6 +236,30 @@ def test_train_signal_model_validated_accepts_and_saves_above_quality_threshold(
     assert result.accepted is True
     assert result.rejection_reason is None
     assert len(saved_paths) == 1
+
+
+def test_train_signal_model_validated_records_holdout_start_time(tmp_path, monkeypatch):
+    """Kabul edilen bir eğitim, holdout'un GERÇEK başlangıç zaman damgasını
+    `app.ml.model_status`'a yazmalı — `app.backtest.system_runner` bunu
+    okuyup backtest'i modelin hiç görmediği barlarla sınırlar (bkz.
+    test_system_backtest.py::test_backtest_excludes_bars_before_model_holdout_start)."""
+    from app.core.config import settings
+    from app.ml import train as train_module
+    from app.ml.model import SignalModel
+    from app.ml.model_status import get_holdout_start_time
+
+    monkeypatch.setattr(settings, "ml_min_balanced_accuracy", 0.0)
+    status_target = tmp_path / "signal_model.joblib"
+    monkeypatch.setattr(train_module, "DEFAULT_MODEL_PATH", status_target)
+    monkeypatch.setattr(SignalModel, "save", lambda self, path=None: None)
+
+    exchange = TrendExchange(seed=8)
+    train_signal_model_validated(exchange, ["UPUSDT", "DOWNUSDT"], horizon=5, threshold_pct=0.5, timeframe="4h", lookback=400)
+
+    holdout_start = get_holdout_start_time(status_target)
+    assert holdout_start is not None
+    # kayıtlı zaman damgası ayrıştırılabilir (geçerli bir ISO tarih) olmalı
+    pd.Timestamp(holdout_start)
 
 
 def test_sweep_lookback_values_returns_one_point_per_lookback():

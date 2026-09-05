@@ -93,7 +93,13 @@ def test_run_system_backtest_uses_most_recent_candles_not_earliest(monkeypatch):
     train_ohlcv = exchange.full_df.iloc[-1000:-600].reset_index(drop=True)
     model = _trained_model(train_ohlcv)
 
-    request = SystemBacktestRequest(symbol="BTC/USDT:USDT", timeframe="1h", candles=600, initial_balance=1000.0)
+    # restrict_to_holdout=False: bu test tarih ARALIĞINI doğruluyor, holdout
+    # filtresini değil — gerçek DEFAULT_MODEL_PATH'te başka bir testten
+    # kalan bir holdout kaydı varsa buradaki senkronize sentetik veriyle
+    # ilgisiz şekilde çakışıp testi kırabilir (bkz. holdout-özel testler).
+    request = SystemBacktestRequest(
+        symbol="BTC/USDT:USDT", timeframe="1h", candles=600, initial_balance=1000.0, restrict_to_holdout=False
+    )
     report = run_system_backtest(exchange, model, None, request)
 
     expected_period_end = exchange.full_df["timestamp"].iloc[-1]
@@ -123,7 +129,9 @@ def test_run_system_backtest_produces_report_and_persists_ohlcv(tmp_path, monkey
     train_ohlcv = exchange.full_df.iloc[:400].reset_index(drop=True)
     model = _trained_model(train_ohlcv)
 
-    request = SystemBacktestRequest(symbol="BTC/USDT:USDT", timeframe="1h", candles=600, initial_balance=1000.0)
+    request = SystemBacktestRequest(
+        symbol="BTC/USDT:USDT", timeframe="1h", candles=600, initial_balance=1000.0, restrict_to_holdout=False
+    )
     report = run_system_backtest(exchange, model, None, request)
 
     assert report.candles_used == 600
@@ -172,6 +180,7 @@ def test_stop_loss_closes_long_position_on_crash():
         atr_trailing_mult=None,
         open_confidence=0.5,  # izin verilen minimum -> daha çok işlem tetiklensin
         close_confidence=0.9,  # kapanış yalnızca stop-loss'tan gelsin, sinyalden değil
+        restrict_to_holdout=False,
     )
     report = run_system_backtest(exchange, model, None, request)
 
@@ -198,6 +207,7 @@ def test_take_profit_closes_position_at_target():
         atr_trailing_mult=None,
         open_confidence=0.5,
         close_confidence=0.9,
+        restrict_to_holdout=False,
     )
     report = run_system_backtest(exchange, model, None, request)
 
@@ -214,7 +224,9 @@ def test_trades_record_position_size_and_decision_breakdown():
     train_ohlcv = exchange.full_df.iloc[:400].reset_index(drop=True)
     model = _trained_model(train_ohlcv)
 
-    request = SystemBacktestRequest(symbol="BTC/USDT:USDT", timeframe="1h", candles=600, initial_balance=1000.0)
+    request = SystemBacktestRequest(
+        symbol="BTC/USDT:USDT", timeframe="1h", candles=600, initial_balance=1000.0, restrict_to_holdout=False
+    )
     report = run_system_backtest(exchange, model, None, request)
 
     assert report.trades, "test verisiyle en az bir işlem beklenir"
@@ -226,6 +238,66 @@ def test_trades_record_position_size_and_decision_breakdown():
         # bu testte LSTM/online model geçirilmedi -> ensemble alanları boş kalmalı
         assert t.lstm_direction is None
         assert t.online_direction is None
+
+
+def test_backtest_excludes_bars_before_model_holdout_start(monkeypatch):
+    """Regresyon: backtest varsayılan olarak `request.candles` (en son N mum)
+    ister, ama bu neredeyse her zaman modelin KENDİ eğitim penceresiyle
+    çakışır. Modelin holdout'unun (hiç görmediği veri) 300. bardan
+    başladığını simüle edip, raporun yalnızca O NOKTADAN SONRAKİ barları
+    içerdiğini ve ilgili uyarının göründüğünü doğrular."""
+    exchange = FakeOscillatingExchange(total_candles=600)
+    train_ohlcv = exchange.full_df.iloc[:400].reset_index(drop=True)
+    model = _trained_model(train_ohlcv)
+
+    features_full = build_features(exchange.full_df).dropna().reset_index(drop=True)
+    holdout_cutoff = pd.Timestamp(int(features_full.iloc[300]["timestamp"]))
+    monkeypatch.setattr(
+        "app.backtest.system_runner.get_holdout_start_time",
+        lambda path: holdout_cutoff.isoformat(),
+    )
+
+    request = SystemBacktestRequest(symbol="BTC/USDT:USDT", timeframe="1h", candles=600, initial_balance=1000.0)
+    report = run_system_backtest(exchange, model, None, request)
+
+    assert pd.Timestamp(report.period_start) >= holdout_cutoff
+    assert any("EĞİTİM verisiyle çakışmaması" in w for w in report.warnings)
+
+
+def test_backtest_warns_when_no_holdout_recorded(monkeypatch):
+    """Eski (bu güvenlik özelliği eklenmeden önce eğitilmiş) bir model için
+    kayıtlı holdout yoksa backtest çökmemeli, ama kullanıcıyı UYARMALI."""
+    exchange = FakeOscillatingExchange(total_candles=600)
+    train_ohlcv = exchange.full_df.iloc[:400].reset_index(drop=True)
+    model = _trained_model(train_ohlcv)
+
+    monkeypatch.setattr("app.backtest.system_runner.get_holdout_start_time", lambda path: None)
+
+    request = SystemBacktestRequest(symbol="BTC/USDT:USDT", timeframe="1h", candles=600, initial_balance=1000.0)
+    report = run_system_backtest(exchange, model, None, request)
+
+    assert any("holdout başlangıç tarihi bulunamadı" in w for w in report.warnings)
+
+
+def test_backtest_restrict_to_holdout_false_bypasses_filter(monkeypatch):
+    exchange = FakeOscillatingExchange(total_candles=600)
+    train_ohlcv = exchange.full_df.iloc[:400].reset_index(drop=True)
+    model = _trained_model(train_ohlcv)
+
+    features_full = build_features(exchange.full_df).dropna().reset_index(drop=True)
+    holdout_cutoff = pd.Timestamp(int(features_full.iloc[300]["timestamp"]))
+    monkeypatch.setattr(
+        "app.backtest.system_runner.get_holdout_start_time",
+        lambda path: holdout_cutoff.isoformat(),
+    )
+
+    request = SystemBacktestRequest(
+        symbol="BTC/USDT:USDT", timeframe="1h", candles=600, initial_balance=1000.0, restrict_to_holdout=False
+    )
+    report = run_system_backtest(exchange, model, None, request)
+
+    assert pd.Timestamp(report.period_start) < holdout_cutoff
+    assert not any("EĞİTİM verisiyle çakışmaması" in w for w in report.warnings)
 
 
 def test_lstm_predictions_skip_windows_that_contain_a_mid_series_nan():

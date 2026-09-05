@@ -24,6 +24,7 @@ const DEFAULT_PARAMS = {
   slippage_pct: 0.02,
   use_meta_label: true,
   use_ensemble: true,
+  restrict_to_holdout: true,
   atr_period: 14,
   atr_stop_loss_mult: 1.5,
   atr_take_profit_mult: null,
@@ -151,6 +152,10 @@ function ParamsCard({ params, setParams, onRun, running }) {
         <div>
           <label className="field">Ensemble (LSTM/online, aktifse)</label>
           <input type="checkbox" checked={params.use_ensemble} onChange={set("use_ensemble")} />
+        </div>
+        <div>
+          <label className="field">Yalnızca modelin hiç görmediği veri (güvenli, önerilen)</label>
+          <input type="checkbox" checked={params.restrict_to_holdout} onChange={set("restrict_to_holdout")} />
         </div>
       </div>
     </div>

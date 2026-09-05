@@ -89,6 +89,42 @@ def test_dataset_builds_with_triple_barrier_method():
     assert set(y.unique()) <= {-1.0, 0.0, 1.0}
 
 
+def test_triple_barrier_labels_accepts_per_row_pct_array():
+    """`take_profit_pct`/`stop_loss_pct` bir Series/dizi olarak da
+    verilebilmeli (ATR-ölçekli, her bar için FARKLI bariyer genişliği) —
+    bkz. `app.ml.dataset._compute_labels`'ın `atr_triple_barrier` yolu."""
+    close = np.array([100, 106, 90, 90, 90, 90])
+    ohlcv = _ohlcv_from_close(close)
+    # satır 0 için TP=%2 (102) -> ilk barda 106 ile tetiklenir (LONG)
+    tp_pct = pd.Series([2.0, 2.0, 2.0, 2.0, 2.0, 2.0])
+    sl_pct = pd.Series([2.0, 2.0, 2.0, 2.0, 2.0, 2.0])
+    labels = triple_barrier_labels(ohlcv, tp_pct, sl_pct, max_horizon=4)
+    assert labels.iloc[0] == LONG
+
+    # AYNI veri ama satır 0 için ÇOK GENİŞ bir TP/SL (%50) verilirse artık
+    # hiçbir bariyer tetiklenmemeli -> zaman aşımı (NEUTRAL)
+    wide_tp = pd.Series([50.0, 2.0, 2.0, 2.0, 2.0, 2.0])
+    wide_sl = pd.Series([50.0, 2.0, 2.0, 2.0, 2.0, 2.0])
+    labels_wide = triple_barrier_labels(ohlcv, wide_tp, wide_sl, max_horizon=4)
+    assert labels_wide.iloc[0] == NEUTRAL
+
+
+def test_dataset_builds_with_atr_triple_barrier_method():
+    """`atr_triple_barrier`: take_profit_pct/stop_loss_pct ATR ÇARPANI
+    olarak yorumlanır (sabit yüzde değil) — her bar kendi volatilitesine
+    göre ölçeklenen bir bariyer genişliği alır. Gerçek çıkışla (ATR
+    tabanlı stop/hedef, bkz. app.backtest.system_runner) aynı mantık."""
+    exchange = _TrendExchange(seed=3)
+    X, y = build_training_dataset(
+        exchange, ["UPUSDT"], "4h", 300, horizon=8,
+        labeling_method="atr_triple_barrier", take_profit_pct=1.5, stop_loss_pct=1.5,
+    )
+    assert len(X) > 50
+    assert set(y.unique()) <= {-1.0, 0.0, 1.0}
+    # tamamen tek bir sınıfa çökmemeli (en azından biraz yön çeşitliliği olmalı)
+    assert y.nunique() >= 2
+
+
 def test_signal_model_calibrates_with_enough_class_diversity():
     # Kalibrasyon eşiği artık her sınıftan cv katı başına en az 10 örnek
     # gerektiriyor (bkz. app.ml.model — küçük sınıflarda kalibrasyonun

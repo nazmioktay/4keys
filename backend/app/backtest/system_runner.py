@@ -8,7 +8,8 @@ from app.ml.advanced_indicators import average_true_range
 from app.ml.features import FEATURE_COLUMNS, build_features
 from app.ml.lstm_model import LSTMSignalModel
 from app.ml.meta_label import MetaLabelModel
-from app.ml.model import Prediction, SignalModel
+from app.ml.model import DEFAULT_MODEL_PATH, Prediction, SignalModel
+from app.ml.model_status import get_holdout_start_time
 from app.ml.online_model import OnlineSignalModel
 
 from app.exchanges.cache import fetch_ohlcv_cached
@@ -153,6 +154,51 @@ def run_system_backtest(
 
     predictions, confidences = model.predict_batch(features)
     xgb_directions = np.array([_DIRECTION_MAP[int(p)] for p in predictions])
+
+    # KRİTİK: `request.candles` "en son N mum" demek — bu, modelin KENDİ
+    # eğitim penceresiyle (aynı sembol/timeframe, genelde aynı varsayılan
+    # uzunluk) BÜYÜK ÖLÇÜDE ÇAKIŞIR. Bu filtre olmadan backtest'in ~%80'i
+    # (holdout_frac=0.2 varsayılanıyla), modelin `fit()` sırasında ZATEN
+    # GÖRDÜĞÜ barları "test" eder — yüksek görünen bir PnL, gerçek beceri
+    # değil EZBER (overfitting) olabilir. `app.ml.model_status` her kabul
+    # edilen eğitimde holdout'un GERÇEKTE hangi barda başladığını
+    # kaydeder (bkz. `train_signal_model_validated`); burada backtest bu
+    # sınırın ÖNCESİNİ (modelin gördüğü veriyi) uyarıyla dışlar. Isınma
+    # (rolling gösterge/ATR hesapları, LSTM `seq_len` penceresi) İÇİN
+    # holdout ÖNCESİ barlar hâlâ `raw_features`/`ohlcv`'de MEVCUT —
+    # yalnızca SİMÜLASYON DÖNGÜSÜ (aşağıda) holdout'tan başlar, bu geçmiş
+    # kullanım (gösterge ısınması) sızıntı SAYILMAZ (gelecek bilgi değil).
+    holdout_start_time = get_holdout_start_time(DEFAULT_MODEL_PATH) if request.restrict_to_holdout else None
+    holdout_trim_warning: str | None = None
+    if holdout_start_time is not None:
+        cutoff_ns = pd.Timestamp(holdout_start_time).value
+        keep_mask = features["timestamp"].to_numpy() >= cutoff_ns
+        excluded = int((~keep_mask).sum())
+        if excluded > 0:
+            features = features[keep_mask].reset_index(drop=True)
+            valid_positions = valid_positions[keep_mask]
+            predictions = predictions[keep_mask]
+            confidences = confidences[keep_mask]
+            xgb_directions = xgb_directions[keep_mask]
+            holdout_trim_warning = (
+                f"Backtest, modelin EĞİTİM verisiyle çakışmaması için yalnızca "
+                f"{pd.Timestamp(holdout_start_time).isoformat()} sonrasındaki (modelin fit() sırasında HİÇ "
+                f"görmediği) {len(features)} bar ile sınırlandı — {excluded} bar (modelin kendi eğitim "
+                "penceresine ait) hariç tutuldu. Tüm geçmişi (ezber dahil, iyimser) görmek isterseniz "
+                "restrict_to_holdout=false gönderin."
+            )
+        if len(features) < 30:
+            raise ValueError(
+                f"Holdout filtresinden sonra yalnızca {len(features)} bar kaldı (en az 30 gerekli) — model "
+                "yakın zamanda eğitildiği için henüz yeterli 'hiç görülmemiş' veri birikmedi. Daha sonra "
+                "tekrar deneyin veya restrict_to_holdout=false ile (ezber dahil) bir önizleme çalıştırın."
+            )
+    elif request.restrict_to_holdout:
+        holdout_trim_warning = (
+            "Model için kaydedilmiş bir holdout başlangıç tarihi bulunamadı (muhtemelen bu güvenlik özelliği "
+            "eklenmeden ÖNCE eğitilmiş bir model) — bu backtest'in bir kısmı modelin kendi eğitim verisiyle "
+            "ÇAKIŞIYOR olabilir, sonuçlar olduğundan iyi görünebilir. Modeli yeniden eğitmek bu kaydı oluşturur."
+        )
 
     use_lstm = lstm_model is not None and request.use_ensemble
     use_online = online_model is not None and request.use_ensemble
@@ -331,7 +377,10 @@ def run_system_backtest(
         ensemble_note.append("LSTM")
     if use_online:
         ensemble_note.append("online")
-    warnings: list[str] = [
+    warnings: list[str] = []
+    if holdout_trim_warning is not None:
+        warnings.append(holdout_trim_warning)
+    warnings += [
         "Makro/order-book/taker-flow özellikleri bu backtest'te hesaplanmaz (yalnızca anlık değerleri var, "
         "geçmişi yok) — eğitim setindeki eski barlarla AYNI şekilde nötr (0.0) kabul edilir.",
         (

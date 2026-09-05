@@ -28,8 +28,8 @@ def label_future_direction(
 
 def triple_barrier_labels(
     ohlcv: pd.DataFrame,
-    take_profit_pct: float = 2.0,
-    stop_loss_pct: float = 2.0,
+    take_profit_pct: float | pd.Series | np.ndarray = 2.0,
+    stop_loss_pct: float | pd.Series | np.ndarray = 2.0,
     max_horizon: int = 10,
 ) -> pd.Series:
     """"Triple-barrier" etiketleme (Lopez de Prado): sabit bir mum sayısı sonraki
@@ -44,6 +44,15 @@ def triple_barrier_labels(
     mantığını (kâr hedefi / stop / zaman aşımı) çok daha doğru yansıtır ve
     mum içi (high/low) hareketleri kullanır, sadece kapanışı değil.
 
+    `take_profit_pct`/`stop_loss_pct` bir SKALER (tüm barlar için sabit
+    yüzde) OLABİLECEĞİ GİBİ, `ohlcv` ile AYNI uzunlukta bir dizi/Series de
+    olabilir — bu, HER BAR için FARKLI (ör. o barın ATR'sine göre
+    ölçeklenen, bkz. `app.ml.dataset._compute_labels`'ın
+    `"atr_triple_barrier"` yolu) bariyer genişliği tanımlamayı sağlar;
+    böylece model, gerçek işlemde kullanılan volatilite-duyarlı ATR
+    stop/hedef mesafesiyle AYNI mantıkla etiketlenmiş olur (sabit yüzdelik
+    etiketleme ile gerçek ATR tabanlı çıkış arasındaki uyumsuzluğu giderir).
+
     Serinin son kısmı (max_horizon mum içinde veri sonuna gelen satırlar,
     hiçbir bariyere dokunmamışsa) NaN döner — bu satırlar için zaman
     bariyerine gerçekten ulaşılıp ulaşılmadığı bilinmiyor, etiketlenemez.
@@ -52,12 +61,14 @@ def triple_barrier_labels(
     high = ohlcv["high"].to_numpy(dtype=float)
     low = ohlcv["low"].to_numpy(dtype=float)
     n = len(close)
+    tp_pct = np.full(n, take_profit_pct, dtype=float) if np.isscalar(take_profit_pct) else np.asarray(take_profit_pct, dtype=float)
+    sl_pct = np.full(n, stop_loss_pct, dtype=float) if np.isscalar(stop_loss_pct) else np.asarray(stop_loss_pct, dtype=float)
     labels = np.full(n, np.nan)
 
     for i in range(n):
         entry = close[i]
-        upper = entry * (1 + take_profit_pct / 100)
-        lower = entry * (1 - stop_loss_pct / 100)
+        upper = entry * (1 + tp_pct[i] / 100)
+        lower = entry * (1 - sl_pct[i] / 100)
         window_end = min(i + 1 + max_horizon, n)
 
         label = None

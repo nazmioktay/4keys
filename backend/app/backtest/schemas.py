@@ -105,6 +105,15 @@ class SystemBacktestRequest(BaseModel):
     use_ensemble: bool = Field(
         default=True, description="Kullanılabilirse (bkz. app.ml.model_status) LSTM/online modeli de canlıdaki gibi ensemble'a katar"
     )
+    restrict_to_holdout: bool = Field(
+        default=True,
+        description=(
+            "True (varsayılan, GÜVENLİ): backtest yalnızca modelin `fit()` sırasında HİÇ görmediği "
+            "(kronolojik holdout dilimi, bkz. app.ml.model_status.get_holdout_start_time) barları oynatır — "
+            "aksi halde backtest'in çoğu, modelin kendi eğitim verisiyle çakışır ve sonuç ezber nedeniyle "
+            "olduğundan iyi görünür. False yalnızca bilinçli bir 'ezber dahil' hızlı bakış için kullanılmalı."
+        ),
+    )
 
     # --- ATR tabanlı risk yönetimi ---
     # Sabit yüzdelik stop-loss YERİNE: volatiliteye göre ölçeklenen ATR

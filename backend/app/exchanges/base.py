@@ -52,3 +52,16 @@ class Exchange(ABC):
         fazla `limit` mum döner — geçmişe doğru sayfalama (bkz.
         `app.backtest.data.fetch_full_history`) bunu kullanır.
         """
+
+    def fetch_open_interest(self, symbol: str) -> dict | None:
+        """Perpetual futures'a özgü açık pozisyon (open interest) verisinin
+        ŞU ANKİ anlık görüntüsünü döner: `{"open_interest": float,
+        "open_interest_value": float}` (miktar + notional/USDT değeri).
+
+        `app.ml.orderbook_features` ile AYNI mantık: borsalar geçmişe dönük
+        open interest saklamaz/satmaz, bu yüzden bu değer yalnızca
+        toplamaya BAŞLADIĞIMIZ andan itibaren (bkz. `app.openinterest`)
+        birikir. Varsayılan (geriye dönük uyumlu) uygulama `None` döner —
+        yalnızca gerçek destek sağlayan borsalar (ör. Binance futures)
+        bunu override eder; spot sembollerde de anlamsızdır."""
+        return None

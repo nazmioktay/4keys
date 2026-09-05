@@ -37,9 +37,15 @@ class TrainRequest(BaseModel):
     symbols: list[str] | None = None  # None -> screener top long+short kullanılır
     horizon: int = 5
     threshold_pct: float = 1.0
-    labeling_method: LabelingMethod = "threshold"
-    take_profit_pct: float = 2.0
-    stop_loss_pct: float = 2.0
+    # Varsayılan artık "atr_triple_barrier": model artık "N mum sonra %X
+    # hareket etti mi" (gerçek işlemle İLGİSİZ, keyfi bir hedef) yerine
+    # "ATR-ölçekli bir kâr hedefine mi yoksa stop'a mı önce ulaştı" diye
+    # eğitiliyor — bu, app.backtest.system_runner/DecisionEngine'in
+    # KULLANDIĞI ATR tabanlı risk yönetimiyle AYNI mantık, etiketleme ile
+    # gerçek çıkış arasındaki uyumsuzluğu (objective mismatch) giderir.
+    labeling_method: LabelingMethod = "atr_triple_barrier"
+    take_profit_pct: float = 1.5  # atr_triple_barrier'da ATR ÇARPANI olarak yorumlanır
+    stop_loss_pct: float = 1.5  # atr_triple_barrier'da ATR ÇARPANI olarak yorumlanır
     calibrate: bool = True
     calibration_method: Literal["sigmoid", "isotonic"] = "sigmoid"
     algorithm: Algorithm = "xgboost"

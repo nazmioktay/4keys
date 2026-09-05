@@ -7,6 +7,7 @@ from app.backtest.data import timeframe_to_minutes
 from app.exchanges.base import Exchange
 from app.exchanges.cache import fetch_ohlcv_cached
 
+from .advanced_indicators import average_true_range
 from .data_quality import warn_if_gaps
 from .features import ALL_FEATURE_COLUMNS, FEATURE_COLUMNS, build_features
 from .labeling import label_future_direction, triple_barrier_labels
@@ -16,7 +17,14 @@ from .orderflow_features import merge_taker_flow_features
 
 logger = logging.getLogger(__name__)
 
-LabelingMethod = Literal["threshold", "triple_barrier"]
+LabelingMethod = Literal["threshold", "triple_barrier", "atr_triple_barrier"]
+
+# `"atr_triple_barrier"` etiketlemesinde ATR hesaplamak için kullanılan
+# pencere — `app.backtest.system_runner`'ın varsayılan `atr_period` ile
+# (ve `average_true_range`'in kendi varsayılanıyla) TUTARLI tutulur, böylece
+# eğitim etiketi ile gerçek backtest/canlı çıkış AYNI volatilite ölçüsünü
+# kullanır.
+_ATR_LABELING_PERIOD = 14
 
 
 def _persist_feature_snapshots(symbol: str, timeframe: str, features: pd.DataFrame) -> None:
@@ -44,6 +52,20 @@ def _compute_labels(
     take_profit_pct: float,
     stop_loss_pct: float,
 ) -> pd.Series:
+    if labeling_method == "atr_triple_barrier":
+        # `take_profit_pct`/`stop_loss_pct` burada YÜZDE DEĞİL, ATR
+        # ÇARPANI olarak yorumlanır (bkz. `SystemBacktestRequest.atr_*` ile
+        # AYNI kavram) — her bar KENDİ ATR'sine göre ölçeklenen bir bariyer
+        # genişliği alır, sabit bir yüzde yerine. Bu, modelin "doğru"
+        # saydığı etiketi gerçek işlemde kullanılan ATR tabanlı çıkışla
+        # (bkz. app.backtest.system_runner) hizalar — sabit-yüzde
+        # etiketleme ile ATR tabanlı gerçek çıkış arasındaki objective
+        # mismatch'i giderir.
+        atr = average_true_range(ohlcv, length=_ATR_LABELING_PERIOD)
+        atr_pct = (atr / ohlcv["close"]) * 100
+        tp_pct = atr_pct * take_profit_pct
+        sl_pct = atr_pct * stop_loss_pct
+        return triple_barrier_labels(ohlcv, tp_pct, sl_pct, max_horizon=horizon)
     if labeling_method == "triple_barrier":
         return triple_barrier_labels(ohlcv, take_profit_pct, stop_loss_pct, max_horizon=horizon)
     return label_future_direction(ohlcv["close"], horizon, threshold_pct)
@@ -89,6 +111,7 @@ def _build_symbol_frames(
             frame["label"] = labels
             frame["symbol"] = symbol
             frame["time_frac"] = (pd.RangeIndex(len(frame)) / max(len(frame) - 1, 1))
+            frame["bar_timestamp"] = ohlcv["timestamp"].to_numpy()
             frame = frame.dropna(subset=FEATURE_COLUMNS + ["label"])
             if not frame.empty:
                 frames.append(frame)
@@ -146,19 +169,24 @@ def build_training_dataset_with_time(
     labeling_method: LabelingMethod = "threshold",
     take_profit_pct: float = 2.0,
     stop_loss_pct: float = 2.0,
-) -> tuple[pd.DataFrame, pd.Series, pd.Series]:
+) -> tuple[pd.DataFrame, pd.Series, pd.Series, pd.Series]:
     """`build_training_dataset` ile aynıdır, ek olarak her satır için
-    `time_frac`'i de döner — walk-forward/purged CV ve out-of-sample
-    holdout bölmeleri (`app.ml.validation`) bunu kullanır.
+    `time_frac`'i (walk-forward/purged CV ve out-of-sample holdout
+    bölmeleri, bkz. `app.ml.validation`, bunu kullanır) ve gerçek
+    `bar_timestamp`'ini de döner — ikincisi, holdout'un GERÇEKTE hangi
+    tarihten başladığını (`app.ml.model_status`'a yazılıp backtest'in
+    "modelin hiç görmediği veri" sınırını bilmesi için) kaydetmek içindir.
     """
     frames = _build_symbol_frames(
         exchange, symbols, timeframe, lookback, horizon, threshold_pct, labeling_method, take_profit_pct, stop_loss_pct
     )
     if not frames:
-        return pd.DataFrame(columns=ALL_FEATURE_COLUMNS), pd.Series(dtype="float"), pd.Series(dtype="float")
+        empty = pd.Series(dtype="float")
+        return pd.DataFrame(columns=ALL_FEATURE_COLUMNS), empty, empty, pd.Series(dtype="datetime64[ns]")
 
     combined = pd.concat(frames, ignore_index=True)
     X = combined[ALL_FEATURE_COLUMNS]
     y = combined["label"]
     time_frac = combined["time_frac"]
-    return X, y, time_frac
+    bar_timestamp = combined["bar_timestamp"]
+    return X, y, time_frac, bar_timestamp
