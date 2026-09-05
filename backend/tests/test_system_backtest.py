@@ -166,7 +166,9 @@ def test_stop_loss_closes_long_position_on_crash():
         timeframe="1h",
         candles=600,
         initial_balance=1000.0,
-        stop_loss_pct=1.0,
+        atr_stop_loss_mult=1.0,
+        atr_take_profit_mult=None,
+        atr_trailing_mult=None,
         open_confidence=0.5,  # izin verilen minimum -> daha çok işlem tetiklensin
         close_confidence=0.9,  # kapanış yalnızca stop-loss'tan gelsin, sinyalden değil
     )
@@ -175,4 +177,51 @@ def test_stop_loss_closes_long_position_on_crash():
     stop_loss_trades = [t for t in report.trades if t.exit_reason == "stop_loss"]
     for t in stop_loss_trades:
         if t.direction == "long":
-            assert t.exit_price <= t.entry_price * 1.0001
+            assert t.exit_price < t.entry_price
+        else:
+            assert t.exit_price > t.entry_price
+
+
+def test_take_profit_closes_position_at_target():
+    exchange = FakeOscillatingExchange(total_candles=600)
+    train_ohlcv = exchange.full_df.iloc[:400].reset_index(drop=True)
+    model = _trained_model(train_ohlcv)
+
+    request = SystemBacktestRequest(
+        symbol="BTC/USDT:USDT",
+        timeframe="1h",
+        candles=600,
+        initial_balance=1000.0,
+        atr_stop_loss_mult=None,
+        atr_take_profit_mult=0.5,
+        atr_trailing_mult=None,
+        open_confidence=0.5,
+        close_confidence=0.9,
+    )
+    report = run_system_backtest(exchange, model, None, request)
+
+    take_profit_trades = [t for t in report.trades if t.exit_reason == "take_profit"]
+    for t in take_profit_trades:
+        if t.direction == "long":
+            assert t.exit_price > t.entry_price
+        else:
+            assert t.exit_price < t.entry_price
+
+
+def test_trades_record_position_size_and_decision_breakdown():
+    exchange = FakeOscillatingExchange(total_candles=600)
+    train_ohlcv = exchange.full_df.iloc[:400].reset_index(drop=True)
+    model = _trained_model(train_ohlcv)
+
+    request = SystemBacktestRequest(symbol="BTC/USDT:USDT", timeframe="1h", candles=600, initial_balance=1000.0)
+    report = run_system_backtest(exchange, model, None, request)
+
+    assert report.trades, "test verisiyle en az bir işlem beklenir"
+    for t in report.trades:
+        assert t.size_quote > 0
+        assert t.size_explanation
+        assert t.xgboost_direction in ("long", "short", "neutral")
+        assert t.decision_reason and "XGBoost=" in t.decision_reason
+        # bu testte LSTM/online model geçirilmedi -> ensemble alanları boş kalmalı
+        assert t.lstm_direction is None
+        assert t.online_direction is None

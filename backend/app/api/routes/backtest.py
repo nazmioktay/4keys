@@ -11,8 +11,11 @@ from app.backtest.system_runner import run_system_backtest
 from app.core.config import settings
 from app.db import repository as db
 from app.exchanges import get_exchange
+from app.ml.lstm_model import DEFAULT_LSTM_MODEL_PATH, LSTMSignalModel
 from app.ml.meta_label import DEFAULT_META_MODEL_PATH, MetaLabelModel
 from app.ml.model import DEFAULT_MODEL_PATH, SignalModel
+from app.ml.model_status import is_model_enabled
+from app.ml.online_model import DEFAULT_ONLINE_MODEL_PATH, OnlineSignalModel
 
 router = APIRouter(prefix="/backtest", tags=["backtest"])
 
@@ -39,9 +42,10 @@ def run(payload: BacktestRequest) -> BacktestReport:
 @router.post("/system/run", response_model=SystemBacktestReport)
 def run_system(payload: SystemBacktestRequest) -> SystemBacktestReport:
     """"Sistem backtest"i: canlı karar motorunun kullandığı AYNI eğitilmiş
-    modeli (+ varsa meta-label filtresi), `payload.symbol` için gerçek
-    geçmiş mumlar (varsayılan: BTC/USDT:USDT futures perpetual, 1h,
-    10.000 mum) üzerinde bar-bar tekrar oynatır. Sonuç DB'ye kaydedilir
+    modelleri (XGBoost birincil + varsa meta-label filtresi + varsa
+    LSTM/online ensemble, bkz. `app.ml.model_status`), `payload.symbol`
+    için gerçek geçmiş mumlar (varsayılan: BTC/USDT:USDT futures perpetual,
+    1h, 10.000 mum) üzerinde bar-bar tekrar oynatır. Sonuç DB'ye kaydedilir
     (Grafana candlestick/PnL panelleri ve `GET /backtest/system/latest`
     buradan okur)."""
     if not DEFAULT_MODEL_PATH.exists():
@@ -50,8 +54,13 @@ def run_system(payload: SystemBacktestRequest) -> SystemBacktestReport:
     exchange = get_exchange(settings.exchange_id)
     model = SignalModel.load_from()
     meta_model = MetaLabelModel.load_from() if DEFAULT_META_MODEL_PATH.exists() else None
+    # Canlı karar motoruyla (bkz. app.engine.service.run_cycle_once) AYNI
+    # kural: bir model yalnızca EN SON eğitiminde kalite eşiğini
+    # (ml_min_balanced_accuracy) geçtiyse aktiftir (bkz. app.ml.model_status).
+    lstm_model = LSTMSignalModel.load_from() if is_model_enabled(DEFAULT_LSTM_MODEL_PATH) else None
+    online_model = OnlineSignalModel.load_from() if is_model_enabled(DEFAULT_ONLINE_MODEL_PATH) else None
     try:
-        return run_system_backtest(exchange, model, meta_model, payload)
+        return run_system_backtest(exchange, model, meta_model, payload, lstm_model=lstm_model, online_model=online_model)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

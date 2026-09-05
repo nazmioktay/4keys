@@ -99,10 +99,24 @@ class SystemBacktestRequest(BaseModel):
     initial_balance: float = Field(default=1000.0, gt=0)
     open_confidence: float = Field(default=0.6, ge=0.5, le=1.0)
     close_confidence: float = Field(default=0.55, ge=0.5, le=1.0)
-    stop_loss_pct: float | None = Field(default=3.0, gt=0, description="null ise stop-loss uygulanmaz")
     commission_pct: float = Field(default=0.04, ge=0)
     slippage_pct: float = Field(default=0.02, ge=0)
     use_meta_label: bool = Field(default=True, description="Eğitilmiş bir meta-label modeli varsa sinyal filtresi olarak kullanılır")
+    use_ensemble: bool = Field(
+        default=True, description="Kullanılabilirse (bkz. app.ml.model_status) LSTM/online modeli de canlıdaki gibi ensemble'a katar"
+    )
+
+    # --- ATR tabanlı risk yönetimi ---
+    # Sabit yüzdelik stop-loss YERİNE: volatiliteye göre ölçeklenen ATR
+    # (Average True Range) tabanlı stop-loss + kâr-alma + trailing stop —
+    # kullanıcı isteği. Trailing stop yalnızca SIKILAŞTIRIR (giriş
+    # anındaki sabit stop'tan daha gevşek bir seviyeye asla dönmez).
+    atr_period: int = Field(default=14, ge=2, le=100)
+    atr_stop_loss_mult: float | None = Field(default=1.5, gt=0, description="null ise stop-loss uygulanmaz")
+    atr_take_profit_mult: float | None = Field(default=1.5, gt=0, description="null ise kâr-alma uygulanmaz")
+    atr_trailing_mult: float | None = Field(
+        default=0.5, gt=0, description="En iyi fiyattan bu kadar ATR geride trailing stop; null ise trailing yok"
+    )
 
 
 class SystemTradeRecord(BaseModel):
@@ -114,8 +128,17 @@ class SystemTradeRecord(BaseModel):
     pnl_pct: float
     pnl_quote: float
     equity_after: float
-    exit_reason: str  # "signal" | "stop_loss"
+    exit_reason: str  # "signal" | "stop_loss" | "take_profit" | "trailing_stop"
     duration_candles: int
+    size_quote: float
+    size_explanation: str
+    xgboost_direction: str
+    xgboost_confidence: float
+    lstm_direction: str | None = None
+    lstm_confidence: float | None = None
+    online_direction: str | None = None
+    online_confidence: float | None = None
+    decision_reason: str
 
 
 class SystemBacktestReport(BaseModel):

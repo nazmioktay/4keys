@@ -550,6 +550,15 @@ def get_latest_backtest_run(symbol: str | None = None) -> dict | None:
                         "equity_after": t.equity_after,
                         "exit_reason": t.exit_reason,
                         "duration_candles": t.duration_candles,
+                        "size_quote": t.size_quote,
+                        "size_explanation": t.size_explanation,
+                        "xgboost_direction": t.xgboost_direction,
+                        "xgboost_confidence": t.xgboost_confidence,
+                        "lstm_direction": t.lstm_direction,
+                        "lstm_confidence": t.lstm_confidence,
+                        "online_direction": t.online_direction,
+                        "online_confidence": t.online_confidence,
+                        "decision_reason": t.decision_reason,
                     }
                     for t in trades
                 ],

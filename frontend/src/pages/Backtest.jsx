@@ -20,10 +20,14 @@ const DEFAULT_PARAMS = {
   initial_balance: 1000,
   open_confidence: 0.6,
   close_confidence: 0.55,
-  stop_loss_pct: 3.0,
   commission_pct: 0.04,
   slippage_pct: 0.02,
   use_meta_label: true,
+  use_ensemble: true,
+  atr_period: 14,
+  atr_stop_loss_mult: 1.5,
+  atr_take_profit_mult: 1.5,
+  atr_trailing_mult: 0.5,
 };
 
 export default function Backtest() {
@@ -124,12 +128,28 @@ function ParamsCard({ params, setParams, onRun, running }) {
           <input type="number" step="0.01" value={params.close_confidence} onChange={set("close_confidence")} />
         </div>
         <div>
-          <label className="field">Stop-loss (%)</label>
-          <input type="number" step="0.1" value={params.stop_loss_pct ?? ""} onChange={set("stop_loss_pct")} />
-        </div>
-        <div>
           <label className="field">Komisyon + kayma (%, işlem bacağı başına)</label>
           <input type="number" step="0.01" value={params.commission_pct} onChange={set("commission_pct")} />
+        </div>
+        <div>
+          <label className="field">ATR periyodu</label>
+          <input type="number" value={params.atr_period} onChange={set("atr_period")} />
+        </div>
+        <div>
+          <label className="field">Stop-loss (x ATR)</label>
+          <input type="number" step="0.1" value={params.atr_stop_loss_mult ?? ""} onChange={set("atr_stop_loss_mult")} />
+        </div>
+        <div>
+          <label className="field">Kâr-alma (x ATR)</label>
+          <input type="number" step="0.1" value={params.atr_take_profit_mult ?? ""} onChange={set("atr_take_profit_mult")} />
+        </div>
+        <div>
+          <label className="field">Trailing stop (x ATR)</label>
+          <input type="number" step="0.1" value={params.atr_trailing_mult ?? ""} onChange={set("atr_trailing_mult")} />
+        </div>
+        <div>
+          <label className="field">Ensemble (LSTM/online, aktifse)</label>
+          <input type="checkbox" checked={params.use_ensemble} onChange={set("use_ensemble")} />
         </div>
       </div>
     </div>
@@ -180,6 +200,19 @@ function WarningsCard({ warnings }) {
   );
 }
 
+const EXIT_REASON_LABELS = {
+  stop_loss: "stop-loss",
+  take_profit: "kâr-alma",
+  trailing_stop: "trailing stop",
+  signal: "sinyal",
+};
+
+function fmtModel(direction, confidence) {
+  if (!direction) return null;
+  const label = { long: "Long", short: "Short", neutral: "Nötr" }[direction] || direction;
+  return `${label} (${fmt(confidence, 2)})`;
+}
+
 function TradesCard({ trades }) {
   return (
     <div className="card">
@@ -189,19 +222,36 @@ function TradesCard({ trades }) {
       </div>
       {!trades.length && <div className="muted">Bu parametrelerle hiç işlem kapanmadı.</div>}
       {trades.slice().reverse().map((t, i) => (
-        <div className="row" key={i}>
-          <div>
-            <div className="row-value">
-              {t.direction === "long" ? "Long" : "Short"} · ${fmt(t.entry_price)} → ${fmt(t.exit_price)}
+        <div className="row" key={i} style={{ flexDirection: "column", alignItems: "stretch" }}>
+          <div style={{ display: "flex", justifyContent: "space-between" }}>
+            <div>
+              <div className="row-value">
+                {t.direction === "long" ? "Long" : "Short"} · ${fmt(t.entry_price)} → ${fmt(t.exit_price)} · ${fmt(t.size_quote)}
+              </div>
+              <div className="muted">
+                {fmtDate(t.entry_time)} → {fmtDate(t.exit_time)} · {t.duration_candles} mum ·{" "}
+                {EXIT_REASON_LABELS[t.exit_reason] || t.exit_reason}
+              </div>
             </div>
-            <div className="muted">
-              {fmtDate(t.entry_time)} → {fmtDate(t.exit_time)} · {t.duration_candles} mum ·{" "}
-              {t.exit_reason === "stop_loss" ? "stop-loss" : "sinyal"}
-            </div>
+            <span className={"row-value " + (t.pnl_pct >= 0 ? "pos" : "neg")}>
+              {t.pnl_pct >= 0 ? "+" : ""}{fmt(t.pnl_pct)}%
+            </span>
           </div>
-          <span className={"row-value " + (t.pnl_pct >= 0 ? "pos" : "neg")}>
-            {t.pnl_pct >= 0 ? "+" : ""}{fmt(t.pnl_pct)}%
-          </span>
+          <div className="muted" style={{ marginTop: 4, fontSize: "0.85em" }}>
+            XGBoost: {fmtModel(t.xgboost_direction, t.xgboost_confidence)}
+            {t.lstm_direction && <> · LSTM: {fmtModel(t.lstm_direction, t.lstm_confidence)}</>}
+            {t.online_direction && <> · Online: {fmtModel(t.online_direction, t.online_confidence)}</>}
+          </div>
+          {t.decision_reason && (
+            <div className="muted" style={{ fontSize: "0.85em" }}>
+              Karar: {t.decision_reason}
+            </div>
+          )}
+          {t.size_explanation && (
+            <div className="muted" style={{ fontSize: "0.8em" }}>
+              Boyut: {t.size_explanation}
+            </div>
+          )}
         </div>
       ))}
     </div>

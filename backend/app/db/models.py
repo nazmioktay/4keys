@@ -215,6 +215,15 @@ class BacktestTradeRow(Base):
     equity_after: Mapped[float] = mapped_column(Float)
     exit_reason: Mapped[str] = mapped_column(String)
     duration_candles: Mapped[int] = mapped_column(Integer)
+    size_quote: Mapped[float | None] = mapped_column(Float, nullable=True)
+    size_explanation: Mapped[str | None] = mapped_column(String, nullable=True)
+    xgboost_direction: Mapped[str | None] = mapped_column(String, nullable=True)
+    xgboost_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    lstm_direction: Mapped[str | None] = mapped_column(String, nullable=True)
+    lstm_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    online_direction: Mapped[str | None] = mapped_column(String, nullable=True)
+    online_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    decision_reason: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class TradeRecord(Base):

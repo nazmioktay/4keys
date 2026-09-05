@@ -3,7 +3,7 @@ from contextlib import contextmanager
 from typing import Iterator
 
 from sqlalchemy import create_engine, inspect, text
-from sqlalchemy.types import Float
+from sqlalchemy.types import Float, String
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -89,11 +89,12 @@ def init_db() -> bool:
 def _add_missing_columns(engine) -> None:
     """Hafif şema göçü: `Base.metadata.create_all` yalnızca EKSİK tabloları
     oluşturur, VAR OLAN bir tabloya sonradan eklenen kolonları eklemez.
-    Modele yeni bir Float kolonu eklendiğinde (ör. yeni bir ML özelliği),
-    var olan `feature_snapshots` tablosu üzerinde bu fonksiyon eksik
-    kolonları `ALTER TABLE ADD COLUMN` ile (NULL edilebilir olarak, eski
-    satırlar bozulmadan) tamamlar. Yalnızca yeni Float kolonlar için
-    güvenlidir; kolon tipi/isim değişikliği veya silme desteklenmez.
+    Modele yeni bir Float veya String kolonu eklendiğinde (ör. yeni bir ML
+    özelliği veya `BacktestTradeRow`'a eklenen karar-açıklama kolonları),
+    var olan tablo üzerinde bu fonksiyon eksik kolonları `ALTER TABLE ADD
+    COLUMN` ile (NULL edilebilir olarak, eski satırlar bozulmadan) tamamlar.
+    Yalnızca yeni Float/String kolonlar için güvenlidir; kolon tipi/isim
+    değişikliği veya silme desteklenmez.
     """
     inspector = inspect(engine)
     for table in Base.metadata.sorted_tables:
@@ -103,11 +104,15 @@ def _add_missing_columns(engine) -> None:
         for column in table.columns:
             if column.name in existing_columns:
                 continue
-            if not isinstance(column.type, Float):
-                continue  # yalnızca yeni Float kolonlar için otomatik ekleme yapılır
+            if isinstance(column.type, Float):
+                sql_type = "FLOAT"
+            elif isinstance(column.type, String):
+                sql_type = "TEXT"
+            else:
+                continue  # yalnızca yeni Float/String kolonlar için otomatik ekleme yapılır
             try:
                 with engine.begin() as conn:
-                    conn.execute(text(f'ALTER TABLE {table.name} ADD COLUMN "{column.name}" FLOAT'))
+                    conn.execute(text(f'ALTER TABLE {table.name} ADD COLUMN "{column.name}" {sql_type}'))
                 logger.info("added missing column %s.%s", table.name, column.name)
             except Exception as exc:  # noqa: BLE001 - en kötü ihtimalle kolon eklenmez, sistem çalışmaya devam eder
                 logger.warning("could not add column %s.%s: %s", table.name, column.name, exc)
