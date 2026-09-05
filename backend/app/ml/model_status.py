@@ -71,6 +71,19 @@ def is_model_enabled(model_path: Path) -> bool:
     return bool(status.get("enabled", False))
 
 
+def get_balanced_accuracy(model_path: Path) -> float | None:
+    """Modelin en son kabul edilen VEYA reddedilen eğitimindeki dengeli
+    doğruluğunu döner (bkz. `write_model_status`) — kayıt yoksa `None`.
+    `app.engine.decision.DecisionEngine`'in ensemble birleştirmesini her
+    modelin KENDİ doğrulanmış becerisine göre ağırlıklandırması için
+    kullanılır (bkz. `_skill_weight`)."""
+    status = read_model_status(model_path)
+    if not status:
+        return None
+    value = status.get("balanced_accuracy")
+    return float(value) if value is not None else None
+
+
 def get_holdout_start_time(model_path: Path) -> str | None:
     """Modelin en son kabul edilen eğitiminde holdout'un başladığı ISO
     zaman damgasını döner (bkz. `write_model_status`) — kayıt yoksa

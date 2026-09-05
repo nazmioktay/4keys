@@ -22,6 +22,7 @@ from .advanced_indicators import (
     supertrend,
     wavetrend,
 )
+from .multi_timeframe_features import MULTI_TIMEFRAME_FEATURE_COLUMNS
 from .orderflow_features import TAKER_FLOW_FEATURE_COLUMNS
 
 FEATURE_COLUMNS = [
@@ -110,8 +111,29 @@ ORDERBOOK_FEATURE_COLUMNS = [
 # yine de opsiyonel/NaN-toleranslı tutulur çünkü her borsa adapter'ı
 # desteklemez.
 
-# Modelin gerçekten gördüğü tüm girdi kolonları (teknik + makro + order book + order flow).
-ALL_FEATURE_COLUMNS = FEATURE_COLUMNS + MACRO_FEATURE_COLUMNS + ORDERBOOK_FEATURE_COLUMNS + TAKER_FLOW_FEATURE_COLUMNS
+# Perpetual futures'a özgü açık pozisyon (open interest) özellikleri:
+# ORDERBOOK_FEATURE_COLUMNS gibi geçmişi olmayan, bugünden itibaren
+# periyodik toplanan bir kaynak (bkz. app.openinterest, app.ml.openinterest_features)
+# — SEMBOL BAZINDA. Fiyat ile OI'nin AYNI/ZIT yönde hareket etmesi, bir
+# trendin YENİ pozisyonlarla mı yoksa pozisyon kapanışıyla mı sürdüğü
+# ayrımını yakalar (klasik OI/fiyat 4 çeyrek analizi).
+OPEN_INTEREST_FEATURE_COLUMNS = [
+    "oi_change_pct",
+    "oi_price_divergence",
+]
+
+# Modelin gerçekten gördüğü tüm girdi kolonları (teknik + makro + order book + order flow + open interest + üst-TF).
+# Üst zaman dilimi (4h/1d, `MULTI_TIMEFRAME_FEATURE_COLUMNS`) ORDERBOOK/OPEN_INTEREST'ten
+# FARKLI olarak harici bir veri kaynağına bağlı DEĞİLDİR (kaynak OHLCV'den
+# resample edilir) — backtest'te de GERÇEK değerlerle hesaplanabilir.
+ALL_FEATURE_COLUMNS = (
+    FEATURE_COLUMNS
+    + MACRO_FEATURE_COLUMNS
+    + ORDERBOOK_FEATURE_COLUMNS
+    + TAKER_FLOW_FEATURE_COLUMNS
+    + OPEN_INTEREST_FEATURE_COLUMNS
+    + MULTI_TIMEFRAME_FEATURE_COLUMNS
+)
 
 
 def build_features(ohlcv: pd.DataFrame) -> pd.DataFrame:

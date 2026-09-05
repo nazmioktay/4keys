@@ -204,6 +204,23 @@ class BinanceExchange(Exchange):
         except Exception:  # noqa: BLE001 - makro veri opsiyoneldir, hata ana akışı bozmamalı
             return None
 
+    def fetch_open_interest(self, symbol: str) -> dict | None:
+        """Şu anki açık pozisyon (open interest) miktarını + notional
+        (USDT) değerini döner. Perpetual futures'a özgüdür, spot sembollerde
+        anlamsızdır. Kimlik doğrulama gerektirmez, herkese açık veridir."""
+        try:
+            result = self._futures.fetch_open_interest(symbol)
+            amount = result.get("openInterestAmount")
+            value = result.get("openInterestValue")
+            if amount is None and value is None:
+                return None
+            return {
+                "open_interest": float(amount) if amount is not None else None,
+                "open_interest_value": float(value) if value is not None else None,
+            }
+        except Exception:  # noqa: BLE001 - open interest verisi opsiyoneldir, hata ana akışı bozmamalı
+            return None
+
     def fetch_order_book_metrics(self, symbol: str, depth: int = 20) -> dict | None:
         """Emir defterinin (order book) ANLIK bir özetini döner — geçmişe
         dönük emir defteri borsalarda saklanmaz/satılmaz, bu yüzden yalnızca

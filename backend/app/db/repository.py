@@ -13,6 +13,7 @@ from .models import (
     FeatureSnapshot,
     MacroSnapshot,
     OHLCVRaw,
+    OpenInterestSnapshot,
     OrderbookSnapshot,
     SignalRecord,
     TradeRecord,
@@ -39,6 +40,8 @@ MACRO_SNAPSHOT_COLUMNS = [
 ]
 
 ORDERBOOK_SNAPSHOT_COLUMNS = ["bid_volume", "ask_volume", "imbalance", "spread_pct"]
+
+OPEN_INTEREST_SNAPSHOT_COLUMNS = ["open_interest", "open_interest_value"]
 
 logger = logging.getLogger(__name__)
 
@@ -336,6 +339,63 @@ def get_orderbook_snapshots(symbol: str, limit: int = 5000) -> pd.DataFrame:
     except SQLAlchemyError:
         logger.exception("failed to read orderbook snapshots for %s", symbol)
         return pd.DataFrame(columns=["time", "symbol", *ORDERBOOK_SNAPSHOT_COLUMNS])
+
+
+def record_open_interest_snapshot(symbol: str, values: dict) -> None:
+    """Bir sembolün open interest'inin (bkz. `app.openinterest.data`) bir
+    anlık görüntüsünü `open_interest_snapshots` tablosuna kaydeder —
+    `record_orderbook_snapshot` ile AYNI desen."""
+    if not is_enabled():
+        return
+    try:
+        with session_scope() as db:
+            db.add(OpenInterestSnapshot(symbol=symbol, **{col: values.get(col) for col in OPEN_INTEREST_SNAPSHOT_COLUMNS}))
+    except SQLAlchemyError:
+        logger.exception("open interest snapshot persist failed for %s", symbol)
+
+
+def get_latest_open_interest_snapshot(symbol: str) -> dict | None:
+    if not is_enabled():
+        return None
+    try:
+        with session_scope() as db:
+            row = db.execute(
+                select(OpenInterestSnapshot)
+                .where(OpenInterestSnapshot.symbol == symbol)
+                .order_by(OpenInterestSnapshot.time.desc())
+                .limit(1)
+            ).scalar_one_or_none()
+            if row is None:
+                return None
+            return {
+                "time": row.time.isoformat(),
+                "symbol": row.symbol,
+                **{col: getattr(row, col) for col in OPEN_INTEREST_SNAPSHOT_COLUMNS},
+            }
+    except SQLAlchemyError:
+        logger.exception("failed to read latest open interest snapshot for %s", symbol)
+        return None
+
+
+def get_open_interest_snapshots(symbol: str, limit: int = 5000) -> pd.DataFrame:
+    if not is_enabled():
+        return pd.DataFrame(columns=["time", "symbol", *OPEN_INTEREST_SNAPSHOT_COLUMNS])
+    try:
+        with session_scope() as db:
+            rows = db.execute(
+                select(OpenInterestSnapshot)
+                .where(OpenInterestSnapshot.symbol == symbol)
+                .order_by(OpenInterestSnapshot.time.desc())
+                .limit(limit)
+            ).scalars().all()
+            records = [
+                {"time": r.time, "symbol": r.symbol, **{col: getattr(r, col) for col in OPEN_INTEREST_SNAPSHOT_COLUMNS}}
+                for r in reversed(rows)
+            ]
+            return pd.DataFrame(records)
+    except SQLAlchemyError:
+        logger.exception("failed to read open interest snapshots for %s", symbol)
+        return pd.DataFrame(columns=["time", "symbol", *OPEN_INTEREST_SNAPSHOT_COLUMNS])
 
 
 def get_all_orderbook_snapshots(limit: int = 200_000) -> pd.DataFrame:

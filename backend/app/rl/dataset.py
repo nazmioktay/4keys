@@ -12,6 +12,8 @@ from app.exchanges.base import Exchange
 
 from app.ml.features import ALL_FEATURE_COLUMNS, FEATURE_COLUMNS, build_features
 from app.ml.macro_features import load_macro_history, merge_macro_features
+from app.ml.multi_timeframe_features import MULTI_TIMEFRAME_FEATURE_COLUMNS, compute_multi_timeframe_features
+from app.ml.openinterest_features import load_open_interest_history, merge_open_interest_features
 from app.ml.orderbook_features import load_orderbook_history, merge_orderbook_features
 from app.ml.orderflow_features import merge_taker_flow_features
 
@@ -38,6 +40,10 @@ def build_episode_data(
     features = merge_macro_features(features, load_macro_history())
     features = merge_orderbook_features(features, load_orderbook_history(symbol))
     features = merge_taker_flow_features(features, ohlcv, exchange, symbol, timeframe)
+    features = merge_open_interest_features(features, load_open_interest_history(symbol))
+    htf_features = compute_multi_timeframe_features(ohlcv)
+    for col in MULTI_TIMEFRAME_FEATURE_COLUMNS:
+        features[col] = htf_features[col].to_numpy()
 
     features = features.dropna(subset=FEATURE_COLUMNS).reset_index(drop=True)
     features = features.fillna(0.0)  # kalan NaN'lar yalnızca makro/order-book kolonlarında olabilir

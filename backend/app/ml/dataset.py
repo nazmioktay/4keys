@@ -12,6 +12,8 @@ from .data_quality import warn_if_gaps
 from .features import ALL_FEATURE_COLUMNS, FEATURE_COLUMNS, build_features
 from .labeling import label_future_direction, triple_barrier_labels
 from .macro_features import load_macro_history, merge_macro_features
+from .multi_timeframe_features import MULTI_TIMEFRAME_FEATURE_COLUMNS, compute_multi_timeframe_features
+from .openinterest_features import load_open_interest_history, merge_open_interest_features
 from .orderbook_features import load_orderbook_history, merge_orderbook_features
 from .orderflow_features import merge_taker_flow_features
 
@@ -106,6 +108,10 @@ def _build_symbol_frames(
             features = merge_macro_features(features, macro_history)
             features = merge_orderbook_features(features, load_orderbook_history(symbol))
             features = merge_taker_flow_features(features, ohlcv, exchange, symbol, timeframe)
+            features = merge_open_interest_features(features, load_open_interest_history(symbol))
+            htf_features = compute_multi_timeframe_features(ohlcv)
+            for col in MULTI_TIMEFRAME_FEATURE_COLUMNS:
+                features[col] = htf_features[col].to_numpy()
             labels = _compute_labels(ohlcv, labeling_method, horizon, threshold_pct, take_profit_pct, stop_loss_pct)
             frame = features.copy()
             frame["label"] = labels

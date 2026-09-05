@@ -12,6 +12,7 @@ from .jobs import (
     AUTO_RETRAIN_REGIME_JOB_ID,
     ENGINE_CYCLE_JOB_ID,
     MACRO_REFRESH_JOB_ID,
+    OPEN_INTEREST_REFRESH_JOB_ID,
     ORDERBOOK_REFRESH_JOB_ID,
     SCREENER_REFRESH_JOB_ID,
     compute_auto_retrain_interval_seconds,
@@ -20,6 +21,7 @@ from .jobs import (
     job_auto_retrain_online,
     job_auto_retrain_regime,
     job_refresh_macro,
+    job_refresh_open_interest,
     job_refresh_orderbook,
     job_refresh_screener,
     job_run_engine_cycle,
@@ -78,6 +80,14 @@ def start_scheduler(enabled: bool | None = None) -> BackgroundScheduler | None:
             max_instances=1,
             coalesce=True,
         )
+        scheduler.add_job(
+            job_refresh_open_interest,
+            "interval",
+            seconds=settings.open_interest_refresh_seconds,
+            id=OPEN_INTEREST_REFRESH_JOB_ID,
+            max_instances=1,
+            coalesce=True,
+        )
         if settings.ml_auto_retrain_enabled:
             # Aynı hesaplanmış aralık (bkz. `compute_auto_retrain_interval_seconds`)
             # 4 model ailesi için de kullanılır. `next_run_time` KASITLI olarak
@@ -109,6 +119,7 @@ def start_scheduler(enabled: bool | None = None) -> BackgroundScheduler | None:
         scheduler.modify_job(SCREENER_REFRESH_JOB_ID, next_run_time=datetime.now())
         scheduler.modify_job(MACRO_REFRESH_JOB_ID, next_run_time=datetime.now())
         scheduler.modify_job(ORDERBOOK_REFRESH_JOB_ID, next_run_time=datetime.now())
+        scheduler.modify_job(OPEN_INTEREST_REFRESH_JOB_ID, next_run_time=datetime.now())
         # auto_retrain'e İLK çalıştırmada hemen tetiklenmez — yüzlerce
         # sembolde ağır bir eğitim, uygulama başlarken ilk isteklerin
         # gecikmesine yol açmasın; yalnızca normal interval'ında çalışır.

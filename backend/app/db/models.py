@@ -168,6 +168,23 @@ class OrderbookSnapshot(Base):
     spread_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
+class OpenInterestSnapshot(Base):
+    """Perpetual futures açık pozisyon (open interest) verisinin periyodik
+    ANLIK görüntüsü (bkz. `app.openinterest`). `OrderbookSnapshot` ile AYNI
+    desen: borsalar geçmişe dönük open interest saklamaz/satmaz, bu yüzden
+    bu tablo yalnızca toplamaya BAŞLADIĞIMIZ andan itibaren, SEMBOL BAZINDA
+    birikir."""
+
+    __tablename__ = "open_interest_snapshots"
+    __table_args__ = (UniqueConstraint("time", "symbol", name="uq_open_interest_snapshot_time_symbol"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    time: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
+    symbol: Mapped[str] = mapped_column(String, index=True)
+    open_interest: Mapped[float | None] = mapped_column(Float, nullable=True)
+    open_interest_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
 class BacktestRun(Base):
     """`app.backtest.system_runner` ile üretilen bir "sistem backtest"i
     (canlıdaki AYNI ML modeli, gerçek geçmiş mumlar üzerinde tekrar

@@ -35,17 +35,78 @@ def test_combine_predictions_opposite_directions_goes_neutral():
 
 
 def test_combine_predictions_one_neutral_discounts_directional():
+    # Varsayılan (belirtilmeyen) skill=0.5 -> indirim çarpanı 0.5+0.5*0.5=0.75
+    # (eskiden sabit 0.7'ydi — artık yönlü modelin KENDİ doğrulanmış
+    # becerisine göre ölçekleniyor, bkz. _skill_weight/DecisionEngine
+    # docstring'i; skill=0.5 "bilinmiyor" nötr varsayılanı temsil eder).
     xgb = Prediction(direction="neutral", confidence=0.5)
     lstm = Prediction(direction="long", confidence=0.8)
     combined = DecisionEngine._combine_predictions(xgb, lstm)
     assert combined.direction == "long"
-    assert combined.confidence == pytest.approx(0.8 * 0.7)
+    assert combined.confidence == pytest.approx(0.8 * 0.75)
+
+
+def test_combine_predictions_high_skill_reduces_discount():
+    """Yönlü modelin KENDİ becerisi yüksekse (skill=1.0, mükemmel
+    doğrulanmış performans) indirim OLMAMALI — düşük beceride (skill=0.0,
+    tam rastgele) ise indirim en YÜKSEK (%50) olmalı."""
+    xgb = Prediction(direction="neutral", confidence=0.5)
+    lstm = Prediction(direction="long", confidence=0.8)
+
+    high_skill = DecisionEngine._combine_predictions(xgb, lstm, xgb_skill=0.5, lstm_skill=1.0)
+    assert high_skill.confidence == pytest.approx(0.8 * 1.0)
+
+    low_skill = DecisionEngine._combine_predictions(xgb, lstm, xgb_skill=0.5, lstm_skill=0.0)
+    assert low_skill.confidence == pytest.approx(0.8 * 0.5)
+
+
+def test_combine_predictions_agreement_weights_by_skill():
+    """İki model AYNI yönde mutabıksa, daha YÜKSEK becerili model
+    birleşik güvene daha FAZLA ağırlıkla katkı vermeli."""
+    xgb = Prediction(direction="long", confidence=0.9)  # düşük beceri
+    lstm = Prediction(direction="long", confidence=0.5)  # yüksek beceri
+
+    combined = DecisionEngine._combine_predictions(xgb, lstm, xgb_skill=0.1, lstm_skill=0.9)
+    # ağırlıklı ortalama lstm'in (düşük confidence) güvenine daha yakın olmalı
+    plain_average = (0.9 + 0.5) / 2
+    assert combined.confidence < plain_average * 1.1
+
+
+def test_skill_weight_maps_random_baseline_to_zero_and_perfect_to_one():
+    assert DecisionEngine._skill_weight(1 / 3) == pytest.approx(0.0)
+    assert DecisionEngine._skill_weight(1.0) == pytest.approx(1.0)
+    assert DecisionEngine._skill_weight(None) == pytest.approx(0.5)
+    # rastgele seviyenin ALTI negatif beceriye değil, 0'a kırpılmalı
+    assert DecisionEngine._skill_weight(0.0) == pytest.approx(0.0)
 
 
 def test_combine_predictions_no_lstm_returns_xgb_unchanged():
     xgb = Prediction(direction="long", confidence=0.6)
     combined = DecisionEngine._combine_predictions(xgb, None)
     assert combined is xgb
+
+
+def test_decision_engine_reads_balanced_accuracy_into_skill_weights(monkeypatch):
+    """`DecisionEngine.__init__`, XGBoost/LSTM/online'ın KENDİ status.json'undaki
+    (bkz. app.ml.model_status) balanced_accuracy'sini okuyup `_skill_weight`
+    ile ağırlığa çevirmeli — gerçek dosyalara dokunmadan, izole test."""
+    from app.engine import decision as decision_module
+
+    accuracies = {"xgb": 0.7, "lstm": 1 / 3, "online": None}
+    monkeypatch.setattr(
+        decision_module,
+        "get_balanced_accuracy",
+        lambda path: {"signal_model.joblib": accuracies["xgb"], "lstm_model.pt": accuracies["lstm"], "online_model.joblib": accuracies["online"]}.get(
+            path.name
+        ),
+    )
+
+    engine = DecisionEngine(
+        exchange=None, model=None, positions=PaperPositionStore(), timeframe="1h", lookback=100
+    )
+    assert engine._xgb_skill == pytest.approx(DecisionEngine._skill_weight(0.7))
+    assert engine._lstm_skill == pytest.approx(0.0)  # rastgele seviye -> sıfır beceri
+    assert engine._online_skill == pytest.approx(0.5)  # bilinmiyor -> nötr
 
 
 class _FakeExchange(Exchange):

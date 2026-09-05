@@ -6,11 +6,12 @@ from app.engine.decision import DecisionEngine
 from app.exchanges.base import Exchange
 from app.ml.advanced_indicators import average_true_range
 from app.ml.features import FEATURE_COLUMNS, build_features
-from app.ml.lstm_model import LSTMSignalModel
+from app.ml.lstm_model import DEFAULT_LSTM_MODEL_PATH, LSTMSignalModel
 from app.ml.meta_label import MetaLabelModel
+from app.ml.multi_timeframe_features import MULTI_TIMEFRAME_FEATURE_COLUMNS, compute_multi_timeframe_features
 from app.ml.model import DEFAULT_MODEL_PATH, Prediction, SignalModel
-from app.ml.model_status import get_holdout_start_time
-from app.ml.online_model import OnlineSignalModel
+from app.ml.model_status import get_balanced_accuracy, get_holdout_start_time
+from app.ml.online_model import DEFAULT_ONLINE_MODEL_PATH, OnlineSignalModel
 
 from app.exchanges.cache import fetch_ohlcv_cached
 
@@ -114,12 +115,15 @@ def run_system_backtest(
 
     Bilinen basitleştirmeler (dürüstçe belgelenir, `warnings` alanına da
     yansır):
-    - Makro/order-book/taker-flow özellikleri (bkz. `ALL_FEATURE_COLUMNS`)
-      burada hesaplanmaz — bunlar yalnızca "ANLIK" değerlerdir, geçmiş
-      barlar için tarihsel bir zaman serisi YOKTUR. Eksik kolonlar 0.0
-      (nötr) ile doldurulur — eğitim setindeki makro geçmişi kısa/yok olan
-      ESKİ barlara UYGULANAN AYNI davranış (bkz. README), yani burada
-      YENİ bir yanlılık eklenmiyor.
+    - Makro/order-book/taker-flow/open-interest özellikleri (bkz.
+      `ALL_FEATURE_COLUMNS`) burada hesaplanmaz — bunlar yalnızca "ANLIK"
+      değerlerdir, geçmiş barlar için tarihsel bir zaman serisi YOKTUR.
+      Eksik kolonlar 0.0 (nötr) ile doldurulur — eğitim setindeki makro
+      geçmişi kısa/yok olan ESKİ barlara UYGULANAN AYNI davranış (bkz.
+      README), yani burada YENİ bir yanlılık eklenmiyor.
+      (Üst zaman dilimi/4h-1d trend bağlamı bu basitleştirmeye DAHİL
+      DEĞİL — kaynak OHLCV'den resample edilir, harici kaynağa bağlı
+      değildir, burada da GERÇEK değerlerle hesaplanır.)
     - Kademeli alım/satım (tranche) ve Kelly boyutlandırma YOK — her
       sinyalde TÜM equity ile tek giriş/tek çıkış simüle edilir (bkz.
       `PortfolioManager` gerçek canlı/paper motorunda bunlar var, ama
@@ -147,10 +151,28 @@ def run_system_backtest(
 
     raw_features = build_features(ohlcv)
     raw_features["atr"] = average_true_range(ohlcv, length=request.atr_period)
+    # Üst zaman dilimi (4h/1d) trend bağlamı, macro/orderbook/OI'dan FARKLI
+    # olarak harici bir veri kaynağına bağlı değildir (kaynak OHLCV'den
+    # resample edilir) — backtest'te de GERÇEK değerlerle hesaplanabilir,
+    # basitleştirme/nötr doldurma gerekmez (bkz. warnings listesi).
+    htf_features = compute_multi_timeframe_features(ohlcv)
+    for col in MULTI_TIMEFRAME_FEATURE_COLUMNS:
+        raw_features[col] = htf_features[col].to_numpy()
 
-    features = raw_features.dropna()
+    # DİKKAT: `htf_*` kolonları, "atr" gibi HER ZAMAN kısa bir ısınma
+    # bölgesi olan kolonlardan FARKLI olarak, yetersiz geçmişte (ör.
+    # 60 günden kısa bir backtest penceresi — `compute_multi_timeframe_features`
+    # `_MIN_HTF_BARS`) TAMAMEN NaN kalabilir. Bunları da blanket `dropna()`'ya
+    # dahil etmek, böyle durumlarda TÜM veri setini boşaltırdı (gerçekte
+    # yaşanan bir regresyon). Bu yüzden yalnızca DİĞER kolonlar zorunlu
+    # dropna'ya tabidir; htf_* eksikse 0.0 (nötr) ile doldurulur —
+    # `model.predict_batch`'in makro/order-book için zaten uyguladığı AYNI
+    # tolerans.
+    strict_columns = [c for c in raw_features.columns if c not in MULTI_TIMEFRAME_FEATURE_COLUMNS]
+    features = raw_features.dropna(subset=strict_columns)
     valid_positions = features.index.to_numpy()
     features = features.reset_index(drop=True)
+    features[MULTI_TIMEFRAME_FEATURE_COLUMNS] = features[MULTI_TIMEFRAME_FEATURE_COLUMNS].fillna(0.0)
 
     predictions, confidences = model.predict_batch(features)
     xgb_directions = np.array([_DIRECTION_MAP[int(p)] for p in predictions])
@@ -202,6 +224,13 @@ def run_system_backtest(
 
     use_lstm = lstm_model is not None and request.use_ensemble
     use_online = online_model is not None and request.use_ensemble
+    # Canlı karar motoruyla (`DecisionEngine.__init__`) AYNI beceri
+    # ağırlıklandırması — bkz. `_skill_weight` — burada da uygulanır,
+    # aksi halde backtest'in ensemble davranışı canlıdan SESSİZCE farklı
+    # olurdu (her zaman nötr 0.5/0.5 varsayılanı kullanılırdı).
+    xgb_skill = DecisionEngine._skill_weight(get_balanced_accuracy(DEFAULT_MODEL_PATH))
+    lstm_skill = DecisionEngine._skill_weight(get_balanced_accuracy(DEFAULT_LSTM_MODEL_PATH)) if use_lstm else 0.5
+    online_skill = DecisionEngine._skill_weight(get_balanced_accuracy(DEFAULT_ONLINE_MODEL_PATH)) if use_online else 0.5
     lstm_directions: list[str | None]
     lstm_confidences: list[float | None]
     if use_lstm:
@@ -226,20 +255,22 @@ def run_system_backtest(
         xgb_pred = Prediction(direction=str(xgb_directions[i]), confidence=float(confidences[i]))
         decision_parts = [f"XGBoost={xgb_pred.direction}({xgb_pred.confidence:.2f})"]
         combined = xgb_pred
+        running_skill = xgb_skill
 
         lstm_dir = lstm_directions[i]
         lstm_conf = lstm_confidences[i]
         if lstm_dir is not None:
             lstm_pred = Prediction(direction=lstm_dir, confidence=float(lstm_conf))
-            combined = DecisionEngine._combine_predictions(combined, lstm_pred)
+            combined = DecisionEngine._combine_predictions(combined, lstm_pred, running_skill, lstm_skill)
             decision_parts.append(f"LSTM={lstm_pred.direction}({lstm_pred.confidence:.2f})")
+            running_skill = (running_skill + lstm_skill) / 2
 
         online_dir: str | None = None
         online_conf: float | None = None
         if use_online:
             online_pred = online_model.predict(row)
             online_dir, online_conf = online_pred.direction, online_pred.confidence
-            combined = DecisionEngine._combine_predictions(combined, online_pred)
+            combined = DecisionEngine._combine_predictions(combined, online_pred, running_skill, online_skill)
             decision_parts.append(f"Online={online_pred.direction}({online_pred.confidence:.2f})")
 
         decision_reason = " + ".join(decision_parts) + f" -> karar={combined.direction}({combined.confidence:.2f})"
@@ -381,8 +412,8 @@ def run_system_backtest(
     if holdout_trim_warning is not None:
         warnings.append(holdout_trim_warning)
     warnings += [
-        "Makro/order-book/taker-flow özellikleri bu backtest'te hesaplanmaz (yalnızca anlık değerleri var, "
-        "geçmişi yok) — eğitim setindeki eski barlarla AYNI şekilde nötr (0.0) kabul edilir.",
+        "Makro/order-book/taker-flow/open-interest özellikleri bu backtest'te hesaplanmaz (yalnızca anlık "
+        "değerleri var, geçmişi yok) — eğitim setindeki eski barlarla AYNI şekilde nötr (0.0) kabul edilir.",
         (
             "Ensemble'a dahil edilen modeller: XGBoost" + (" + meta-label filtresi" if meta_model is not None and request.use_meta_label else "")
             + ("".join(f" + {name}" for name in ensemble_note))

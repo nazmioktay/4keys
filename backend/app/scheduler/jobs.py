@@ -17,6 +17,7 @@ from app.ml.train import (
     train_signal_model_validated,
     train_signal_models_by_regime,
 )
+from app.openinterest.service import refresh_all_configured_symbols as refresh_open_interest_symbols
 from app.orderbook.service import refresh_all_configured_symbols
 from app.screener.scanner import top_long, top_short
 from app.screener.service import refresh as refresh_screener
@@ -30,6 +31,7 @@ SCREENER_REFRESH_JOB_ID = "screener_refresh"
 ENGINE_CYCLE_JOB_ID = "engine_cycle"
 MACRO_REFRESH_JOB_ID = "macro_refresh"
 ORDERBOOK_REFRESH_JOB_ID = "orderbook_refresh"
+OPEN_INTEREST_REFRESH_JOB_ID = "open_interest_refresh"
 AUTO_RETRAIN_JOB_ID = "auto_retrain"
 AUTO_RETRAIN_LSTM_JOB_ID = "auto_retrain_lstm"
 AUTO_RETRAIN_ONLINE_JOB_ID = "auto_retrain_online"
@@ -112,6 +114,23 @@ def job_refresh_orderbook() -> None:
     except Exception as exc:  # noqa: BLE001 - zamanlayıcı thread'i asla çökmemeli
         logger.exception("orderbook refresh job failed")
         status.record(ORDERBOOK_REFRESH_JOB_ID, ok=False, detail=str(exc))
+
+
+def job_refresh_open_interest() -> None:
+    """Periyodik iş: `feature_snapshot_symbols` ayarındaki sembollerin
+    açık pozisyonunun (open interest) bir anlık görüntüsünü alıp kaydeder
+    (bkz. `app.openinterest`). Geçmişe dönük open interest verisi yoktur —
+    bu tablo yalnızca bugünden itibaren birikir (`job_refresh_orderbook`
+    ile AYNI desen)."""
+    try:
+        exchange = get_exchange(settings.exchange_id)
+        results = refresh_open_interest_symbols(exchange, settings.feature_snapshot_symbols_list)
+        missing = [symbol for symbol, metrics in results.items() if metrics is None]
+        detail = "tüm semboller alındı" if not missing else f"eksik semboller: {', '.join(missing)}"
+        status.record(OPEN_INTEREST_REFRESH_JOB_ID, ok=True, detail=detail)
+    except Exception as exc:  # noqa: BLE001 - zamanlayıcı thread'i asla çökmemeli
+        logger.exception("open interest refresh job failed")
+        status.record(OPEN_INTEREST_REFRESH_JOB_ID, ok=False, detail=str(exc))
 
 
 def job_auto_retrain() -> None:

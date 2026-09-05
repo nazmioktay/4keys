@@ -102,6 +102,7 @@ class Settings(BaseSettings):
     engine_cycle_seconds: int = 300
     macro_refresh_seconds: int = 21600  # 6 saat — makro veriler (VIX, altın, faiz oranları vb.) günde birkaç kez yeterli
     orderbook_refresh_seconds: int = 1800  # 30 dakika — emir defterinin ANLIK görüntüsü, geçmişi yoktur (bkz. app.orderbook)
+    open_interest_refresh_seconds: int = 1800  # 30 dakika — open interest'in ANLIK görüntüsü, geçmişi yoktur (bkz. app.openinterest)
 
     # --- Otomatik yeniden eğitim (bkz. app.scheduler.jobs) ---
     # Aralık, sabit bir takvim süresi yerine HESAPLANIR (bkz.
