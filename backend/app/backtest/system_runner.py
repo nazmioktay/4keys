@@ -64,20 +64,35 @@ def _lstm_predictions_for_series(
     windows = np.moveaxis(windows, -1, 1)  # (n - seq_len + 1, seq_len, n_özellik)
     end_position_to_window_idx = {int(pos): k for k, pos in enumerate(range(seq_len - 1, n))}
 
-    # `valid_positions` (XGBoost özelliklerinin `dropna` sonrası kalan
-    # orijinal konumları) her zaman ısınma penceresinin (rolling
-    # göstergeler + seq_len) SONRASI, ardışık bir alt küme olduğu için,
-    # bu pozisyonlardaki pencereler NaN İÇERMEZ — ayrıca bir NaN
-    # kontrolüne gerek yoktur.
+    # DİKKAT: `valid_positions` (XGBoost özelliklerinin `dropna` sonrası kalan
+    # orijinal konumları) ısınma bölgesinin SONRASI olsa da, birkaç gösterge
+    # formülü (ör. `linreg_zscore`, `nwe_position`, `bb_percent_b`,
+    # `di_diff_norm`, `ichimoku_cloud_position`, mum fitil oranları) bir
+    # rolling payda/aralık tam SIFIR olduğunda (ör. ADX'te plus_di+minus_di=0,
+    # ya da bir doji mumda high=low) ISINMA SONRASI da ARA SIRA NaN üretebilir
+    # — bu durumda `raw_features.dropna()` yalnızca O satırı düşürür,
+    # `valid_positions`'ta ARDIŞIK OLMAYAN bir boşluk bırakır. Bu satır,
+    # PENCERENİN İÇİNDE (bitiş noktası değil) yer alsa bile LSTM'in
+    # rekürrent ileri geçişini baştan sona NaN'a bulaştırır (softmax NaN
+    # olur, argmax NaN'larda deterministik olarak ilk sınıfa düşer —
+    # yani yön rastgele/anlamsız görünür ama güven NaN olur). Bu yüzden
+    # her pencere gerçekten sonlu mu diye AÇIKÇA kontrol edilir; NaN içeren
+    # pencereler (nadir) LSTM'siz (None) bırakılır.
     usable_positions = [p for p in valid_positions if int(p) in end_position_to_window_idx]
     if not usable_positions:
         return directions, confidences
 
-    idxs = [end_position_to_window_idx[int(p)] for p in usable_positions]
-    batch_preds, batch_confs = lstm_model.predict_batch(windows[idxs])
+    idxs = np.array([end_position_to_window_idx[int(p)] for p in usable_positions])
+    candidate_windows = windows[idxs]
+    finite_mask = np.isfinite(candidate_windows).all(axis=(1, 2))
+    if not finite_mask.any():
+        return directions, confidences
+
+    batch_preds, batch_confs = lstm_model.predict_batch(candidate_windows[finite_mask])
 
     pos_to_row = {int(p): i for i, p in enumerate(valid_positions)}
-    for orig_pos, pred, conf in zip(usable_positions, batch_preds, batch_confs):
+    finite_positions = [p for p, keep in zip(usable_positions, finite_mask) if keep]
+    for orig_pos, pred, conf in zip(finite_positions, batch_preds, batch_confs):
         row_idx = pos_to_row[int(orig_pos)]
         directions[row_idx] = _DIRECTION_MAP[int(pred)]
         confidences[row_idx] = float(conf)

@@ -3,8 +3,9 @@ import pandas as pd
 import pytest
 
 from app.backtest.schemas import SystemBacktestRequest
-from app.backtest.system_runner import run_system_backtest
-from app.ml.features import build_features
+from app.backtest.system_runner import _lstm_predictions_for_series, run_system_backtest
+from app.ml.features import FEATURE_COLUMNS, build_features
+from app.ml.lstm_model import LSTMSignalModel
 from app.ml.model import SignalModel
 from app.exchanges.base import Exchange
 
@@ -225,3 +226,48 @@ def test_trades_record_position_size_and_decision_breakdown():
         # bu testte LSTM/online model geçirilmedi -> ensemble alanları boş kalmalı
         assert t.lstm_direction is None
         assert t.online_direction is None
+
+
+def test_lstm_predictions_skip_windows_that_contain_a_mid_series_nan():
+    """Regresyon: `raw_features.dropna()` sonrası `valid_positions` ISINMA
+    SONRASI olsa da ardışık olmak ZORUNDA değildir — bir gösterge (ör.
+    `linreg_zscore`, `di_diff_norm`, bir doji mumda mum fitil oranları) bir
+    rolling payda tam SIFIR olduğunda ısınma bittikten ÇOK SONRA bile ARA
+    SIRA NaN üretebilir. Böyle bir satır bir LSTM penceresinin İÇİNDE
+    (bitişinde değil) kalsa bile rekürrent ileri geçişi NaN'a bulaştırır —
+    üretimde gözlenen `LSTM=short(nan)` hatasının kök nedeni buydu. Bu
+    testte seq_len=5 pencereli sentetik bir seride 50. satıra bilerek bir
+    NaN enjekte edilip, o satırı İÇEREN pencerelerin (bitişleri 50-54
+    arası) `None` (LSTM'siz) dönmesi, UZAK pencerelerin ise normal tahmin
+    üretmesi doğrulanır."""
+    seq_len = 5
+    n_rows = 200
+    rng = np.random.default_rng(7)
+    columns = FEATURE_COLUMNS[:6]
+    data = rng.normal(0, 1, (n_rows, len(columns))).astype("float64")
+    raw_features = pd.DataFrame(data, columns=columns)
+
+    contaminated_row = 50
+    raw_features.loc[contaminated_row, columns[2]] = float("nan")
+
+    model = LSTMSignalModel(seq_len=seq_len, hidden_size=8, num_layers=1)
+    X_train = rng.normal(0, 1, (60, seq_len, len(columns))).astype("float32")
+    y_train = rng.choice([-1, 0, 1], size=60)
+    model.fit(X_train, y_train, epochs=1, batch_size=16)
+    model.feature_columns = columns
+
+    valid_positions = np.arange(seq_len - 1, n_rows)
+    directions, confidences = _lstm_predictions_for_series(model, raw_features, valid_positions)
+
+    pos_to_row = {int(p): i for i, p in enumerate(valid_positions)}
+    # bitişi 50..54 olan pencereler NaN'lı satırı içerir -> LSTM'siz kalmalı
+    for end_pos in range(contaminated_row, contaminated_row + seq_len):
+        row_idx = pos_to_row[end_pos]
+        assert directions[row_idx] is None
+        assert confidences[row_idx] is None
+
+    # kontamine bölgeden uzak bir pencere (ör. bitişi 100) normal tahmin üretmeli
+    far_row_idx = pos_to_row[100]
+    assert directions[far_row_idx] is not None
+    assert confidences[far_row_idx] is not None
+    assert not np.isnan(confidences[far_row_idx])
