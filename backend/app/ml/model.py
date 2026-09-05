@@ -230,26 +230,61 @@ class SignalModel:
     def predict(self, feature_row: pd.Series) -> Prediction:
         self._require_fitted()
         x = feature_row.reindex(FEATURE_COLUMNS).fillna(0.0).to_frame().T
-        proba = self._pipeline.predict_proba(x)[0]
-        classes = self._pipeline.classes_
-        best_idx = int(np.argmax(proba))
-        label = classes[best_idx]
-        confidence = float(proba[best_idx])
+
+        # YÖN kararı HAM (kalibrasyonsuz) modelden alınır — bkz.
+        # `predict_batch` docstring'i: kalibrasyon, dengesiz sınıflarda
+        # (ör. %80+ nötr) argmax'ı neredeyse her zaman çoğunluk sınıfına
+        # çekiyordu (sınıf-ağırlıklı eğitimin düzelttiği şeyi geri bozarak).
+        raw_proba = self._base_pipeline.predict_proba(x)[0]
+        raw_classes = self._base_pipeline.classes_
+        best_idx = int(np.argmax(raw_proba))
+        label = raw_classes[best_idx]
+        confidence = float(raw_proba[best_idx])
+
+        if self.is_calibrated:
+            calibrated_proba = self._pipeline.predict_proba(x)[0]
+            calibrated_classes = list(self._pipeline.classes_)
+            if label in calibrated_classes:
+                confidence = float(calibrated_proba[calibrated_classes.index(label)])
 
         direction = {1: "long", -1: "short", 0: "neutral"}[int(label)]
         return Prediction(direction=direction, confidence=confidence)
 
     def predict_batch(self, X: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
-        """Bir DataFrame'in tamamı için (tahmin edilen sınıf, o sınıfın
-        kalibre edilmiş olasılığı) dizilerini döner. Meta-labeling eğitim
-        seti kurmak ve toplu değerlendirme için kullanılır."""
+        """Bir DataFrame'in tamamı için (tahmin edilen sınıf, o sınıfa
+        atanan güven) dizilerini döner. Meta-labeling eğitim seti kurmak
+        ve toplu değerlendirme (walk-forward/out-of-sample) için kullanılır.
+
+        YÖN, HER ZAMAN ham (kalibrasyonsuz) modelin argmax'ıdır — bu,
+        `_XGBClassifierWrapper.fit()`'in sınıf ağırlıklandırmasının etkisini
+        doğrudan yansıtır. Yalnızca GÜVEN skoru (varsa) kalibre edilmiş
+        olasılıktan alınır — Kelly boyutlandırma gibi tüketiciler için
+        "dürüst" bir olasılık tahmini gerekiyor, ama BU tahminin hangi
+        sınıfa ait olduğunu kalibrasyonun DEĞİŞTİRMESİNE izin verilmiyor.
+
+        Önceden yön DE kalibre edilmiş olasılıktan alınıyordu — ciddi sınıf
+        dengesizliğinde (ör. %80+ nötr) bu, kalibrasyonun (doğası gereği
+        olasılıkları gözlemlenen taban orana çekmesi nedeniyle) argmax'ı
+        neredeyse HER ZAMAN çoğunluk sınıfına sabitlemesine yol açıyordu —
+        `out_of_sample_balanced_accuracy`'nin tekrar tekrar tam olarak 1/3'e
+        (modelin holdout'ta HER ZAMAN tek bir sınıfı tahmin ettiğinin
+        matematiksel imzası) düşmesinin asıl kök nedeni buydu."""
         self._require_fitted()
         x = _select_features(X)
-        proba = self._pipeline.predict_proba(x)
-        classes = self._pipeline.classes_
-        best_idx = np.argmax(proba, axis=1)
-        predictions = classes[best_idx]
-        confidences = proba[np.arange(len(proba)), best_idx]
+
+        raw_proba = self._base_pipeline.predict_proba(x)
+        raw_classes = self._base_pipeline.classes_
+        best_idx = np.argmax(raw_proba, axis=1)
+        predictions = raw_classes[best_idx]
+        confidences = raw_proba[np.arange(len(raw_proba)), best_idx]
+
+        if self.is_calibrated:
+            calibrated_proba = self._pipeline.predict_proba(x)
+            calibrated_classes = list(self._pipeline.classes_)
+            class_to_col = {c: i for i, c in enumerate(calibrated_classes)}
+            cols = np.array([class_to_col[label] for label in predictions])
+            confidences = calibrated_proba[np.arange(len(calibrated_proba)), cols]
+
         return predictions, confidences
 
     def shap_values(self, X: pd.DataFrame, max_rows: int = 200) -> pd.DataFrame:
