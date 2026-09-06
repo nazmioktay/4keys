@@ -66,6 +66,17 @@ set -uo pipefail
 # torch/PyTorch nedeniyle en pahali TEK adim - atlamanin pratik bir kaybi
 # yok ama kalan adimlarin tamamlanma sansini artirir. Yine de denemek
 # istersen: INCLUDE_LSTM=1 bash deploy/train-all.sh
+#
+# CANLI API OTOMATIK YENIDEN BASLATILIR (varsayilan): sunucuda gozlendi,
+# canli API'nin belleği taze bir restart sonrasi ~590MB iken, birkac saatlik
+# normal calisma (zamanlayici + karar dongusu) SONRASINDA ~1.74GB'a
+# CIKABILIYOR (bkz. README "canli API'nin belleği zamanla buyuyor" bulgusu)
+# - mum sayisini 30K'dan 5K'ya dusurmenin OOM'u COZMEMESININ asil nedeni
+# buydu: her deneme, GIDEREK BUYUYEN bir tabana karsi yarisiyordu. Egitimden
+# HEMEN ONCE canli API'yi yeniden olusturmak (deploy/recreate-backend.sh),
+# her zaman EN DUSUK tabandan baslamasini garanti eder - birkac saniyelik
+# kisa bir kesinti pahasina (paper-trading, gercek para riski yok). Atlamak
+# istersen: SKIP_RECREATE=1 bash deploy/train-all.sh
 # ============================================================
 
 NETWORK="4keys-net"
@@ -94,6 +105,13 @@ LOOKBACK_ARGS=()
 if [ -n "${LOOKBACK:-}" ]; then
   echo "==> Mum sayisi ${LOOKBACK} ile eziliyor (settings.ml_train_lookback yerine)."
   LOOKBACK_ARGS=(--lookback "$LOOKBACK")
+fi
+
+if [ "${SKIP_RECREATE:-0}" != "1" ]; then
+  echo "==> Canli API taze bellek tabaniyla yeniden olusturuluyor (birkac saniyelik kisa kesinti)..."
+  bash "$(dirname "$0")/recreate-backend.sh"
+else
+  echo "==> Canli API yeniden olusturma ATLANDI (SKIP_RECREATE=1) - mevcut (buyumus olabilecek) bellek tabaniyla devam ediliyor."
 fi
 
 NETWORK_ARGS=()
