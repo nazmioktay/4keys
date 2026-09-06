@@ -17,16 +17,19 @@ OUT_FILE="/tmp/diagnose-oom-$(date +%Y%m%d-%H%M%S).txt"
   echo "=== RAM/SWAP ==="
   free -h
   echo
-  echo "=== Konteyner durumu ==="
-  docker ps -a --filter name=4keys-backend
+  echo "=== TUM konteynerler ==="
+  docker ps -a
   echo
-  echo "=== Restart sayisi / durum ==="
+  echo "=== TUM konteynerlerin anlik bellek kullanimi ==="
+  docker stats --no-stream 2>&1
+  echo
+  echo "=== Docker disk/imaj kullanimi (birikim var mi) ==="
+  docker system df 2>&1
+  echo
+  echo "=== 4keys-backend: restart sayisi / durum ==="
   docker inspect 4keys-backend --format 'RestartCount={{.RestartCount}} Status={{.State.Status}} StartedAt={{.State.StartedAt}}' 2>&1
   echo
-  echo "=== Anlik bellek kullanimi ==="
-  docker stats --no-stream 4keys-backend 2>&1
-  echo
-  echo "=== Docker bellek limiti (0 = limitsiz) ==="
+  echo "=== 4keys-backend: bellek limiti (0 = limitsiz) ==="
   docker inspect 4keys-backend --format 'Memory={{.HostConfig.Memory}} MemorySwap={{.HostConfig.MemorySwap}}' 2>&1
   echo
   echo "=== Son OOM olaylari ==="
