@@ -3,7 +3,9 @@ import pandas as pd
 import pytest
 
 from app.exchanges.base import Exchange
+from app.ml.advanced_indicators import average_true_range
 from app.ml.dataset import build_training_dataset, build_training_dataset_with_time
+from app.ml.labeling import triple_barrier_labels
 from app.ml.model import SignalModel
 from app.ml.train import train_signal_model_validated
 from app.ml.validation import split_out_of_sample, walk_forward_splits
@@ -439,7 +441,35 @@ def test_all_ensemble_members_share_one_labeling_definition():
 
     # ve paylaşılan tanım gerçekten ATR-hizalı olmalı
     assert train_module._ENSEMBLE_LABELING["labeling_method"] == "atr_triple_barrier"
-    assert train_module._ENSEMBLE_LABELING["horizon"] >= 6, "ATR bariyerleri için çok kısa zaman bariyeri"
+
+    # DOĞRU kontrol "horizon >= N" gibi sabit bir eşik DEĞİL (bu, horizon'un
+    # ATR çarpanıyla BİRLİKTE davrandığını gözden kaçırır — ör. horizon=3
+    # 1.5xATR ile %48.9 nötr verirken 1.0xATR ile yalnızca %18.7 nötr verir,
+    # bkz. sohbet). Asıl endişe: seçilen (horizon, çarpan) kombinasyonu saf
+    # gürültüde AŞIRI tek-sınıf çökmesine (eski "%84.7 nötr" felaketi) yol
+    # açmasın. Bunu doğrudan, sentetik saf rastgele-yürüyüş verisiyle ölçer.
+    rng = np.random.default_rng(11)
+    n = 20000
+    close = 60000 * np.exp(np.cumsum(rng.normal(0.0, 0.004, n)))
+    ohlcv = pd.DataFrame(
+        {
+            "timestamp": pd.date_range("2024-01-01", periods=n, freq="1h"),
+            "open": close,
+            "high": close * (1 + np.abs(rng.normal(0, 0.002, n))),
+            "low": close * (1 - np.abs(rng.normal(0, 0.002, n))),
+            "close": close,
+            "volume": rng.uniform(800, 1200, n),
+        }
+    )
+    atr_pct = (average_true_range(ohlcv, length=14) / ohlcv["close"]) * 100
+    mult = train_module._ENSEMBLE_LABELING["take_profit_pct"]
+    horizon = train_module._ENSEMBLE_LABELING["horizon"]
+    labels = triple_barrier_labels(ohlcv, atr_pct * mult, atr_pct * mult, max_horizon=horizon).dropna()
+    class_shares = labels.value_counts(normalize=True)
+    assert class_shares.max() < 0.6, (
+        f"_ENSEMBLE_LABELING (horizon={horizon}, çarpan={mult}) saf gürültüde bir sınıfa "
+        f"çöküyor (en yüksek pay: %{class_shares.max() * 100:.1f}) — eski '%84.7 nötr' felaketiyle AYNI desen"
+    )
 
 
 class _TrendingWithNoiseExchange(Exchange):

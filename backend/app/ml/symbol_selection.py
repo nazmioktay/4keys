@@ -56,6 +56,13 @@ def select_training_symbols(
     primary = settings.ml_primary_symbol
     limit = max_symbols if max_symbols is not None else settings.ml_train_max_symbols
 
+    # `limit<=1`: yalnızca `primary` (BTC) ile eğitim isteniyor (bkz. README
+    # "temel sadeleşme") — diğer adayların OHLC'sini ÇEKMEYE bile gerek yok,
+    # sonuçları zaten atılacaktı. Kısa-devre, kullanıcının "diğer çiftlerin
+    # ohcl bilgileriyle HİÇBİR İŞLEM yapılmasın" isteğini tam karşılar.
+    if limit <= 1:
+        return [primary]
+
     try:
         primary_ohlcv = exchange.fetch_ohlcv(primary, _PROBE_TIMEFRAME, _PROBE_LOOKBACK)
         primary_returns = primary_ohlcv["close"].pct_change().dropna()

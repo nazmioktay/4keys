@@ -97,6 +97,23 @@ def test_liquid_and_correlated_symbol_included():
     assert selected == ["BTC/USDT:USDT", "ETH/USDT:USDT"]
 
 
+def test_max_symbols_le_1_returns_primary_without_any_exchange_calls():
+    """Bkz. README "temel sadeleşme": `ml_train_max_symbols<=1` (yeni
+    varsayılan: 1) iken diğer sembollerin (veya BTC'nin bile — sonuç zaten
+    biliniyor, `fetch_ohlcv` sonucu değiştirmez) OHLC'siyle HİÇBİR İŞLEM
+    yapılmamalı. Herhangi bir sembol için çağrılırsa patlayan bir exchange
+    stub'ıyla, kısa-devrenin GERÇEKTEN hiç ağ çağrısı yapmadığını doğrular."""
+
+    class _MustNotFetchAnything(_FakeExchange):
+        def fetch_ohlcv(self, symbol, timeframe, limit, since=None):
+            raise AssertionError(f"limit<=1 iken {symbol} için fetch_ohlcv ÇAĞRILDI")
+
+    exchange = _MustNotFetchAnything({})
+
+    selected = select_training_symbols(exchange, candidates=["ETH/USDT:USDT"], max_symbols=1)
+    assert selected == ["BTC/USDT:USDT"]
+
+
 def test_max_symbols_cap_keeps_highest_correlation_first():
     rng = np.random.default_rng(4)
     btc_returns = rng.normal(0, 0.01, 99)

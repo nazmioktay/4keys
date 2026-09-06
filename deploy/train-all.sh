@@ -76,10 +76,18 @@ if [ -n "${1:-}" ]; then
   SYMBOLS_ARGS=(--symbols "$1")
 fi
 
-SKIP_ARGS=()
+SKIP_LIST=()
 if [ "${INCLUDE_LSTM:-0}" != "1" ]; then
   echo "==> LSTM atlaniyor (hic kalite esigini gecemedi, en pahali adim - INCLUDE_LSTM=1 ile dahil edilebilir)."
-  SKIP_ARGS=(--skip lstm)
+  SKIP_LIST+=("lstm")
+fi
+if [ "${INCLUDE_REGIME:-0}" != "1" ]; then
+  echo "==> Rejim modelleri atlaniyor (temel sadelesme, kullanici istegi - INCLUDE_REGIME=1 ile dahil edilebilir)."
+  SKIP_LIST+=("regime")
+fi
+SKIP_ARGS=()
+if [ "${#SKIP_LIST[@]}" -gt 0 ]; then
+  SKIP_ARGS=(--skip "${SKIP_LIST[@]}")
 fi
 
 NETWORK_ARGS=()

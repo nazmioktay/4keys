@@ -47,7 +47,18 @@ def _resample_ohlcv(ohlcv: pd.DataFrame, rule: str) -> pd.DataFrame:
 def compute_multi_timeframe_features(ohlcv: pd.DataFrame) -> pd.DataFrame:
     """`ohlcv` ("timestamp" kolonu gerçek datetime olmalı) ile AYNI
     index/uzunlukta, `MULTI_TIMEFRAME_FEATURE_COLUMNS` kolonlarını içeren
-    bir DataFrame döner."""
+    bir DataFrame döner.
+
+    `settings.ml_enable_multi_timeframe_features=False` (şu anki varsayılan
+    — bkz. README "temel sadeleşme", kullanıcı isteğiyle GEÇİCİ olarak
+    durduruldu) iken hiçbir resample/gösterge hesaplaması YAPILMAZ, tüm
+    kolonlar nötr (0.0) doner — makro/order-book'ta "veri yoksa nötr" için
+    ZATEN kullanılan AYNI desen, burada da yeni bir yanlılık eklenmez."""
+    from app.core.config import settings
+
+    if not settings.ml_enable_multi_timeframe_features:
+        return pd.DataFrame(0.0, index=ohlcv.index, columns=MULTI_TIMEFRAME_FEATURE_COLUMNS)
+
     # PERFORMANS: burada `app.ml.features.build_features` ÇAĞRILMAZ. O
     # fonksiyon 42 gösterge (Hurst, Ichimoku, Nadaraya-Watson, dinamik
     # destek/direnç...) hesaplar ve 10.000 barlık bir seride ~2.2 saniye

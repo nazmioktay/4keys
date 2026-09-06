@@ -1,11 +1,22 @@
 import numpy as np
 import pandas as pd
+import pytest
 
+from app.core.config import settings
 from app.ml.multi_timeframe_features import (
     MULTI_TIMEFRAME_FEATURE_COLUMNS,
     _resample_ohlcv,
     compute_multi_timeframe_features,
 )
+
+
+@pytest.fixture(autouse=True)
+def _enable_multi_timeframe_features(monkeypatch):
+    """Bu dosyanın amacı: resample/no-lookahead MEKANİZMASININ kendisini
+    doğrulamak — üretimdeki "şu an geçici olarak kapalı" varsayılanından
+    (bkz. README "temel sadeleşme") BAĞIMSIZ olmalı, aksi halde tüm bu
+    testler yalnızca sabit 0.0 dönen kısa-devreyi test eder hale gelirdi."""
+    monkeypatch.setattr(settings, "ml_enable_multi_timeframe_features", True)
 
 
 def _flat_ohlcv(n: int, price: float = 100.0, freq: str = "1h") -> pd.DataFrame:
@@ -73,3 +84,18 @@ def test_compute_multi_timeframe_features_no_lookahead_at_bucket_boundary():
     # (EMA gecikmeli tepki verir ama pre_jump_value'dan FARKLI olmalı)
     after_close_value = result["htf_4h_ema_gap"].iloc[jump_hour + 4]
     assert after_close_value != pre_jump_value
+
+
+def test_compute_multi_timeframe_features_returns_neutral_zero_when_disabled(monkeypatch):
+    """Bkz. README "temel sadeleşme": `ml_enable_multi_timeframe_features=False`
+    (şu anki üretim varsayılanı) iken HİÇBİR resample/gösterge hesaplaması
+    yapılmamalı, tüm kolonlar nötr (0.0) dönmeli — makro/order-book'ta
+    "veri yoksa nötr" için ZATEN kullanılan AYNI desen."""
+    monkeypatch.setattr(settings, "ml_enable_multi_timeframe_features", False)
+    ohlcv = _flat_ohlcv(24 * 90)
+
+    result = compute_multi_timeframe_features(ohlcv)
+
+    assert len(result) == len(ohlcv)
+    assert list(result.columns) == MULTI_TIMEFRAME_FEATURE_COLUMNS
+    assert (result == 0.0).all().all()

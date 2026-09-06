@@ -30,7 +30,11 @@ class Settings(BaseSettings):
     # yaşanan overfitting sorununu (bkz. README "Faz B — LSTM" notu) daha
     # fazla satırla azaltmak için.
     ml_train_timeframe: str = "1h"
-    ml_train_lookback: int = 10000
+    # 10.000 -> 30.000: kullanıcı isteğiyle (bkz. README "temel sadeleşme")
+    # tek sembole (BTC-only, aşağıya bkz.) inildiğinde kaybedilen satır
+    # sayısını (çoklu-sembolün kattığı ek satırlar) BTC'nin KENDİ geçmişini
+    # derinleştirerek dengelemek için.
+    ml_train_lookback: int = 30000
 
     # --- Eğitim sembol seçimi: BTC-öncelikli + uyumluluk filtresi ---
     # Önceden eğitim evreni doğrudan screener'ın Top-N Long + Top-N Short
@@ -40,10 +44,26 @@ class Settings(BaseSettings):
     # sembollerin yalnızca bu eğitime UYUMLU olmaları hâlinde katılmaları
     # gerektiğini belirtti (bkz. sohbet). Uyumluluk = BTC ile getiri
     # korelasyonu (aynı rejimde hareket ediyor mu) + minimum likidite.
+    #
+    # GÜNCELLEME (temel sadeleşme, bkz. README): `ml_train_max_symbols=1`
+    # yapıldı — sistem artık YALNIZCA BTC/USDT ile eğitiliyor, başka hiçbir
+    # sembolün OHLC verisiyle işlem/öğrenme yapılmıyor (bkz.
+    # `select_training_symbols`/`_resolve_symbols`'daki kısa-devre: limit<=1
+    # olduğunda diğer sembollerin verisi HİÇ ÇEKİLMEZ). Eski değer (5)
+    # `frozenset`/yorum olarak değil, doğrudan buradan geri açılabilir.
     ml_primary_symbol: str = "BTC/USDT:USDT"
-    ml_train_max_symbols: int = 5
+    ml_train_max_symbols: int = 1
     ml_min_correlation_with_primary: float = 0.4
     ml_min_quote_volume_24h: float = 5_000_000.0
+
+    # --- Çok zamanlı dilim (4h/1d) trend bağlamı özellikleri: GEÇİCİ KAPALI ---
+    # Kullanıcı isteğiyle (bkz. README "temel sadeleşme") geçici olarak
+    # durduruldu — `compute_multi_timeframe_features` bu bayrak False'ken
+    # hesaplama YAPMAZ, tüm `MULTI_TIMEFRAME_FEATURE_COLUMNS`'u nötr (0.0)
+    # doldurur (makro/order-book'ta ZATEN kullanılan "veri yoksa nötr"
+    # deseniyle AYNI). Geri açmak için burayı True yapmak yeterli — kod
+    # SİLİNMEDİ, yalnızca devre dışı.
+    ml_enable_multi_timeframe_features: bool = False
 
     # --- XGBoost + LSTM + online ensemble ---
     # LSTM ve online (river ARF) modellerinin canlı karar motoruna katılıp

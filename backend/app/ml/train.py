@@ -976,10 +976,16 @@ class TrainAllStepResult:
 # yapısal olarak engellenir.
 _ENSEMBLE_LABELING = {
     "labeling_method": "atr_triple_barrier",
-    "horizon": 12,  # ATR bariyerlerinde ZAMAN bariyeri (bar) — bkz. train_all_models
+    # GÜNCELLEME (temel sadeleşme, kullanıcı isteği — bkz. README): 12
+    # bar/1.5xATR -> 3 bar/1.0xATR. Sentetik saf-gürültü kontrolüyle
+    # doğrulandı: bu kombinasyon %18.7 nötr / %40-41 yönlü veriyor (eski
+    # "84.7% nötr" felaketine — o da FARKLI bir etiketleme yöntemindeydi —
+    # BENZEMİYOR). Hedef artık "3 mumda 1 ATR kazanım mı 1 ATR zarar mı
+    # önce gelir" — daha kısa vadeli, daha sık sinyal üreten bir soru.
+    "horizon": 3,  # ATR bariyerlerinde ZAMAN bariyeri (bar) — bkz. train_all_models
     "threshold_pct": 1.0,  # atr_triple_barrier'da kullanılmaz, imza uyumu için
-    "take_profit_pct": 1.5,  # ATR ÇARPANI
-    "stop_loss_pct": 1.5,  # ATR ÇARPANI
+    "take_profit_pct": 1.0,  # ATR ÇARPANI
+    "stop_loss_pct": 1.0,  # ATR ÇARPANI
 }
 
 

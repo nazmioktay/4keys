@@ -68,3 +68,22 @@ def test_train_meta_endpoint_returns_response_matching_its_schema(monkeypatch):
     assert set(body.keys()) == {"rows_used", "symbols_used"}
     assert body["symbols_used"] == 2
     assert body["rows_used"] > 0
+
+
+def test_resolve_symbols_skips_screener_scan_when_max_symbols_is_one(monkeypatch):
+    """Bkz. README "temel sadeleşme": `ml_train_max_symbols<=1` (yeni
+    varsayılan) iken `_resolve_symbols`, screener taramasını (`scan_market`
+    — yüzlerce sembol için `fetch_tickers` + gösterge hesabı) bile
+    ÇAĞIRMAMALI, doğrudan `[ml_primary_symbol]` dönmeli. `scan_market`
+    çağrılırsa patlayan bir stub'la doğrular."""
+    from app.api.routes import ml as ml_routes
+
+    def _scan_market_must_not_be_called(*_a, **_k):
+        raise AssertionError("ml_train_max_symbols<=1 iken scan_market ÇAĞRILDI")
+
+    monkeypatch.setattr(ml_routes, "scan_market", _scan_market_must_not_be_called)
+    monkeypatch.setattr(ml_routes.settings, "ml_train_max_symbols", 1)
+    monkeypatch.setattr(ml_routes.settings, "ml_primary_symbol", "BTC/USDT:USDT")
+
+    result = ml_routes._resolve_symbols(exchange=object(), symbols=None)
+    assert result == ["BTC/USDT:USDT"]

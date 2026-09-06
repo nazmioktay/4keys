@@ -234,6 +234,13 @@ def _model_exists() -> bool:
 def _resolve_symbols(exchange, symbols: list[str] | None) -> list[str]:
     if symbols:
         return symbols
+    # `ml_train_max_symbols<=1`: yalnızca BTC ile eğitim (bkz. README "temel
+    # sadeleşme") — screener taramasını (yüzlerce sembol için fetch_tickers +
+    # gösterge hesabı) bile ATLA, sonucu zaten `select_training_symbols`
+    # tek BTC'ye indirecekti. Kullanıcının "diğer çiftlerle HİÇBİR İŞLEM
+    # yapılmasın" isteğini en baştan (aday havuzu bile oluşturulmadan) karşılar.
+    if settings.ml_train_max_symbols <= 1:
+        return [settings.ml_primary_symbol]
     # Eskiden burada screener'ın Top-N Long + Top-N Short çıktısı doğrudan
     # eğitim evreni olarak kullanılıyordu — bu liste yalnızca kısa vadeli
     # teknik skora göre seçiliyor, likidite/uyumluluk kontrolü yoktu ("zayıf
