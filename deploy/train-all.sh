@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -uo pipefail
+# NOT -e: egitim konteyneri OOM ile (137) veya baska bir hatayla cikabilir
+# ve BU BEKLENEN bir durum - script yine de Grafana/Prometheus'u geri
+# baslatma adimina (asagida trap ile) ulasmali. Cikis kodu sonda elle
+# yakalanip script'in kendi cikis kodu olarak kullanilir.
 
 # ============================================================
 # Tum modelleri (XGBoost -> meta-label -> LSTM -> online -> regime) TEK
@@ -31,6 +35,15 @@ set -euo pipefail
 #      deploy/recreate-backend.sh'teki canli API'nin -500'u - "bunu EN SON
 #      oldur"). Boylece 1500m yine de yetersiz kalirsa, feda edilen HER ZAMAN
 #      bu (yeniden calistirilabilir) egitim islemi olur, canli API degil.
+# Sunucuda DOGRULANDI: iki gercek OOM olayinda da oldurulen surec bu egitim
+# konteyneriydi, uvicorn DEGIL (bkz. README "OOM uretim olayi").
+#
+# YETERSIZ KAPASITE (sunucuda gozlendi): kutuda backend'in yaninda Grafana +
+# Prometheus + TimescaleDB de calisiyor (~730MB toplam) - dorduyle egitime
+# neredeyse hic pay kalmiyor, egitim konteyneri ilk adimlardan biri
+# bitmeden olduruluyor. Grafana/Prometheus canli TRADING islevine DAHIL
+# DEGIL (salt izleme) - egitim suresince GECICI olarak durdurulup (trap ile
+# HER durumda, basari/hata/Ctrl-C fark etmeksizin) sonunda geri baslatiliyor.
 # (bkz. README "OOM uretim olayi").
 #
 # Cogunlukla ILK KURULUMDA (henuz hicbir model yokken, ör. yeni bir
@@ -48,6 +61,15 @@ else
   echo "==> 4keys-net agi yok, veritabansiz calisiliyor."
 fi
 
+echo "==> Grafana/Prometheus egitim suresince gecici olarak durduruluyor (bellek acmak icin)..."
+docker stop 4keys-grafana 4keys-prometheus >/dev/null 2>&1 || true
+
+restart_monitoring() {
+  echo "==> Grafana/Prometheus yeniden baslatiliyor..."
+  docker start 4keys-grafana 4keys-prometheus >/dev/null 2>&1 || true
+}
+trap restart_monitoring EXIT
+
 docker rm -f 4keys-train-all 2>/dev/null || true
 
 docker run --rm \
@@ -59,6 +81,12 @@ docker run --rm \
   -v fourkeys_ml_artifacts:/app/app/ml/artifacts \
   4keys-backend \
   python -m app.cli train-all
+TRAIN_EXIT=$?
 
 echo
-echo "Tamamlandi. Her adimin \"ok\" alanini kontrol edin."
+if [ "$TRAIN_EXIT" -eq 0 ]; then
+  echo "Tamamlandi. Her adimin \"ok\" alanini kontrol edin."
+else
+  echo "Egitim konteyneri hata/OOM ile sonlandi (exit=$TRAIN_EXIT) - tekrar deneyebilirsin. Canli API bundan ETKILENMEMIS olmali (bkz. bash deploy/diagnose-oom.sh ile dogrula)."
+fi
+exit "$TRAIN_EXIT"
