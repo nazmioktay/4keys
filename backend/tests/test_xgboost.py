@@ -413,6 +413,7 @@ def test_all_ensemble_members_share_one_labeling_definition():
     tree = ast.parse(textwrap.dedent(inspect.getsource(train_module.train_all_models)))
     members = {
         "train_signal_model_validated",
+        "train_meta_label_model",
         "train_lstm_signal_model",
         "train_online_signal_model",
         "train_signal_models_by_regime",
@@ -439,3 +440,78 @@ def test_all_ensemble_members_share_one_labeling_definition():
     # ve paylaşılan tanım gerçekten ATR-hizalı olmalı
     assert train_module._ENSEMBLE_LABELING["labeling_method"] == "atr_triple_barrier"
     assert train_module._ENSEMBLE_LABELING["horizon"] >= 6, "ATR bariyerleri için çok kısa zaman bariyeri"
+
+
+class _TrendingWithNoiseExchange(Exchange):
+    """Guclu, ogrenilebilir bir trend + gurultu -- XGBoost'un KENDI
+    egitim etiketinde (atr_triple_barrier) makul bir dogruluk yakalayabilmesi
+    icin (meta-label uyusmazligi regresyonunu yeniden uretebilmek icin sart:
+    primary GERCEKTEN cogunlukla dogruysa, YANLIS bir etikete gore olculunce
+    "yanlis" gorunmesi ancak o zaman ACIKCA fark edilir)."""
+
+    def __init__(self, n: int = 3000, seed: int = 21) -> None:
+        rng = np.random.default_rng(seed)
+        trend = np.linspace(0, 0.6, n)  # guclu, kalici yukselis
+        close = 100 * np.exp(trend + rng.normal(0, 0.01, n))
+        self.full_df = pd.DataFrame(
+            {
+                "timestamp": pd.date_range("2025-01-01", periods=n, freq="1h"),
+                "open": close,
+                "high": close * 1.003,
+                "low": close * 0.997,
+                "close": close,
+                "volume": rng.uniform(800, 1200, n),
+            }
+        )
+
+    def list_symbols(self, quote_currency, market_type):
+        return ["BTCUSDT"]
+
+    def fetch_ohlcv(self, symbol, timeframe, limit, since=None):
+        return self.full_df.iloc[-limit:].reset_index(drop=True)
+
+
+def test_meta_label_must_use_same_labeling_as_primary_model():
+    """Regresyon (gerçek üretim hatası): `train_meta_label_model`, birincil
+    modelin "doğru mu tahmin etti" sorusunu kendi etiketleme parametreleriyle
+    (varsayılan: `threshold`/`horizon=5`) ölçüyordu — `primary_model` BAŞKA
+    bir etiketle (`atr_triple_barrier`/`horizon=12`) eğitilmiş olsa bile.
+    Yani meta-label, primary'nin ÖĞRENMEDİĞİ bir soruya göre "yanlış" damgası
+    vuruyordu. Üretimde somut sonucu: primary kendi sorusunda makul bir
+    doğrulukla (oos=0.377) çalışırken, meta-label 768 açılış girişiminin
+    767'sini veto etti.
+
+    Bu test, AYNI (`atr_triple_barrier`/`horizon=12`) etiketlemeyle eğitilmiş
+    bir birincil model için meta-label'ın "doğru" oranının UYUMLU parametrelerle
+    ÇAĞRILDIĞINDA UYUMSUZ parametrelerle çağrıldığından belirgin şekilde
+    yüksek olduğunu doğrular."""
+    from app.ml.meta_label import build_meta_dataset
+    from app.ml.train import _ENSEMBLE_LABELING, train_signal_model_validated
+
+    exchange = _TrendingWithNoiseExchange()
+
+    primary_result = train_signal_model_validated(
+        exchange, ["BTCUSDT"], timeframe="1h", lookback=3000, persist=False, **_ENSEMBLE_LABELING
+    )
+    primary = primary_result.model
+
+    # AYNI (birincilin ÖĞRENDİĞİ) etiketle yeniden kurulan veri seti
+    X_matched, y_matched = build_training_dataset(exchange, ["BTCUSDT"], "1h", 3000, **_ENSEMBLE_LABELING)
+    _, meta_y_matched = build_meta_dataset(primary, X_matched, y_matched)
+
+    # ESKİ (uyumsuz) varsayılanlarla kurulan veri seti -- eski buggy davranış
+    X_mismatched, y_mismatched = build_training_dataset(
+        exchange, ["BTCUSDT"], "1h", 3000, horizon=5, threshold_pct=1.0, labeling_method="threshold"
+    )
+    _, meta_y_mismatched = build_meta_dataset(primary, X_mismatched, y_mismatched)
+
+    matched_correct_rate = meta_y_matched.mean()
+    mismatched_correct_rate = meta_y_mismatched.mean()
+
+    assert matched_correct_rate > mismatched_correct_rate + 0.1, (
+        f"beklenen: AYNI etiketle 'doğru' oranı belirgin yüksek olmalı — "
+        f"uyumlu={matched_correct_rate:.3f} uyumsuz={mismatched_correct_rate:.3f}"
+    )
+    # ve uyumlu haliyle meta-label'ın makul sayıda pozitif ("act") örneği olmalı
+    # -- aksi halde ("hep veto") backtest'te gördüğümüz duruma geri döneriz.
+    assert matched_correct_rate > 0.5

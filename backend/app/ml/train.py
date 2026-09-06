@@ -1030,7 +1030,17 @@ def train_all_models(exchange: Exchange, symbols: list[str]) -> list[TrainAllSte
         results.append(TrainAllStepResult("meta_label", False, "atlandı: birincil model reddedildi (kalite eşiğinin altında)"))
     else:
         try:
-            _, meta_rows = train_meta_label_model(exchange, symbols, primary.model)
+            # KRİTİK — bkz. _ENSEMBLE_LABELING ("KRİTİK" notu, train_all_models
+            # docstring'i): meta-label "birincil DOĞRU tahmin etti mi" sorusunu
+            # bu ÇAĞRIDA KULLANILAN etikete göre ölçer. `_ENSEMBLE_LABELING`
+            # GEÇİLMEZSE bu fonksiyonun kendi eski varsayılanı (threshold/
+            # horizon=5) kullanılır — yani "doğru" ölçütü, XGBoost'un GERÇEKTE
+            # öğrendiği (atr_triple_barrier/horizon=12) soru değil, TAMAMEN
+            # FARKLI bir soru olur. Bu, meta-label'ı YANLIŞ YERE PESİMİST
+            # yapar (XGBoost, kendi öğrendiği sorunun cevabını doğru verse
+            # bile FARKLI bir soruya göre "yanlış" sayılır) — üretimde tam
+            # olarak bu yaşandı: 768 açılış girişiminin 767'si veto edildi.
+            _, meta_rows = train_meta_label_model(exchange, symbols, primary.model, **_ENSEMBLE_LABELING)
             results.append(TrainAllStepResult("meta_label", True, f"{meta_rows} satır"))
         except ValueError as exc:
             results.append(TrainAllStepResult("meta_label", False, str(exc)))
