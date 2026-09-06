@@ -387,3 +387,55 @@ def test_freshly_trained_model_records_current_feature_columns(tmp_path):
     path = tmp_path / "m.joblib"
     model.save(path)
     assert SignalModel.load_from(path).feature_columns == list(ALL_FEATURE_COLUMNS)
+
+
+def test_all_ensemble_members_share_one_labeling_definition():
+    """Regresyon (gerçek üretimde gözlendi): ensemble üyeleri FARKLI hedefler
+    öğreniyordu — XGBoost "12 bar içinde ATR hedefine mi stopa mı önce
+    ulaşır", LSTM "3 bar sonra %1 hareket eder mi", online "5 bar sonra %1
+    hareket eder mi". Farklı soruların cevaplarını harmanlamak sağlam bir
+    ensemble değil: güvenler aynı ölçekte olmaz ve `_skill_weight` farklı
+    problemlerde ölçülmüş doğrulukları kıyaslar (XGBoost'un zor/dengeli
+    problemdeki 0.375'i, online'ın kolay problemdeki 0.502'siyle kıyaslanıp
+    haksız düşük ağırlık aldı).
+
+    Bu test, `train_all_models`'ın TÜM üyeleri tek bir `_ENSEMBLE_LABELING`
+    tanımından beslediğini garanti eder — biri elle farklı bir horizon/
+    labeling ile çağrılırsa BU TEST ÇÖKER."""
+    import ast
+    import inspect
+    import textwrap
+
+    from app.ml import train as train_module
+
+    # Metin araması YETMEZ (yorum satırlarındaki "horizon=3" gibi ifadeler
+    # yanlış alarm verir) — gerçek çağrıların argümanları AST ile incelenir.
+    tree = ast.parse(textwrap.dedent(inspect.getsource(train_module.train_all_models)))
+    members = {
+        "train_signal_model_validated",
+        "train_lstm_signal_model",
+        "train_online_signal_model",
+        "train_signal_models_by_regime",
+    }
+    labeling_kwargs = {"horizon", "labeling_method", "threshold_pct", "take_profit_pct", "stop_loss_pct"}
+
+    seen = set()
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in members):
+            continue
+        seen.add(node.func.id)
+        passed = {kw.arg for kw in node.keywords if kw.arg is not None}
+        leaked = passed & labeling_kwargs
+        assert not leaked, (
+            f"{node.func.id} kendi etiketleme parametrelerini elle geçiriyor: {sorted(leaked)} — "
+            "tüm ensemble üyeleri _ENSEMBLE_LABELING'i paylaşmalı"
+        )
+        assert any(kw.arg is None for kw in node.keywords), (
+            f"{node.func.id} çağrısında **_ENSEMBLE_LABELING açılımı yok"
+        )
+
+    assert seen == members, f"train_all_models'ta çağrılmayan üye(ler): {sorted(members - seen)}"
+
+    # ve paylaşılan tanım gerçekten ATR-hizalı olmalı
+    assert train_module._ENSEMBLE_LABELING["labeling_method"] == "atr_triple_barrier"
+    assert train_module._ENSEMBLE_LABELING["horizon"] >= 6, "ATR bariyerleri için çok kısa zaman bariyeri"

@@ -952,6 +952,20 @@ class TrainAllStepResult:
     detail: str
 
 
+# Ensemble üyelerinin (XGBoost/LSTM/online/rejim) PAYLAŞTIĞI TEK etiketleme
+# tanımı — bkz. `train_all_models` docstring'i ("KRİTİK" notu). Buradaki tek
+# bir değişiklik tüm üyeleri birlikte taşır; üyelerin farklı hedefler
+# öğrenmesi (ve dolayısıyla kıyaslanamaz güven/beceri değerleri üretmesi)
+# yapısal olarak engellenir.
+_ENSEMBLE_LABELING = {
+    "labeling_method": "atr_triple_barrier",
+    "horizon": 12,  # ATR bariyerlerinde ZAMAN bariyeri (bar) — bkz. train_all_models
+    "threshold_pct": 1.0,  # atr_triple_barrier'da kullanılmaz, imza uyumu için
+    "take_profit_pct": 1.5,  # ATR ÇARPANI
+    "stop_loss_pct": 1.5,  # ATR ÇARPANI
+}
+
+
 def train_all_models(exchange: Exchange, symbols: list[str]) -> list[TrainAllStepResult]:
     """Tüm modelleri (XGBoost -> meta-label -> LSTM -> online -> regime)
     sırayla, deploy script'lerinde (`deploy/train-xgboost-best-labeling.sh`,
@@ -966,6 +980,17 @@ def train_all_models(exchange: Exchange, symbols: list[str]) -> list[TrainAllSte
     çalışmasını ENGELLEMEZ; her adımın sonucu ayrı ayrı raporlanır.
     LSTM sırasıyla en yavaş adımdır, toplam çalışma süresi birkaç dakikayı
     bulabilir.
+
+    KRİTİK — TÜM ensemble üyeleri AYNI hedefi öğrenir: XGBoost, LSTM ve
+    online model `_ENSEMBLE_LABELING` ile TEK BİR etiketleme tanımını
+    paylaşır. Önceden her biri FARKLI bir soruyu öğreniyordu (XGBoost:
+    "12 bar içinde ATR-ölçekli hedefe mi stopa mı önce ulaşır", LSTM:
+    "3 bar sonra %1 hareket eder mi", online: "5 bar sonra %1 hareket eder
+    mi"). Farklı soruların cevaplarını harmanlamak sağlam bir ensemble
+    değildir: güvenleri aynı ölçekte olmaz ve `DecisionEngine._skill_weight`
+    FARKLI problemlerde ölçülmüş doğrulukları kıyaslar (gerçekte gözlendi:
+    XGBoost'un zor/dengeli problemdeki 0.375'i, online'ın kolay/nötr-ağırlıklı
+    problemdeki 0.502'siyle kıyaslanıp haksız yere düşük ağırlık aldı).
     """
     results: list[TrainAllStepResult] = []
 
@@ -978,9 +1003,10 @@ def train_all_models(exchange: Exchange, symbols: list[str]) -> list[TrainAllSte
         # (üretimde gözlendi: holdout'ta %84.7 nötr), model yönlü sınıfları
         # düşük güvenle tahmin ediyor ve `open_confidence` eşiği hiç
         # aşılamıyordu ("0 işlem" backtest'i). 12 bar (1h'de yarım gün),
-        # sentetik sınamada dengeli bir 3 sınıf dağılımı veriyor; gerçek
-        # dağılım her eğitimde `true_class_counts` ile raporlanır.
-        primary = train_signal_model_validated(exchange, symbols, horizon=12, threshold_pct=1.0)
+        # dengeli bir 3 sınıf dağılımı veriyor (üretimde doğrulandı: nötr
+        # oranı %84.7 -> %17.7); gerçek dağılım her eğitimde
+        # `true_class_counts` ile raporlanır.
+        primary = train_signal_model_validated(exchange, symbols, **_ENSEMBLE_LABELING)
         detail = (
             f"{primary.rows_used} satır, oos_balanced_acc={primary.out_of_sample.balanced_accuracy:.3f}, "
             f"gerçek={primary.out_of_sample.true_class_counts}, "
@@ -1010,7 +1036,7 @@ def train_all_models(exchange: Exchange, symbols: list[str]) -> list[TrainAllSte
             results.append(TrainAllStepResult("meta_label", False, str(exc)))
 
     try:
-        lstm_result = train_lstm_signal_model(exchange, symbols, horizon=3, threshold_pct=1.0)
+        lstm_result = train_lstm_signal_model(exchange, symbols, **_ENSEMBLE_LABELING)
         detail = f"{lstm_result.rows_used} satır, oos_balanced_acc={lstm_result.out_of_sample.balanced_accuracy:.3f}"
         if not lstm_result.accepted:
             detail = f"REDDEDİLDİ: {lstm_result.rejection_reason} ({detail})"
@@ -1019,7 +1045,7 @@ def train_all_models(exchange: Exchange, symbols: list[str]) -> list[TrainAllSte
         results.append(TrainAllStepResult("lstm", False, str(exc)))
 
     try:
-        _, online_report = train_online_signal_model(exchange, symbols, window_size=500)
+        _, online_report = train_online_signal_model(exchange, symbols, window_size=500, **_ENSEMBLE_LABELING)
         detail = f"{online_report.rows_used} satır, overall_balanced_acc={online_report.overall_balanced_accuracy:.3f}"
         if not online_report.accepted:
             detail = f"REDDEDİLDİ: {online_report.rejection_reason} ({detail})"
@@ -1029,7 +1055,7 @@ def train_all_models(exchange: Exchange, symbols: list[str]) -> list[TrainAllSte
 
     try:
         _, regime_results = train_signal_models_by_regime(
-            exchange, symbols, n_regimes=3, walk_forward_splits=3, horizon=3, threshold_pct=1.0
+            exchange, symbols, n_regimes=3, walk_forward_splits=3, **_ENSEMBLE_LABELING
         )
         summary = "; ".join(
             f"rejim {r.regime}: {r.rows_used} satır" + (f" (REDDEDİLDİ: {r.error})" if r.error else "") for r in regime_results
