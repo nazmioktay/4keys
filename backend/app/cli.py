@@ -31,12 +31,17 @@ import json
 import sys
 
 from app.core.config import settings
+from app.core.memory_probe import log_rss
 from app.db.session import init_db
 from app.exchanges import get_exchange
+
+log_rss("app.cli modülü yüklendi (argparse/config/db/exchanges import edildi)")
 
 
 def _cmd_train_all(args: argparse.Namespace) -> int:
     from app.api.routes.ml import _resolve_symbols
+
+    log_rss("app.api.routes.ml import edildi (FastAPI + tüm ml/train zinciri)")
     from app.ml.train import train_all_models
 
     init_db()
@@ -46,6 +51,7 @@ def _cmd_train_all(args: argparse.Namespace) -> int:
         print(json.dumps({"error": "Eğitim için sembol bulunamadı."}, ensure_ascii=False))
         return 1
 
+    log_rss(f"sembol seçimi tamamlandı ({len(symbols)} sembol), eğitim başlıyor")
     results = train_all_models(exchange, symbols, skip_steps=frozenset(args.skip or []), lookback=args.lookback)
     output = {
         "symbols_used": len(symbols),

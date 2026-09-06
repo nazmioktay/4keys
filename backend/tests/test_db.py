@@ -246,10 +246,16 @@ def test_scan_market_persists_feature_snapshots_for_configured_symbols():
     assert len(eth_snapshots) == 0  # ETH ayarlarda değil, kaydedilmemeli
 
 
-def test_build_training_dataset_backfills_feature_snapshots_for_all_symbols():
+def test_build_training_dataset_backfills_feature_snapshots_for_all_symbols(monkeypatch):
     """ML eğitimi (feature_snapshot_symbols kısıtlamasından BAĞIMSIZ olarak)
     çektiği tüm sembollerin geçmişini feature_snapshots'a da yazmalı —
-    LSTM/RL birikimini tek seferde "backfill" eder (bkz. app.ml.dataset)."""
+    LSTM/RL birikimini tek seferde "backfill" eder (bkz. app.ml.dataset).
+
+    `ml_persist_feature_snapshots` varsayılan olarak KAPALI (bkz. README
+    "OOM üretim olayı" — LSTM/RL şu an devre dışı, bu tabloyu okuyan hiçbir
+    eğitim kodu yok, yalnızca üretimde tabloyu amaçsızca büyütüyordu) —
+    burada özellikle backfill davranışını test ettiğimiz için elle açılır."""
+    monkeypatch.setattr(settings, "ml_persist_feature_snapshots", True)
     import numpy as np
 
     from app.exchanges.base import Exchange

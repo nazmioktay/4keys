@@ -4,6 +4,7 @@ from typing import Literal
 import pandas as pd
 
 from app.backtest.data import timeframe_to_minutes
+from app.core.memory_probe import log_rss
 from app.exchanges.base import Exchange
 from app.exchanges.cache import fetch_ohlcv_cached
 
@@ -35,7 +36,16 @@ def _persist_feature_snapshots(symbol: str, timeframe: str, features: pd.DataFra
     uzun zaman serisini periyodik birikim yerine tek seferde "backfill"
     eder (bkz. `app.db.repository.record_feature_snapshots_bulk`).
     DB kapalı/erişilemezse veya import başarısızsa sessizce atlanır —
-    eğitim akışının bir ön koşulu değildir."""
+    eğitim akışının bir ön koşulu değildir.
+
+    `settings.ml_persist_feature_snapshots` False iken (varsayılan, bkz.
+    README "OOM üretim olayı") HİÇBİR ŞEY yazılmaz — LSTM/RL şu an
+    devre dışı olduğundan bu tabloyu okuyan hiçbir eğitim kodu yok, yalnızca
+    üretimde tabloyu amaçsızca büyütüyordu."""
+    from app.core.config import settings
+
+    if not settings.ml_persist_feature_snapshots:
+        return
     try:
         from app.db.repository import record_feature_snapshots_bulk
 
@@ -99,16 +109,20 @@ def _build_symbol_frames(
 
     for symbol in symbols:
         try:
+            log_rss(f"{symbol}: fetch_ohlcv_cached öncesi")
             ohlcv = fetch_ohlcv_cached(exchange, symbol, timeframe, lookback)
+            log_rss(f"{symbol}: fetch_ohlcv_cached sonrası ({len(ohlcv)} mum)")
             if len(ohlcv) < 60:
                 continue
             warn_if_gaps(symbol, timeframe, ohlcv, timeframe_to_minutes(timeframe))
             features = build_features(ohlcv)
+            log_rss(f"{symbol}: build_features sonrası")
             _persist_feature_snapshots(symbol, timeframe, features)
             features = merge_macro_features(features, macro_history)
             features = merge_orderbook_features(features, load_orderbook_history(symbol))
             features = merge_taker_flow_features(features, ohlcv, exchange, symbol, timeframe)
             features = merge_open_interest_features(features, load_open_interest_history(symbol))
+            log_rss(f"{symbol}: macro/orderbook/taker/OI merge sonrası")
             htf_features = compute_multi_timeframe_features(ohlcv)
             for col in MULTI_TIMEFRAME_FEATURE_COLUMNS:
                 features[col] = htf_features[col].to_numpy()
@@ -121,10 +135,12 @@ def _build_symbol_frames(
             frame = frame.dropna(subset=FEATURE_COLUMNS + ["label"])
             if not frame.empty:
                 frames.append(frame)
+            log_rss(f"{symbol}: sembol tamamlandı")
         except Exception as exc:  # noqa: BLE001 - tek sembol hatası tüm eğitimi durdurmamalı
             logger.warning("dataset: skipping %s: %s", symbol, exc)
             continue
 
+    log_rss("_build_symbol_frames tamamlandı (tüm semboller)")
     return frames
 
 

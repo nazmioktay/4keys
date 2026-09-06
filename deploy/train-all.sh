@@ -77,6 +77,11 @@ set -uo pipefail
 # her zaman EN DUSUK tabandan baslamasini garanti eder - birkac saniyelik
 # kisa bir kesinti pahasina (paper-trading, gercek para riski yok). Atlamak
 # istersen: SKIP_RECREATE=1 bash deploy/train-all.sh
+#
+# MEMORY_PROBE=1: sabit ~1.2-1.4GB OOM olum noktasinin NEREDE olustugunu
+# (import mi, sembol-basi build_features mi, hangi adim mi) bulmak icin -
+# her kontrol noktasindan sonra anlik RSS'i yazdirir. Ornek (en kucuk,
+# en hizli deney): MEMORY_PROBE=1 LOOKBACK=1000 bash deploy/train-all.sh
 # ============================================================
 
 NETWORK="4keys-net"
@@ -105,6 +110,17 @@ LOOKBACK_ARGS=()
 if [ -n "${LOOKBACK:-}" ]; then
   echo "==> Mum sayisi ${LOOKBACK} ile eziliyor (settings.ml_train_lookback yerine)."
   LOOKBACK_ARGS=(--lookback "$LOOKBACK")
+fi
+
+# MEMORY_PROBE=1: sabit ~1.2-1.4GB'ta (lookback'ten BAGIMSIZ, kanitlandi -
+# bkz. README) NEREDE oldugunu bulmak icin - import mi, sembol-basi
+# isleme mi, hangi adim mi. Her adimdan/kontrol noktasindan sonra anlik
+# RSS'i (bkz. app/core/memory_probe.py) ekrana yazdirir - varsayilan
+# (kapali) durumda SIFIR ek maliyet/gurultu.
+MEMORY_PROBE_ARGS=()
+if [ "${MEMORY_PROBE:-0}" = "1" ]; then
+  echo "==> MEMORY_PROBE=1: her kontrol noktasindan sonra anlik bellek (RSS) yazdirilacak."
+  MEMORY_PROBE_ARGS=(-e MEMORY_PROBE=1)
 fi
 
 if [ "${SKIP_RECREATE:-0}" != "1" ]; then
@@ -153,6 +169,7 @@ docker run --rm \
   --memory=2200m \
   --oom-score-adj=500 \
   --env-file "$ENV_FILE" \
+  "${MEMORY_PROBE_ARGS[@]}" \
   -v fourkeys_ml_artifacts:/app/app/ml/artifacts \
   4keys-backend \
   python -m app.cli train-all "${SYMBOLS_ARGS[@]}" "${SKIP_ARGS[@]}" "${LOOKBACK_ARGS[@]}"

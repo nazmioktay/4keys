@@ -81,6 +81,20 @@ class Settings(BaseSettings):
     # app.ml.features.FEATURE_COLUMNS) feature_snapshots tablosuna kaydedilir.
     feature_snapshot_symbols: str = "BTC/USDT:USDT"
 
+    # GÜNCELLEME (bkz. README "OOM üretim olayı"): her eğitim çağrısı
+    # (`_persist_feature_snapshots`, bkz. `app.ml.dataset`), lookback kadar
+    # satırı `feature_snapshots`'a TOPLU YAZAR (LSTM/RL ileride tekrar
+    # tekrar biriktirmek yerine tek seferde "backfill" bulsun diye) — ama
+    # LSTM şu an varsayılan olarak ATLANIYOR (`train-all.sh` içindeki
+    # `INCLUDE_LSTM=0`) ve bu tabloyu okuyan TEK yer bir hata ayıklama API
+    # rotası (`GET /db/feature-snapshots`), eğitim kodunun kendisi DEĞİL —
+    # yani şu an bu yazma işlemi HİÇBİR ŞEY tarafından okunmuyor, sadece
+    # üretimde tabloyu şişiriyor (bulundu: 291.208 satır/147MB). Bu yüzden
+    # varsayılan olarak KAPATILDI; LSTM/RL çalışması yeniden başladığında
+    # buradan True yapılıp `deploy/truncate-feature-snapshots.sh` ile eski
+    # (artık amaçsız kalmış) satırlar temizlenebilir.
+    ml_persist_feature_snapshots: bool = False
+
     @property
     def feature_snapshot_symbols_list(self) -> list[str]:
         return [s.strip() for s in self.feature_snapshot_symbols.split(",") if s.strip()]

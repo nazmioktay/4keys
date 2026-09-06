@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Literal
 import numpy as np
 
 from app.core.config import settings
+from app.core.memory_probe import log_rss
 from app.exchanges.base import Exchange
 
 from .dataset import LabelingMethod, build_training_dataset, build_training_dataset_with_time
@@ -1033,6 +1034,7 @@ def train_all_models(
     problemdeki 0.502'siyle kıyaslanıp haksız yere düşük ağırlık aldı).
     """
     results: list[TrainAllStepResult] = []
+    log_rss("train_all_models başladı")
 
     if "xgboost" in skip_steps:
         primary = None
@@ -1062,6 +1064,7 @@ def train_all_models(
         except ValueError as exc:
             primary = None
             results.append(TrainAllStepResult("xgboost", False, str(exc)))
+    log_rss("xgboost adımı bitti")
 
     if "meta_label" in skip_steps:
         results.append(TrainAllStepResult("meta_label", True, "atlandı (skip_steps)"))
@@ -1090,6 +1093,7 @@ def train_all_models(
             results.append(TrainAllStepResult("meta_label", True, f"{meta_rows} satır"))
         except ValueError as exc:
             results.append(TrainAllStepResult("meta_label", False, str(exc)))
+    log_rss("meta_label adımı bitti")
 
     if "lstm" in skip_steps:
         results.append(TrainAllStepResult("lstm", True, "atlandı (skip_steps)"))
@@ -1102,6 +1106,7 @@ def train_all_models(
             results.append(TrainAllStepResult("lstm", True, detail))
         except ValueError as exc:
             results.append(TrainAllStepResult("lstm", False, str(exc)))
+    log_rss("lstm adımı bitti")
 
     if "online" in skip_steps:
         results.append(TrainAllStepResult("online", True, "atlandı (skip_steps)"))
@@ -1114,6 +1119,7 @@ def train_all_models(
             results.append(TrainAllStepResult("online", True, detail))
         except ValueError as exc:
             results.append(TrainAllStepResult("online", False, str(exc)))
+    log_rss("online adımı bitti")
 
     if "regime" in skip_steps:
         results.append(TrainAllStepResult("regime", True, "atlandı (skip_steps)"))
@@ -1128,5 +1134,6 @@ def train_all_models(
             results.append(TrainAllStepResult("regime", True, summary or "sonuç yok"))
         except ValueError as exc:
             results.append(TrainAllStepResult("regime", False, str(exc)))
+    log_rss("regime adımı bitti (train_all_models tamamlandı)")
 
     return results
