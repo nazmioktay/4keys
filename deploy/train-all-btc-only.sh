@@ -13,4 +13,4 @@ set -uo pipefail
 # Calistirma (sunucuda, root olarak, /opt/4keys icinde): bash deploy/train-all-btc-only.sh
 # ============================================================
 
-exec "$(dirname "$0")/train-all.sh" "BTC/USDT:USDT"
+exec bash "$(dirname "$0")/train-all.sh" "BTC/USDT:USDT"
