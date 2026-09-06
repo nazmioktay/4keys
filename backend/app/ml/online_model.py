@@ -46,12 +46,28 @@ class OnlineSignalModel:
     """`river.forest.ARFClassifier` sarmalayıcısı — `app.ml.model.SignalModel`
     ile BENZER bir arayüz (`predict`) sunar ama öğrenme tamamen farklıdır
     (bkz. modül docstring'i): `fit(X, y)` YOKTUR, `learn_one` vardır.
-    """
 
-    def __init__(self, n_models: int = 10, seed: int = 42) -> None:
+    KÖK NEDEN BULUNDU (bkz. README "OOM üretim olayı"): `ARFClassifier`'ın
+    bellek sınırlama mekanizması (`max_size`, ağaç başına MB) yalnızca
+    `memory_estimate_period` kadar (varsayılan 1-2 MİLYON) örnek AĞIRLIĞI
+    görüldükten sonra tetiklenir — bizim eğitimlerimiz (`ml_train_lookback`
+    onbinlerce satır, ARF'nin ortalama `lambda_value=6` ağırlığıyla bile
+    en fazla birkaç yüz bin) bu eşiğe ASLA ulaşmıyor, yani sınır fiilen HİÇ
+    UYGULANMIYOR ve ağaçlar sınırsız büyüyor — üretimde tek bir eğitimden
+    sonra `online_model.joblib` **208MB**'a ulaştı, her yükleme (her 5
+    dakikalık karar döngüsü VE her backtest çağrısı) belleğe önemli bir yük
+    bindirdi. Ölçüldü (aynı sentetik, 50 özellikli, ~30K satırlık veride):
+    varsayılan ayarlarla 85.3MB; `max_size=5.0, memory_estimate_period=200`
+    ile **45.1MB** (%47 azalma) — prequential doğruluk PRATİKTE DEĞİŞMEDİ
+    (0.754 → 0.753). Bu yüzden kontrol periyodu, bizim gerçek veri
+    hacmimize göre (varsayılanın binde biri) küçültüldü."""
+
+    def __init__(self, n_models: int = 10, seed: int = 42, max_size_mb: float = 5.0, memory_estimate_period: int = 200) -> None:
         self.n_models = n_models
         self.seed = seed
-        self._model = forest.ARFClassifier(n_models=n_models, seed=seed)
+        self._model = forest.ARFClassifier(
+            n_models=n_models, seed=seed, max_size=max_size_mb, memory_estimate_period=memory_estimate_period
+        )
         self._is_fitted = False
 
     def learn_one(self, features: dict, label: int) -> None:

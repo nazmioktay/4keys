@@ -30,6 +30,17 @@ class _TrendExchange(Exchange):
         )
 
 
+def test_online_signal_model_caps_tree_memory_by_default():
+    """Bkz. README 'OOM üretim olayı' — `ARFClassifier`'ın varsayılan
+    `memory_estimate_period`'u (1-2 milyon) bizim ~30K satırlık
+    eğitimlerimizde HİÇ tetiklenmiyor, ağaçlar sınırsız büyüyor (üretimde
+    208MB'a ulaştı). `OnlineSignalModel` artık bunu, gerçek veri hacmimize
+    göre küçültülmüş bir varsayılanla inşa etmeli."""
+    model = OnlineSignalModel()
+    assert model._model.max_size == 5.0
+    assert model._model.memory_estimate_period == 200
+
+
 def test_online_signal_model_learn_and_predict():
     model = OnlineSignalModel(n_models=3, seed=0)
     rng = np.random.default_rng(1)
