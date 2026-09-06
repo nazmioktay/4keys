@@ -28,22 +28,26 @@ set -uo pipefail
 # kutunun fiziksel RAM'ini (3.7GB) asiyor, kernel'in GENEL (host-capinda)
 # OOM-killer'i devreye girip yine uvicorn'u secebiliyor - konteynerler AYRI
 # olsa bile. Iki ek onlem eklendi:
-#   1. Bellek sinirini daha muhafazakar yapmak (--memory=1500m): canli API'nin
-#      tabaniyla toplandiginda fiziksel RAM'i ASMAMASI hedeflenir - global
+#   1. Bellek sinirini muhafazakar yapmak: canli API'nin tabaniyla
+#      toplandiginda fiziksel RAM'i ASMAMASI hedeflenir - global
 #      OOM-killer'a hic ulasilmamasi, boylece.
 #   2. --oom-score-adj=500: kernel'e "sikisirsa ONCE bunu oldur" der (bkz.
 #      deploy/recreate-backend.sh'teki canli API'nin -500'u - "bunu EN SON
-#      oldur"). Boylece 1500m yine de yetersiz kalirsa, feda edilen HER ZAMAN
+#      oldur"). Boylece sinir yine de yetersiz kalirsa, feda edilen HER ZAMAN
 #      bu (yeniden calistirilabilir) egitim islemi olur, canli API degil.
-# Sunucuda DOGRULANDI: iki gercek OOM olayinda da oldurulen surec bu egitim
+# Sunucuda DOGRULANDI: uc gercek OOM olayinda da oldurulen surec bu egitim
 # konteyneriydi, uvicorn DEGIL (bkz. README "OOM uretim olayi").
 #
-# YETERSIZ KAPASITE (sunucuda gozlendi): kutuda backend'in yaninda Grafana +
-# Prometheus + TimescaleDB de calisiyor (~730MB toplam) - dorduyle egitime
-# neredeyse hic pay kalmiyor, egitim konteyneri ilk adimlardan biri
-# bitmeden olduruluyor. Grafana/Prometheus canli TRADING islevine DAHIL
-# DEGIL (salt izleme) - egitim suresince GECICI olarak durdurulup (trap ile
-# HER durumda, basari/hata/Ctrl-C fark etmeksizin) sonunda geri baslatiliyor.
+# YETERSIZ KAPASITE (sunucuda gozlendi, sonra kismen COZULDU): kutuda
+# backend'in yaninda Grafana + Prometheus + TimescaleDB de calisiyor
+# (~730MB toplam) - egitime neredeyse hic pay kalmiyordu. Grafana/Prometheus
+# canli TRADING islevine DAHIL DEGIL (salt izleme) - egitim suresince
+# GECICI olarak durdurulup (trap ile HER durumda, basari/hata/Ctrl-C fark
+# etmeksizin) sonunda geri baslatiliyor. Ayrica torch'un (LSTM/PatchTST)
+# artik LAZY import edilmesiyle (bkz. README "torch HER ZAMAN yukleniyordu"
+# bulgusu) canli API'nin kendi tabani da ~1.42GB'tan ~590MB'a dustu - bu
+# ikisi BIRLIKTE egitime kalan payi onemli olcude buyuttu, --memory buna
+# gore yukseltildi (1.5GB -> 2.2GB).
 # (bkz. README "OOM uretim olayi").
 #
 # Cogunlukla ILK KURULUMDA (henuz hicbir model yokken, ör. yeni bir
@@ -87,7 +91,7 @@ docker rm -f 4keys-train-all 2>/dev/null || true
 docker run --rm \
   --name 4keys-train-all \
   "${NETWORK_ARGS[@]}" \
-  --memory=1500m \
+  --memory=2200m \
   --oom-score-adj=500 \
   --env-file "$ENV_FILE" \
   -v fourkeys_ml_artifacts:/app/app/ml/artifacts \
