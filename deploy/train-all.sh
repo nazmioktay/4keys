@@ -48,10 +48,22 @@ set -uo pipefail
 #
 # Cogunlukla ILK KURULUMDA (henuz hicbir model yokken, ör. yeni bir
 # fourkeys_ml_artifacts volume'unden sonra) kullanilir.
+#
+# Istege bagli 1. argüman: tek bir sembol (ör. "BTC/USDT:USDT") verilirse
+# yalnizca O sembolle egitir - kutu bu kadar kucukken (3.7GB) coklu-sembol
+# veri hazirlamanin bellek zirvesini test etmek/atlamak icin (bkz.
+# deploy/train-all-btc-only.sh - ayni seyi TEK KOMUTLA yapan kisayol).
+# Bos birakilirsa (varsayilan) tum semboller (BTC + korelasyonlu digerleri)
+# kullanilir.
 # ============================================================
 
 NETWORK="4keys-net"
 ENV_FILE="/opt/4keys/backend/.env"
+SYMBOLS_ARGS=()
+if [ -n "${1:-}" ]; then
+  echo "==> Yalniz $1 ile egitiliyor (coklu-sembol atlaniyor)."
+  SYMBOLS_ARGS=(--symbols "$1")
+fi
 
 NETWORK_ARGS=()
 if docker network inspect "$NETWORK" >/dev/null 2>&1; then
@@ -80,7 +92,7 @@ docker run --rm \
   --env-file "$ENV_FILE" \
   -v fourkeys_ml_artifacts:/app/app/ml/artifacts \
   4keys-backend \
-  python -m app.cli train-all
+  python -m app.cli train-all "${SYMBOLS_ARGS[@]}"
 TRAIN_EXIT=$?
 
 echo
