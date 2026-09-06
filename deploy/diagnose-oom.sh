@@ -34,6 +34,10 @@ OUT_FILE="/tmp/diagnose-oom-$(date +%Y%m%d-%H%M%S).txt"
   echo
   echo "=== Son OOM olaylari ==="
   dmesg 2>&1 | grep -i "out of memory\|killed process" | tail -10
+  echo
+  echo "=== DB tablo boyutlari (buyukten kucuge) ==="
+  echo "--- (macro/orderbook/open_interest_snapshots: egitim/canli karar dongusu bunlarin TAMAMINI (200.000 satira kadar, lookback'ten BAGIMSIZ) yukluyor - buyukse muhtemel OOM kaynagi) ---"
+  docker exec 4keys-db bash -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT relname AS tablo, n_live_tup AS satir_sayisi, pg_size_pretty(pg_total_relation_size(relid)) AS boyut FROM pg_stat_user_tables ORDER BY n_live_tup DESC;"' 2>&1
 } | tee "$OUT_FILE"
 
 echo
