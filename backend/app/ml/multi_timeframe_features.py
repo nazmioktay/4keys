@@ -48,7 +48,17 @@ def compute_multi_timeframe_features(ohlcv: pd.DataFrame) -> pd.DataFrame:
     """`ohlcv` ("timestamp" kolonu gerçek datetime olmalı) ile AYNI
     index/uzunlukta, `MULTI_TIMEFRAME_FEATURE_COLUMNS` kolonlarını içeren
     bir DataFrame döner."""
-    from .features import build_features  # döngüsel bağımlılığı önlemek için yerel import (bkz. orderbook_features.py aynı desen)
+    # PERFORMANS: burada `app.ml.features.build_features` ÇAĞRILMAZ. O
+    # fonksiyon 42 gösterge (Hurst, Ichimoku, Nadaraya-Watson, dinamik
+    # destek/direnç...) hesaplar ve 10.000 barlık bir seride ~2.2 saniye
+    # sürer — oysa buradan yalnızca İKİ kolon (`ema_gap`, `rsi_norm`)
+    # kullanılıyor. `compute_indicators` aynı EMA/RSI'yı ~0.006 saniyede
+    # üretiyor (~360x hızlı). Bu, `_build_symbol_frames`/`build_sequence_dataset`
+    # üzerinden eğitim başına onlarca kez çağrıldığı için eğitim süresine
+    # DOĞRUDAN yansıyordu; ayrıca canlı karar döngüsünde de sembol başına
+    # her turda ödeniyordu. Dönüşümler `features.py`'daki tanımlarla
+    # BİREBİR aynı tutulur (bkz. aşağıdaki yorumlar).
+    from app.screener.indicators import compute_indicators
 
     result = pd.DataFrame(index=ohlcv.index)
     for col in MULTI_TIMEFRAME_FEATURE_COLUMNS:
@@ -62,11 +72,18 @@ def compute_multi_timeframe_features(ohlcv: pd.DataFrame) -> pd.DataFrame:
         htf_ohlcv = _resample_ohlcv(ohlcv, rule)
         if len(htf_ohlcv) < _MIN_HTF_BARS:
             continue
-        htf_features = build_features(htf_ohlcv)
+        ind = compute_indicators(htf_ohlcv)
+        # `app.ml.features.build_features` ile BİREBİR AYNI dönüşümler:
+        #   rsi_norm = (rsi - 50) / 50
+        #   ema_gap  = ((ema_fast - ema_slow) / close).clip(-0.1, 0.1) * 10
+        htf_values = {
+            "rsi_norm": (ind["rsi"] - 50) / 50,
+            "ema_gap": ((ind["ema_fast"] - ind["ema_slow"]) / ind["close"]).clip(-0.1, 0.1) * 10,
+        }
 
         right = pd.DataFrame({"timestamp": pd.to_datetime(htf_ohlcv["timestamp"])})
         for col in _HTF_SOURCE_COLUMNS:
-            right[col] = htf_features[col].to_numpy()
+            right[col] = htf_values[col].to_numpy()
 
         merged = pd.merge_asof(left_sorted, right, on="timestamp", direction="backward")
         merged = merged.sort_values("_order").reset_index(drop=True)

@@ -442,6 +442,16 @@ def run_system_backtest(
     ]
     if trades_closed < 10:
         warnings.append(f"Yalnızca {trades_closed} işlem kapandı — istatistiksel güvenilirlik düşük.")
+        # AZ işlem de en az "0 işlem" kadar açıklama ister: sinyal ne sıklıkta
+        # yönlü çıktı, güven eşiği ne kadarını eledi, meta-label kaçını veto
+        # etti? Bu olmadan "1 işlem, %100 kazanma" gibi yanıltıcı bir özet
+        # kalıyordu.
+        if trades_closed > 0:
+            warnings.append(
+                f"Teşhis: {len(features)} barın {directional_bars} tanesinde ensemble yönlü karar üretti; "
+                f"görülen EN YÜKSEK yönlü güven {max_directional_confidence:.3f} (eşik: {request.open_confidence}). "
+                + (f"Meta-label filtresi {meta_label_vetoes} açılış sinyalini veto etti." if meta_label_vetoes else "")
+            )
     if trades_closed == 0:
         # "0 işlem" sonucunu sessiz bırakma: nedeni AÇIKÇA raporla —
         # sinyal hiç yönlü çıkmadı mı, güven eşiği mi aşılamadı, yoksa
