@@ -11,7 +11,8 @@ def test_train_all_cli_prints_json_and_returns_zero_on_success(monkeypatch, caps
     def fake_resolve_symbols(exchange, symbols):
         return symbols or ["BTC/USDT:USDT"]
 
-    def fake_train_all_models(exchange, symbols):
+    def fake_train_all_models(exchange, symbols, skip_steps=frozenset()):
+        assert skip_steps == frozenset()
         return [TrainAllStepResult("xgboost", True, "detail")]
 
     monkeypatch.setattr("app.api.routes.ml._resolve_symbols", fake_resolve_symbols)
@@ -25,6 +26,29 @@ def test_train_all_cli_prints_json_and_returns_zero_on_success(monkeypatch, caps
     output = json.loads(capsys.readouterr().out)
     assert output["symbols_used"] == 1
     assert output["steps"] == [{"step": "xgboost", "ok": True, "detail": "detail"}]
+
+
+def test_train_all_cli_skip_forwards_to_train_all_models(monkeypatch, capsys):
+    """Bkz. README 'OOM üretim olayı' — `--skip lstm`, en pahalı (torch)
+    ama kalite eşiğini hiç geçemeyen adımı atlayıp kalan adımların
+    tamamlanma şansını artırmak için eklendi."""
+    seen_skip_steps = {}
+
+    def fake_resolve_symbols(exchange, symbols):
+        return symbols or ["BTC/USDT:USDT"]
+
+    def fake_train_all_models(exchange, symbols, skip_steps=frozenset()):
+        seen_skip_steps["value"] = skip_steps
+        return [TrainAllStepResult("lstm", True, "atlandı (skip_steps)")]
+
+    monkeypatch.setattr("app.api.routes.ml._resolve_symbols", fake_resolve_symbols)
+    monkeypatch.setattr("app.ml.train.train_all_models", fake_train_all_models)
+    monkeypatch.setattr(cli_module, "init_db", lambda: None)
+    monkeypatch.setattr(cli_module, "get_exchange", lambda exchange_id: object())
+
+    exit_code = main(["train-all", "--skip", "lstm"])
+    assert exit_code == 0
+    assert seen_skip_steps["value"] == frozenset({"lstm"})
 
 
 def test_train_all_cli_returns_nonzero_when_no_symbols_found(monkeypatch, capsys):

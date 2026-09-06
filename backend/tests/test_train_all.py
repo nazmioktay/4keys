@@ -135,3 +135,59 @@ def test_train_all_models_skips_meta_when_primary_rejected(monkeypatch):
     # tutarsız olurdu -> meta-label adımı atlanmalı.
     assert by_step["meta_label"].ok is False
     assert "reddedildi" in by_step["meta_label"].detail
+
+
+def test_train_all_models_skip_steps_never_calls_the_skipped_function(monkeypatch):
+    """Regresyon (bkz. README 'OOM üretim olayı'): `skip_steps` verilen bir
+    adım HİÇ ÇAĞRILMAMALI — yalnızca sonucu "atlandı" olarak işaretlenmek
+    yetmez, asıl amaç o adımın PAHALI (LSTM için torch) işini hiç
+    yapmamak. `train_lstm_signal_model`'i çağrılırsa patlayan bir stub'la
+    değiştirip `skip_steps={"lstm"}` ile çağrıldığında bu stub'ın HİÇ
+    tetiklenmediğini doğrular."""
+
+    def _lstm_must_not_be_called(*_a, **_k):
+        raise AssertionError("skip_steps={'lstm'} verilmişken train_lstm_signal_model ÇAĞRILDI")
+
+    monkeypatch.setattr(train_module, "train_signal_model_validated", lambda *a, **k: _FakePrimaryResult())
+    monkeypatch.setattr(train_module, "train_meta_label_model", lambda *a, **k: (object(), 500))
+    monkeypatch.setattr(train_module, "train_lstm_signal_model", _lstm_must_not_be_called)
+    monkeypatch.setattr(train_module, "train_online_signal_model", lambda *a, **k: (object(), _FakeOnlineReport()))
+    monkeypatch.setattr(
+        train_module, "train_signal_models_by_regime", lambda *a, **k: (object(), [_FakeRegimeResult(0)])
+    )
+
+    results = train_module.train_all_models(object(), ["BTC/USDT:USDT"], skip_steps=frozenset({"lstm"}))
+    by_step = {r.step: r for r in results}
+
+    assert by_step["lstm"].ok is True
+    assert "atlandı" in by_step["lstm"].detail
+    # Bağımsız diğer adımlar normal şekilde çalışmaya devam etmeli.
+    assert by_step["xgboost"].ok is True
+    assert by_step["meta_label"].ok is True
+    assert by_step["online"].ok is True
+    assert by_step["regime"].ok is True
+
+
+def test_train_all_models_skip_steps_can_skip_multiple_independent_steps(monkeypatch):
+    def _must_not_be_called(name):
+        def _fn(*_a, **_k):
+            raise AssertionError(f"skip_steps verilmişken {name} ÇAĞRILDI")
+
+        return _fn
+
+    monkeypatch.setattr(train_module, "train_signal_model_validated", lambda *a, **k: _FakePrimaryResult())
+    monkeypatch.setattr(train_module, "train_meta_label_model", lambda *a, **k: (object(), 500))
+    monkeypatch.setattr(train_module, "train_lstm_signal_model", _must_not_be_called("train_lstm_signal_model"))
+    monkeypatch.setattr(train_module, "train_online_signal_model", _must_not_be_called("train_online_signal_model"))
+    monkeypatch.setattr(
+        train_module, "train_signal_models_by_regime", lambda *a, **k: (object(), [_FakeRegimeResult(0)])
+    )
+
+    results = train_module.train_all_models(object(), ["BTC/USDT:USDT"], skip_steps=frozenset({"lstm", "online"}))
+    by_step = {r.step: r for r in results}
+
+    assert "atlandı" in by_step["lstm"].detail
+    assert "atlandı" in by_step["online"].detail
+    assert by_step["xgboost"].ok is True
+    assert by_step["meta_label"].ok is True
+    assert by_step["regime"].ok is True

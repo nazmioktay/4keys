@@ -983,7 +983,7 @@ _ENSEMBLE_LABELING = {
 }
 
 
-def train_all_models(exchange: Exchange, symbols: list[str]) -> list[TrainAllStepResult]:
+def train_all_models(exchange: Exchange, symbols: list[str], skip_steps: frozenset[str] = frozenset()) -> list[TrainAllStepResult]:
     """Tüm modelleri (XGBoost -> meta-label -> LSTM -> online -> regime)
     sırayla, deploy script'lerinde (`deploy/train-xgboost-best-labeling.sh`,
     `train-meta.sh`, `train-lstm-btc-best-labeling.sh`, `train-online-btc.sh`,
@@ -998,6 +998,14 @@ def train_all_models(exchange: Exchange, symbols: list[str]) -> list[TrainAllSte
     LSTM sırasıyla en yavaş adımdır, toplam çalışma süresi birkaç dakikayı
     bulabilir.
 
+    `skip_steps` (ör. `{"lstm"}`) verilen adımları HİÇ ÇALIŞTIRMAZ — bkz.
+    README "OOM üretim olayı": bu beş adımı TEK process'te zincirlemek,
+    her adımın (özellikle LSTM'in — torch/PyTorch) bıraktığı belleğin bir
+    sonrakine kümülatif olarak taşınmasına yol açıyor; küçük bellekli bir
+    kutuda LSTM'i (kalite eşiğini hiç geçemiyorsa, atlamanın pratik bir
+    kaybı da yoktur) atlamak, kalan adımların tamamlanma şansını belirgin
+    şekilde artırabilir.
+
     KRİTİK — TÜM ensemble üyeleri AYNI hedefi öğrenir: XGBoost, LSTM ve
     online model `_ENSEMBLE_LABELING` ile TEK BİR etiketleme tanımını
     paylaşır. Önceden her biri FARKLI bir soruyu öğreniyordu (XGBoost:
@@ -1011,32 +1019,38 @@ def train_all_models(exchange: Exchange, symbols: list[str]) -> list[TrainAllSte
     """
     results: list[TrainAllStepResult] = []
 
-    try:
-        # `horizon`, ATR-triple-barrier etiketlemesinde ZAMAN bariyeridir
-        # (bir bariyere ulaşmak için kaç bar tanınır). Eski `horizon=3`
-        # değeri, eski "N mum sonraki getiri" etiketlemesi için seçilmişti;
-        # ATR bariyerleriyle 3 bar, 1.5xATR'lik bir hareket için ÇOK KISA —
-        # örneklerin ezici çoğunluğu zaman aşımına uğrayıp NÖTR etiketleniyor
-        # (üretimde gözlendi: holdout'ta %84.7 nötr), model yönlü sınıfları
-        # düşük güvenle tahmin ediyor ve `open_confidence` eşiği hiç
-        # aşılamıyordu ("0 işlem" backtest'i). 12 bar (1h'de yarım gün),
-        # dengeli bir 3 sınıf dağılımı veriyor (üretimde doğrulandı: nötr
-        # oranı %84.7 -> %17.7); gerçek dağılım her eğitimde
-        # `true_class_counts` ile raporlanır.
-        primary = train_signal_model_validated(exchange, symbols, **_ENSEMBLE_LABELING)
-        detail = (
-            f"{primary.rows_used} satır, oos_balanced_acc={primary.out_of_sample.balanced_accuracy:.3f}, "
-            f"gerçek={primary.out_of_sample.true_class_counts}, "
-            f"tahmin={primary.out_of_sample.predicted_class_counts}"
-        )
-        if not primary.accepted:
-            detail = f"REDDEDİLDİ: {primary.rejection_reason} ({detail})"
-        results.append(TrainAllStepResult("xgboost", True, detail))
-    except ValueError as exc:
+    if "xgboost" in skip_steps:
         primary = None
-        results.append(TrainAllStepResult("xgboost", False, str(exc)))
+        results.append(TrainAllStepResult("xgboost", True, "atlandı (skip_steps)"))
+    else:
+        try:
+            # `horizon`, ATR-triple-barrier etiketlemesinde ZAMAN bariyeridir
+            # (bir bariyere ulaşmak için kaç bar tanınır). Eski `horizon=3`
+            # değeri, eski "N mum sonraki getiri" etiketlemesi için seçilmişti;
+            # ATR bariyerleriyle 3 bar, 1.5xATR'lik bir hareket için ÇOK KISA —
+            # örneklerin ezici çoğunluğu zaman aşımına uğrayıp NÖTR etiketleniyor
+            # (üretimde gözlendi: holdout'ta %84.7 nötr), model yönlü sınıfları
+            # düşük güvenle tahmin ediyor ve `open_confidence` eşiği hiç
+            # aşılamıyordu ("0 işlem" backtest'i). 12 bar (1h'de yarım gün),
+            # dengeli bir 3 sınıf dağılımı veriyor (üretimde doğrulandı: nötr
+            # oranı %84.7 -> %17.7); gerçek dağılım her eğitimde
+            # `true_class_counts` ile raporlanır.
+            primary = train_signal_model_validated(exchange, symbols, **_ENSEMBLE_LABELING)
+            detail = (
+                f"{primary.rows_used} satır, oos_balanced_acc={primary.out_of_sample.balanced_accuracy:.3f}, "
+                f"gerçek={primary.out_of_sample.true_class_counts}, "
+                f"tahmin={primary.out_of_sample.predicted_class_counts}"
+            )
+            if not primary.accepted:
+                detail = f"REDDEDİLDİ: {primary.rejection_reason} ({detail})"
+            results.append(TrainAllStepResult("xgboost", True, detail))
+        except ValueError as exc:
+            primary = None
+            results.append(TrainAllStepResult("xgboost", False, str(exc)))
 
-    if primary is None:
+    if "meta_label" in skip_steps:
+        results.append(TrainAllStepResult("meta_label", True, "atlandı (skip_steps)"))
+    elif primary is None:
         # Meta-label birincil modele bağımlı olduğundan, birincil model hiç
         # eğitilemediyse meta-label'ı denemek anlamsız.
         results.append(TrainAllStepResult("meta_label", False, "atlandı: birincil model eğitilemedi"))
@@ -1062,33 +1076,42 @@ def train_all_models(exchange: Exchange, symbols: list[str]) -> list[TrainAllSte
         except ValueError as exc:
             results.append(TrainAllStepResult("meta_label", False, str(exc)))
 
-    try:
-        lstm_result = train_lstm_signal_model(exchange, symbols, **_ENSEMBLE_LABELING)
-        detail = f"{lstm_result.rows_used} satır, oos_balanced_acc={lstm_result.out_of_sample.balanced_accuracy:.3f}"
-        if not lstm_result.accepted:
-            detail = f"REDDEDİLDİ: {lstm_result.rejection_reason} ({detail})"
-        results.append(TrainAllStepResult("lstm", True, detail))
-    except ValueError as exc:
-        results.append(TrainAllStepResult("lstm", False, str(exc)))
+    if "lstm" in skip_steps:
+        results.append(TrainAllStepResult("lstm", True, "atlandı (skip_steps)"))
+    else:
+        try:
+            lstm_result = train_lstm_signal_model(exchange, symbols, **_ENSEMBLE_LABELING)
+            detail = f"{lstm_result.rows_used} satır, oos_balanced_acc={lstm_result.out_of_sample.balanced_accuracy:.3f}"
+            if not lstm_result.accepted:
+                detail = f"REDDEDİLDİ: {lstm_result.rejection_reason} ({detail})"
+            results.append(TrainAllStepResult("lstm", True, detail))
+        except ValueError as exc:
+            results.append(TrainAllStepResult("lstm", False, str(exc)))
 
-    try:
-        _, online_report = train_online_signal_model(exchange, symbols, window_size=500, **_ENSEMBLE_LABELING)
-        detail = f"{online_report.rows_used} satır, overall_balanced_acc={online_report.overall_balanced_accuracy:.3f}"
-        if not online_report.accepted:
-            detail = f"REDDEDİLDİ: {online_report.rejection_reason} ({detail})"
-        results.append(TrainAllStepResult("online", True, detail))
-    except ValueError as exc:
-        results.append(TrainAllStepResult("online", False, str(exc)))
+    if "online" in skip_steps:
+        results.append(TrainAllStepResult("online", True, "atlandı (skip_steps)"))
+    else:
+        try:
+            _, online_report = train_online_signal_model(exchange, symbols, window_size=500, **_ENSEMBLE_LABELING)
+            detail = f"{online_report.rows_used} satır, overall_balanced_acc={online_report.overall_balanced_accuracy:.3f}"
+            if not online_report.accepted:
+                detail = f"REDDEDİLDİ: {online_report.rejection_reason} ({detail})"
+            results.append(TrainAllStepResult("online", True, detail))
+        except ValueError as exc:
+            results.append(TrainAllStepResult("online", False, str(exc)))
 
-    try:
-        _, regime_results = train_signal_models_by_regime(
-            exchange, symbols, n_regimes=3, walk_forward_splits=3, **_ENSEMBLE_LABELING
-        )
-        summary = "; ".join(
-            f"rejim {r.regime}: {r.rows_used} satır" + (f" (REDDEDİLDİ: {r.error})" if r.error else "") for r in regime_results
-        )
-        results.append(TrainAllStepResult("regime", True, summary or "sonuç yok"))
-    except ValueError as exc:
-        results.append(TrainAllStepResult("regime", False, str(exc)))
+    if "regime" in skip_steps:
+        results.append(TrainAllStepResult("regime", True, "atlandı (skip_steps)"))
+    else:
+        try:
+            _, regime_results = train_signal_models_by_regime(
+                exchange, symbols, n_regimes=3, walk_forward_splits=3, **_ENSEMBLE_LABELING
+            )
+            summary = "; ".join(
+                f"rejim {r.regime}: {r.rows_used} satır" + (f" (REDDEDİLDİ: {r.error})" if r.error else "") for r in regime_results
+            )
+            results.append(TrainAllStepResult("regime", True, summary or "sonuç yok"))
+        except ValueError as exc:
+            results.append(TrainAllStepResult("regime", False, str(exc)))
 
     return results

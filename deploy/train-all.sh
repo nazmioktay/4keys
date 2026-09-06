@@ -59,6 +59,13 @@ set -uo pipefail
 # deploy/train-all-btc-only.sh - ayni seyi TEK KOMUTLA yapan kisayol).
 # Bos birakilirsa (varsayilan) tum semboller (BTC + korelasyonlu digerleri)
 # kullanilir.
+#
+# LSTM VARSAYILAN OLARAK ATLANIR (bkz. README "5 adimin ayni process'te
+# zincirlenmesi" bulgusu): sunucuda tekrar tekrar gozlendi, LSTM (a) hic
+# kalite esigini gecemedi (out_of_sample_balanced_accuracy hep <0.37), (b)
+# torch/PyTorch nedeniyle en pahali TEK adim - atlamanin pratik bir kaybi
+# yok ama kalan adimlarin tamamlanma sansini artirir. Yine de denemek
+# istersen: INCLUDE_LSTM=1 bash deploy/train-all.sh
 # ============================================================
 
 NETWORK="4keys-net"
@@ -67,6 +74,12 @@ SYMBOLS_ARGS=()
 if [ -n "${1:-}" ]; then
   echo "==> Yalniz $1 ile egitiliyor (coklu-sembol atlaniyor)."
   SYMBOLS_ARGS=(--symbols "$1")
+fi
+
+SKIP_ARGS=()
+if [ "${INCLUDE_LSTM:-0}" != "1" ]; then
+  echo "==> LSTM atlaniyor (hic kalite esigini gecemedi, en pahali adim - INCLUDE_LSTM=1 ile dahil edilebilir)."
+  SKIP_ARGS=(--skip lstm)
 fi
 
 NETWORK_ARGS=()
@@ -96,7 +109,7 @@ docker run --rm \
   --env-file "$ENV_FILE" \
   -v fourkeys_ml_artifacts:/app/app/ml/artifacts \
   4keys-backend \
-  python -m app.cli train-all "${SYMBOLS_ARGS[@]}"
+  python -m app.cli train-all "${SYMBOLS_ARGS[@]}" "${SKIP_ARGS[@]}"
 TRAIN_EXIT=$?
 
 echo

@@ -293,6 +293,7 @@ def train(payload: TrainRequest) -> TrainResponse:
 
 class TrainAllRequest(BaseModel):
     symbols: list[str] | None = None
+    skip_steps: list[Literal["xgboost", "meta_label", "lstm", "online", "regime"]] | None = None
 
 
 class TrainAllStepModel(BaseModel):
@@ -322,7 +323,7 @@ def train_all(payload: TrainAllRequest) -> TrainAllResponse:
     if not symbols:
         raise HTTPException(status_code=400, detail="Eğitim için sembol bulunamadı.")
 
-    results = train_all_models(exchange, symbols)
+    results = train_all_models(exchange, symbols, skip_steps=frozenset(payload.skip_steps or []))
     return TrainAllResponse(
         symbols_used=len(symbols),
         steps=[TrainAllStepModel(step=r.step, ok=r.ok, detail=r.detail) for r in results],

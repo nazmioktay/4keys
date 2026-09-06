@@ -21,7 +21,7 @@ konteynere bir `--memory` üst sınırı da verilir).
 istemiyoruz. `init_db()` çağrılır (tablo oluşturma tamamen idempotent,
 zamanlayıcıyla ilgisi yok).
 
-Kullanım: `python -m app.cli train-all [--symbols BTC/USDT:USDT ...]`
+Kullanım: `python -m app.cli train-all [--symbols BTC/USDT:USDT ...] [--skip lstm ...]`
 """
 
 from __future__ import annotations
@@ -46,7 +46,7 @@ def _cmd_train_all(args: argparse.Namespace) -> int:
         print(json.dumps({"error": "Eğitim için sembol bulunamadı."}, ensure_ascii=False))
         return 1
 
-    results = train_all_models(exchange, symbols)
+    results = train_all_models(exchange, symbols, skip_steps=frozenset(args.skip or []))
     output = {
         "symbols_used": len(symbols),
         "steps": [{"step": r.step, "ok": r.ok, "detail": r.detail} for r in results],
@@ -71,6 +71,17 @@ def main(argv: list[str] | None = None) -> int:
         nargs="*",
         default=None,
         help="Boş bırakılırsa screener + BTC-öncelikli seçim (select_training_symbols) kullanılır.",
+    )
+    train_all_parser.add_argument(
+        "--skip",
+        nargs="*",
+        default=None,
+        choices=["xgboost", "meta_label", "lstm", "online", "regime"],
+        help=(
+            "Bu adımları HİÇ ÇALIŞTIRMAZ (bkz. README 'OOM üretim olayı') — ör. --skip lstm: "
+            "LSTM (torch) kalite eşiğini hiç geçemiyorsa atlamanın pratik bir kaybı yoktur, "
+            "ama en pahalı adımdır; atlamak kalan adımların tamamlanma şansını artırabilir."
+        ),
     )
     train_all_parser.set_defaults(func=_cmd_train_all)
 
