@@ -93,12 +93,22 @@ class DecisionEngine:
         # seviye 0.333'tür ve gerçek ölçümde yönlü tahminlerin güveni
         # p50=0.44, p99=0.53, MAKSİMUM 0.56 çıkıyor — yani 0.6 eşiği
         # MATEMATİKSEL OLARAK ULAŞILAMAZDI ve sistem (hem backtest hem
-        # CANLI motor) hiçbir zaman pozisyon açamıyordu. 0.5, ölçülen
-        # dağılımın en üst ~%12'sini seçer (rastgele seviyenin %50 üzeri):
-        # hâlâ seçici, ama ulaşılabilir. Çıkış eşiği girişten DÜŞÜK tutulur
-        # (çıkmak girmekten kolay olmalı — risk açısından doğru duruş).
-        open_confidence: float = 0.5,
-        close_confidence: float = 0.45,
+        # CANLI motor) hiçbir zaman pozisyon açamıyordu. 0.5 (ulaşılabilir
+        # ama seçici) bu yüzden ilk varsayılan yapılmıştı.
+        #
+        # `POST /backtest/system/sweep-confidence` ile GERÇEK holdout
+        # verisinde ölçüldü (bkz. README "güven eşiği taraması"): 0.5'te
+        # total_pnl_pct NEGATİF (-%0.25); 0.55'te 89 işlem, kazanma=%53.9,
+        # PnL=+%2.09, max_drawdown=%0.64 (taramanın EN DÜŞÜK drawdown'ı);
+        # 0.6'da 48 işlem, PnL=+%2.70 (en yüksek) ama drawdown biraz daha
+        # yüksek; 0.65/0.7'de örneklem (22/12 işlem) güvenilir yorum için
+        # çok küçük. 0.55 seçildi: 0.6'ya göre ~2x daha büyük örneklem VE
+        # taramanın en düşük drawdown'ı — ham PnL farkı (0.6'nın lehine
+        # ~%0.6) küçülen örneklemle örtüşen işlemler arasındaki gürültü
+        # payının içinde. TEK bir holdout penceresinde ölçüldü — kalıcı bir
+        # kanun değil, yeni veriyle periyodik olarak yeniden ölçülmeli.
+        open_confidence: float = 0.55,
+        close_confidence: float = 0.5,
         portfolio: PortfolioManager | None = None,
         assumed_stop_loss_pct: float = 3.0,
         meta_model: MetaLabelModel | None = None,

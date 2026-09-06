@@ -12,12 +12,37 @@ set -euo pipefail
 # orani, cok islemle gorulen daha dusuk bir orandan DAHA GUVENILIR
 # degildir — karar operatore kalir. Denenecek degerleri asagidan
 # degistirebilirsin.
+#
+# Tam JSON'u bir dosyaya da yazar — konsol gecmisinde (ozellikle Hetzner
+# web konsolu gibi kaydirma gecmisi sinirli ortamlarda) yukari kaydirip
+# eski satirlara ulasamama sorununu onlemek icin.
 # ============================================================
 
-response=$(curl -sS -X POST http://127.0.0.1:8000/backtest/system/sweep-confidence \
-  -H "Content-Type: application/json" \
-  -d '{"open_confidence_values": [0.5, 0.55, 0.6, 0.65, 0.7]}')
+OUT_FILE="/tmp/sweep-confidence-$(date +%Y%m%d-%H%M%S).json"
 
-echo "$response" | python3 -m json.tool 2>/dev/null || echo "$response"
+curl -sS -X POST http://127.0.0.1:8000/backtest/system/sweep-confidence \
+  -H "Content-Type: application/json" \
+  -d '{"open_confidence_values": [0.5, 0.55, 0.6, 0.65, 0.7]}' \
+  -o "$OUT_FILE"
+
+echo "Tam JSON kaydedildi: $OUT_FILE (konsolda kaybolursa: cat $OUT_FILE)"
 echo
-echo "Tamamlandi. Her nokta icin trades_closed / win_rate_pct / total_pnl_pct / max_drawdown_pct karsilastir."
+
+python3 - "$OUT_FILE" <<'PYEOF' 2>/dev/null || cat "$OUT_FILE"
+import json, sys
+with open(sys.argv[1]) as f:
+    points = json.load(f)["points"]
+header = f"{'open':>6} {'close':>6} {'islem':>6} {'kazanma%':>9} {'pnl%':>8} {'gunluk%':>8} {'drawdown%':>10}  hata"
+print(header)
+print("-" * len(header))
+for p in points:
+    err = p.get("error") or ""
+    print(
+        f"{p['open_confidence']:>6.2f} {p['close_confidence']:>6.2f} {p['trades_closed']:>6} "
+        f"{p['win_rate_pct']:>9.2f} {p['total_pnl_pct']:>8.3f} {p['daily_pnl_pct']:>8.4f} "
+        f"{p['max_drawdown_pct']:>10.3f}  {err}"
+    )
+PYEOF
+
+echo
+echo "Tamamlandi. Otomatik 'en iyi' esik SECILMEZ — ozellikle <30 islemli noktalarda sonuc guvenilirligi dusuktur, karar sana kalir."
