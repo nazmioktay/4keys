@@ -175,24 +175,30 @@ def build_training_dataset_with_time(
     labeling_method: LabelingMethod = "threshold",
     take_profit_pct: float = 2.0,
     stop_loss_pct: float = 2.0,
-) -> tuple[pd.DataFrame, pd.Series, pd.Series, pd.Series]:
+) -> tuple[pd.DataFrame, pd.Series, pd.Series, pd.Series, pd.Series]:
     """`build_training_dataset` ile aynıdır, ek olarak her satır için
     `time_frac`'i (walk-forward/purged CV ve out-of-sample holdout
-    bölmeleri, bkz. `app.ml.validation`, bunu kullanır) ve gerçek
-    `bar_timestamp`'ini de döner — ikincisi, holdout'un GERÇEKTE hangi
-    tarihten başladığını (`app.ml.model_status`'a yazılıp backtest'in
-    "modelin hiç görmediği veri" sınırını bilmesi için) kaydetmek içindir.
+    bölmeleri, bkz. `app.ml.validation`, bunu kullanır), gerçek
+    `bar_timestamp`'ini (holdout'un GERÇEKTE hangi tarihten başladığını
+    `app.ml.model_status`'a yazmak için) VE `symbol`'ünü de döner —
+    SONUNCUSU, holdout başlangıcının BİRDEN ÇOK sembol eğitildiğinde
+    (bkz. `app.ml.symbol_selection.select_training_symbols` — BTC +
+    korelasyonlu ek semboller) YANLIŞLIKLA farklı bir sembolün (kendi
+    geçmişi kısa/farklı tarih aralığında olabilir) tarihine göre
+    hesaplanmasını önlemek için gereklidir (bkz. `train_signal_model_validated`
+    — yalnızca `settings.ml_primary_symbol`'ün holdout'u kullanılır).
     """
     frames = _build_symbol_frames(
         exchange, symbols, timeframe, lookback, horizon, threshold_pct, labeling_method, take_profit_pct, stop_loss_pct
     )
     if not frames:
         empty = pd.Series(dtype="float")
-        return pd.DataFrame(columns=ALL_FEATURE_COLUMNS), empty, empty, pd.Series(dtype="datetime64[ns]")
+        return pd.DataFrame(columns=ALL_FEATURE_COLUMNS), empty, empty, pd.Series(dtype="datetime64[ns]"), pd.Series(dtype="object")
 
     combined = pd.concat(frames, ignore_index=True)
     X = combined[ALL_FEATURE_COLUMNS]
     y = combined["label"]
     time_frac = combined["time_frac"]
     bar_timestamp = combined["bar_timestamp"]
-    return X, y, time_frac, bar_timestamp
+    symbol_col = combined["symbol"]
+    return X, y, time_frac, bar_timestamp, symbol_col

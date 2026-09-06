@@ -35,7 +35,7 @@ def test_combine_predictions_opposite_directions_goes_neutral():
 
 
 def test_combine_predictions_one_neutral_discounts_directional():
-    # Varsayılan (belirtilmeyen) skill=0.5 -> indirim çarpanı 0.5+0.5*0.5=0.75
+    # Varsayılan (belirtilmeyen) skill=0.5 -> indirim çarpanı 0.7+0.3*0.5=0.85
     # (eskiden sabit 0.7'ydi — artık yönlü modelin KENDİ doğrulanmış
     # becerisine göre ölçekleniyor, bkz. _skill_weight/DecisionEngine
     # docstring'i; skill=0.5 "bilinmiyor" nötr varsayılanı temsil eder).
@@ -43,13 +43,13 @@ def test_combine_predictions_one_neutral_discounts_directional():
     lstm = Prediction(direction="long", confidence=0.8)
     combined = DecisionEngine._combine_predictions(xgb, lstm)
     assert combined.direction == "long"
-    assert combined.confidence == pytest.approx(0.8 * 0.75)
+    assert combined.confidence == pytest.approx(0.8 * 0.85)
 
 
 def test_combine_predictions_high_skill_reduces_discount():
-    """Yönlü modelin KENDİ becerisi yüksekse (skill=1.0, mükemmel
-    doğrulanmış performans) indirim OLMAMALI — düşük beceride (skill=0.0,
-    tam rastgele) ise indirim en YÜKSEK (%50) olmalı."""
+    """Yönlü modelin KENDİ becerisi yüksekse (skill=1.0) indirim OLMAMALI;
+    en düşük beceride (skill=0.0) bile indirim ESKİ sabit 0.7 tabanından
+    daha sert OLMAMALI."""
     xgb = Prediction(direction="neutral", confidence=0.5)
     lstm = Prediction(direction="long", confidence=0.8)
 
@@ -57,7 +57,21 @@ def test_combine_predictions_high_skill_reduces_discount():
     assert high_skill.confidence == pytest.approx(0.8 * 1.0)
 
     low_skill = DecisionEngine._combine_predictions(xgb, lstm, xgb_skill=0.5, lstm_skill=0.0)
-    assert low_skill.confidence == pytest.approx(0.8 * 0.5)
+    assert low_skill.confidence == pytest.approx(0.8 * 0.7)
+
+
+def test_skill_weighting_never_discounts_harder_than_legacy_baseline():
+    """Regresyon (üretimde "0 işlem" backtest'ine yol açan hata): beceri
+    ağırlıklandırması, eski beceri-körü sabit 0.7 katsayısından DAHA SERT
+    indirim yapmamalı. Aksi halde gerçek (düşük beceri: ~0.10-0.19) modellerde
+    iki ardışık indirim adımı güveni `open_confidence` eşiğinin altına
+    çekip hiç işlem açılmamasına neden oluyordu."""
+    directional = Prediction(direction="long", confidence=0.8)
+    neutral = Prediction(direction="neutral", confidence=0.5)
+
+    for skill in (0.0, 0.1, 0.19, 0.5, 1.0):
+        combined = DecisionEngine._combine_predictions(neutral, directional, xgb_skill=0.5, lstm_skill=skill)
+        assert combined.confidence >= 0.8 * 0.7 - 1e-9, f"skill={skill} eski tabandan daha sert indirim yaptı"
 
 
 def test_combine_predictions_agreement_weights_by_skill():

@@ -245,6 +245,9 @@ def run_system_backtest(
     trades: list[dict] = []
     equity = request.initial_balance
     equity_curve = [equity]
+    directional_bars = 0
+    max_directional_confidence = 0.0
+    meta_label_vetoes = 0
 
     for i in range(len(features)):
         row = features.iloc[i]
@@ -276,6 +279,12 @@ def run_system_backtest(
         decision_reason = " + ".join(decision_parts) + f" -> karar={combined.direction}({combined.confidence:.2f})"
         direction = combined.direction
         confidence = combined.confidence
+
+        # Teşhis: "0 işlem" sonucunu sessiz bırakmamak için — yönlü sinyal
+        # hiç mi üretilmedi, yoksa üretildi de güven eşiği mi aşılamadı?
+        if direction in ("long", "short"):
+            directional_bars += 1
+            max_directional_confidence = max(max_directional_confidence, confidence)
 
         if position is not None:
             if position["direction"] == "long":
@@ -345,6 +354,7 @@ def run_system_backtest(
             if meta_model is not None and request.use_meta_label:
                 decision = meta_model.decide(row, confidence)
                 if not decision.act:
+                    meta_label_vetoes += 1
                     continue
             initial_stop_loss_price = None
             take_profit_price = None
@@ -432,6 +442,25 @@ def run_system_backtest(
     ]
     if trades_closed < 10:
         warnings.append(f"Yalnızca {trades_closed} işlem kapandı — istatistiksel güvenilirlik düşük.")
+    if trades_closed == 0:
+        # "0 işlem" sonucunu sessiz bırakma: nedeni AÇIKÇA raporla —
+        # sinyal hiç yönlü çıkmadı mı, güven eşiği mi aşılamadı, yoksa
+        # meta-label filtresi mi veto etti?
+        if directional_bars == 0:
+            warnings.append(
+                f"HİÇ işlem açılmadı: {len(features)} barın hiçbirinde ensemble yönlü (long/short) bir karar "
+                "üretmedi — modeller sürekli 'nötr' dedi. Genellikle etiketlemenin aşırı nötr-ağırlıklı olmasından "
+                "kaynaklanır (bkz. eğitim çıktısındaki `gerçek={...}` sınıf dağılımı)."
+            )
+        else:
+            warnings.append(
+                f"HİÇ işlem açılmadı: {directional_bars} barda yönlü karar üretildi, ama birleşik güven "
+                f"`open_confidence` eşiğini ({request.open_confidence}) hiç aşamadı — görülen EN YÜKSEK yönlü güven "
+                f"{max_directional_confidence:.3f}. Eşiği bu değerin altına çekmek veya modelleri daha ayrıştırıcı "
+                "etiketlemeyle yeniden eğitmek gerekir."
+            )
+        if meta_label_vetoes > 0:
+            warnings.append(f"Ayrıca meta-label filtresi {meta_label_vetoes} açılış sinyalini veto etti.")
 
     run_row = {
         "symbol": request.symbol,

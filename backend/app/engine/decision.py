@@ -84,8 +84,21 @@ class DecisionEngine:
         positions: PaperPositionStore,
         timeframe: str,
         lookback: int,
-        open_confidence: float = 0.6,
-        close_confidence: float = 0.55,
+        # DİKKAT — bu eşikler KALİBRE EDİLMİŞ 3 sınıflı olasılık ölçeğindedir.
+        # Eski 0.6/0.55 varsayılanları, güvenin HAM (kalibre edilmemiş) argmax
+        # olasılığından okunduğu dönemden kalmaydı. `SignalModel.predict`
+        # artık yönü ham modelden, GÜVENİ ise kalibre edilmiş olasılıktan
+        # alıyor (bkz. kalibrasyon çökmesi düzeltmesi) — kalibrasyon,
+        # olasılıkları taban orana doğru SIKIŞTIRIR: 3 sınıfta rastgele
+        # seviye 0.333'tür ve gerçek ölçümde yönlü tahminlerin güveni
+        # p50=0.44, p99=0.53, MAKSİMUM 0.56 çıkıyor — yani 0.6 eşiği
+        # MATEMATİKSEL OLARAK ULAŞILAMAZDI ve sistem (hem backtest hem
+        # CANLI motor) hiçbir zaman pozisyon açamıyordu. 0.5, ölçülen
+        # dağılımın en üst ~%12'sini seçer (rastgele seviyenin %50 üzeri):
+        # hâlâ seçici, ama ulaşılabilir. Çıkış eşiği girişten DÜŞÜK tutulur
+        # (çıkmak girmekten kolay olmalı — risk açısından doğru duruş).
+        open_confidence: float = 0.5,
+        close_confidence: float = 0.45,
         portfolio: PortfolioManager | None = None,
         assumed_stop_loss_pct: float = 3.0,
         meta_model: MetaLabelModel | None = None,
@@ -152,11 +165,18 @@ class DecisionEngine:
                 blended = (xgb.confidence * xgb_skill + lstm.confidence * lstm_skill) / total_skill
             return Prediction(direction=xgb.direction, confidence=min(1.0, blended * 1.1))
         if xgb.direction == "neutral":
-            # Yönlü modelin KENDİ becerisi yüksekse indirim daha az olur
-            # (skill=1 -> indirim yok, skill=0 -> %50 indirim).
-            return Prediction(direction=lstm.direction, confidence=lstm.confidence * (0.5 + 0.5 * lstm_skill))
+            # Yönlü modelin KENDİ becerisi yüksekse indirim daha az olur.
+            # ARALIK BİLEREK 0.7..1.0: eski (beceri-körü) sabit katsayı 0.7'ydi
+            # ve bu, TABAN olarak korunur — beceri ağırlıklandırması hiçbir
+            # zaman eski davranıştan DAHA SERT indirim yapmamalı. Önceki
+            # sürümde aralık 0.5..1.0'dı; gerçek modellerin becerisi düşük
+            # (balanced_accuracy ~0.40-0.46 -> skill ~0.10-0.19) olduğu için
+            # bu, iki ardışık indirim adımıyla birleşince güveni
+            # `open_confidence` eşiğinin altına çekip HİÇ işlem açılmamasına
+            # yol açtı (üretimde gözlenen "0 işlem" backtest'i).
+            return Prediction(direction=lstm.direction, confidence=lstm.confidence * (0.7 + 0.3 * lstm_skill))
         if lstm.direction == "neutral":
-            return Prediction(direction=xgb.direction, confidence=xgb.confidence * (0.5 + 0.5 * xgb_skill))
+            return Prediction(direction=xgb.direction, confidence=xgb.confidence * (0.7 + 0.3 * xgb_skill))
         # İkisi de yönlü ama ZIT (biri long biri short) -> belirsizlik, işlem açma.
         return Prediction(direction="neutral", confidence=min(xgb.confidence, lstm.confidence))
 

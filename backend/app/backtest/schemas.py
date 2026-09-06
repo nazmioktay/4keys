@@ -97,8 +97,15 @@ class SystemBacktestRequest(BaseModel):
     timeframe: str | None = Field(default=None, description="Boş bırakılırsa ml_train_timeframe (1h) kullanılır")
     candles: int = Field(default=10000, ge=300, le=20000)
     initial_balance: float = Field(default=1000.0, gt=0)
-    open_confidence: float = Field(default=0.6, ge=0.5, le=1.0)
-    close_confidence: float = Field(default=0.55, ge=0.5, le=1.0)
+    # Bkz. `app.engine.decision.DecisionEngine.__init__` — AYNI gerekçe:
+    # bu eşikler KALİBRE EDİLMİŞ 3 sınıflı olasılık ölçeğindedir (rastgele
+    # seviye 0.333). Eski 0.6/0.55 varsayılanları ulaşılamazdı (ölçülen
+    # maksimum yönlü güven 0.56) ve backtest HİÇ işlem açamıyordu.
+    # `ge` sınırı da 0.5'ten 0.34'e (rastgele seviyenin hemen üstü)
+    # çekildi — eski sınır, doğru değerin API'den verilmesini bile
+    # ENGELLİYORDU.
+    open_confidence: float = Field(default=0.5, ge=0.34, le=1.0)
+    close_confidence: float = Field(default=0.45, ge=0.34, le=1.0)
     commission_pct: float = Field(default=0.04, ge=0)
     slippage_pct: float = Field(default=0.02, ge=0)
     use_meta_label: bool = Field(default=True, description="Eğitilmiş bir meta-label modeli varsa sinyal filtresi olarak kullanılır")

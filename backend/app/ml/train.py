@@ -106,7 +106,7 @@ def train_signal_model_validated(
     gibi yalnızca KARŞILAŞTIRMA amaçlı, art arda birden çok deneme yapan
     çağrılarda production modelinin yanlışlıkla üzerine yazılmasını önler.
     """
-    X, y, time_frac, bar_timestamp = build_training_dataset_with_time(
+    X, y, time_frac, bar_timestamp, symbol_col = build_training_dataset_with_time(
         exchange,
         symbols,
         timeframe or settings.ml_train_timeframe,
@@ -125,7 +125,28 @@ def train_signal_model_validated(
 
     X_train, y_train, X_holdout, y_holdout = split_out_of_sample(X, y, time_frac, holdout_frac)
     train_time_frac = time_frac[X_train.index]
-    holdout_start_time = bar_timestamp.loc[X_holdout.index].min() if len(X_holdout) > 0 else None
+    # KRİTİK: birden çok sembolle eğitim yapılıyorsa (bkz.
+    # `app.ml.symbol_selection.select_training_symbols` — BTC + korelasyonlu
+    # ek semboller), holdout'un TÜM sembollerdeki EN ERKEN tarihini almak
+    # YANLIŞTIR — ikinci sembolün kendi geçmişi/DB önbellek kapsamı BTC'den
+    # FARKLI (ör. daha kısa/daha eski) olabilir, bu da holdout_start_time'ı
+    # yanlışlıkla ÇOK ERKEN bir tarihe çeker (gerçek üretimde gözlenen bir
+    # regresyon: backtest hiçbir barı dışlamadı, çünkü kaydedilen tarih
+    # backtest'in çektiği pencerenin BAŞINDAN bile ÖNCEYDİ). Backtest yalnızca
+    # `settings.ml_primary_symbol`'ü (BTC) oynattığı için, holdout_start_time
+    # de YALNIZCA o sembolün kendi holdout satırlarından hesaplanmalı.
+    holdout_start_time = None
+    if len(X_holdout) > 0:
+        primary_mask = symbol_col.loc[X_holdout.index] == settings.ml_primary_symbol
+        primary_holdout_timestamps = bar_timestamp.loc[X_holdout.index][primary_mask]
+        if len(primary_holdout_timestamps) > 0:
+            holdout_start_time = primary_holdout_timestamps.min()
+        else:
+            logger.warning(
+                "holdout_start_time hesaplanamadı: %s için holdout satırı yok (symbols=%s)",
+                settings.ml_primary_symbol,
+                symbols,
+            )
 
     def _factory() -> SignalModel:
         return SignalModel(algorithm=algorithm, calibrate=calibrate, calibration_method=calibration_method)
@@ -822,7 +843,7 @@ def train_online_signal_model(
     (veya BTC-öncelikli az sayıda sembol) kullanmak bu basitleştirmeyi
     önemsiz kılar.
     """
-    X, y, _time_frac, _bar_timestamp = build_training_dataset_with_time(
+    X, y, _time_frac, _bar_timestamp, _symbol_col = build_training_dataset_with_time(
         exchange,
         symbols,
         timeframe or settings.ml_train_timeframe,
@@ -949,7 +970,17 @@ def train_all_models(exchange: Exchange, symbols: list[str]) -> list[TrainAllSte
     results: list[TrainAllStepResult] = []
 
     try:
-        primary = train_signal_model_validated(exchange, symbols, horizon=3, threshold_pct=1.0)
+        # `horizon`, ATR-triple-barrier etiketlemesinde ZAMAN bariyeridir
+        # (bir bariyere ulaşmak için kaç bar tanınır). Eski `horizon=3`
+        # değeri, eski "N mum sonraki getiri" etiketlemesi için seçilmişti;
+        # ATR bariyerleriyle 3 bar, 1.5xATR'lik bir hareket için ÇOK KISA —
+        # örneklerin ezici çoğunluğu zaman aşımına uğrayıp NÖTR etiketleniyor
+        # (üretimde gözlendi: holdout'ta %84.7 nötr), model yönlü sınıfları
+        # düşük güvenle tahmin ediyor ve `open_confidence` eşiği hiç
+        # aşılamıyordu ("0 işlem" backtest'i). 12 bar (1h'de yarım gün),
+        # sentetik sınamada dengeli bir 3 sınıf dağılımı veriyor; gerçek
+        # dağılım her eğitimde `true_class_counts` ile raporlanır.
+        primary = train_signal_model_validated(exchange, symbols, horizon=12, threshold_pct=1.0)
         detail = (
             f"{primary.rows_used} satır, oos_balanced_acc={primary.out_of_sample.balanced_accuracy:.3f}, "
             f"gerçek={primary.out_of_sample.true_class_counts}, "

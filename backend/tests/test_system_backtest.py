@@ -300,6 +300,121 @@ def test_backtest_restrict_to_holdout_false_bypasses_filter(monkeypatch):
     assert not any("EĞİTİM verisiyle çakışmaması" in w for w in report.warnings)
 
 
+class FakeNoisyBtcExchange(Exchange):
+    """GERÇEKÇİ (gürültülü, rastgele yürüyüş) bir BTC serisi — `FakeOscillatingExchange`'in
+    temiz sinüsünden FARKLI olarak kolayca öğrenilemez, bu yüzden modelin
+    kalibre edilmiş güveni gerçek üretimdeki gibi ~0.4-0.6 bandında kalır.
+    Güven eşiği regresyonunu yeniden üretebilmek için bu şart."""
+
+    def __init__(self, total_candles: int, seed: int = 5) -> None:
+        rng = np.random.default_rng(seed)
+        close = 60000 * np.exp(np.cumsum(rng.normal(0.0001, 0.004, total_candles)))
+        self.full_df = pd.DataFrame(
+            {
+                "timestamp": pd.date_range("2025-01-01", periods=total_candles, freq="1h"),
+                "open": close,
+                "high": close * (1 + np.abs(rng.normal(0, 0.002, total_candles))),
+                "low": close * (1 - np.abs(rng.normal(0, 0.002, total_candles))),
+                "close": close,
+                "volume": rng.uniform(800, 1200, total_candles),
+            }
+        )
+
+    def list_symbols(self, quote_currency, market_type):
+        return ["BTC/USDT:USDT"]
+
+    def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int, since: int | None = None) -> pd.DataFrame:
+        return self.full_df.iloc[-limit:].reset_index(drop=True)
+
+
+def test_default_confidence_thresholds_are_reachable_on_calibrated_scale(monkeypatch):
+    """Regresyon (üretimde "0 işlem / %0 PnL"): `open_confidence` varsayılanı
+    0.6'ydı, ama `SignalModel` güveni KALİBRE EDİLMİŞ 3 sınıflı olasılıktan
+    okuyor — kalibrasyon olasılıkları taban orana (0.333) sıkıştırdığı için
+    yönlü güven gerçek veride 0.56-0.61'i aşmıyor; 0.6 eşiği pratikte
+    ULAŞILAMAZDI ve ne backtest ne de CANLI motor pozisyon açabiliyordu.
+
+    Bu test, gerçekçi GÜRÜLTÜLÜ bir seri + gerçek `atr_triple_barrier`
+    etiketlemesiyle (üretimdeki AYNI yol) VARSAYILAN eşiklerin işlem
+    açabildiğini garanti eden bir DUMAN TESTİDİR.
+
+    NOT (dürüstlük): bu senaryo tek başına 0.6 varsayılanını GÜVENİLİR
+    şekilde yakalayamaz — ölçülen maksimum yönlü güven (~0.60) tam eşiğin
+    sınırında olduğu ve XGBoost eğitimi tam deterministik olmadığı için
+    sonuç koşudan koşuya değişebiliyor. Eşiğin ulaşılabilir kalmasını
+    DETERMİNİSTİK olarak garanti eden asıl koruma:
+    `test_default_confidence_thresholds_stay_on_calibrated_scale`."""
+    from app.ml.dataset import build_training_dataset
+
+    exchange = FakeNoisyBtcExchange(total_candles=2500)
+    X, y = build_training_dataset(
+        exchange, ["BTC/USDT:USDT"], "1h", 2500, horizon=12,
+        labeling_method="atr_triple_barrier", take_profit_pct=1.5, stop_loss_pct=1.5,
+    )
+    model = SignalModel()
+    model.fit(X, y)
+    monkeypatch.setattr("app.backtest.system_runner.get_holdout_start_time", lambda path: None)
+
+    # eşikler AÇIKÇA verilmiyor -> şemadaki VARSAYILANLAR kullanılır
+    request = SystemBacktestRequest(symbol="BTC/USDT:USDT", timeframe="1h", candles=2500, initial_balance=1000.0)
+    report = run_system_backtest(exchange, model, None, request)
+
+    assert report.trades_closed > 0, (
+        f"varsayılan eşiklerle (open={request.open_confidence}) hiç işlem açılmadı — uyarılar: {report.warnings}"
+    )
+
+
+def test_default_confidence_thresholds_stay_on_calibrated_scale():
+    """DETERMİNİSTİK koruma (bkz. yukarıdaki duman testinin notu): güven
+    eşikleri KALİBRE EDİLMİŞ 3 sınıflı olasılık ölçeğinde yaşar — rastgele
+    seviye 0.333, gerçek ölçümde yönlü güvenin tavanı ~0.56-0.61. Bu yüzden
+    0.55 ÜZERİ bir varsayılan, kapıyı pratikte ULAŞILAMAZ yapar ve sistem
+    (hem backtest hem CANLI motor) hiç pozisyon açamaz — üretimde tam olarak
+    bu yaşandı ("0 işlem / %0 PnL" backtest'i).
+
+    Ayrıca `ge` alt sınırı da 0.5'in ÜZERİNDE olmamalı: eski `ge=0.5`,
+    doğru değerin API'den verilmesini bile engelliyordu."""
+    from app.engine.decision import DecisionEngine
+
+    request = SystemBacktestRequest()
+    assert request.open_confidence <= 0.55, "backtest open_confidence varsayılanı kalibre ölçekte ulaşılamaz"
+    assert request.close_confidence <= request.open_confidence, "çıkış eşiği girişten yüksek olmamalı"
+
+    field = SystemBacktestRequest.model_fields["open_confidence"]
+    lower_bounds = [m.ge for m in field.metadata if hasattr(m, "ge")]
+    assert lower_bounds and lower_bounds[0] <= 0.5, "ge alt sınırı doğru eşiğin verilmesini engelliyor"
+
+    # CANLI karar motorunun kendi varsayılanları da AYNI ölçekte olmalı —
+    # `app.engine.service.run_cycle_once` bu eşikleri açıkça geçmiyor.
+    import inspect
+
+    live_defaults = inspect.signature(DecisionEngine.__init__).parameters
+    assert live_defaults["open_confidence"].default <= 0.55
+    assert live_defaults["close_confidence"].default <= live_defaults["open_confidence"].default
+
+
+def test_zero_trade_backtest_explains_why(monkeypatch):
+    """Regresyon: üretimde backtest "0 işlem / %0 PnL" döndü ve NEDENİ hiçbir
+    yerde görünmüyordu. Artık sıfır işlem durumunda rapor, sinyalin hiç yönlü
+    çıkmadığını mı yoksa güven eşiğinin mi aşılamadığını (ve görülen en yüksek
+    yönlü güveni) AÇIKÇA yazmalı."""
+    exchange = FakeOscillatingExchange(total_candles=600)
+    train_ohlcv = exchange.full_df.iloc[:400].reset_index(drop=True)
+    model = _trained_model(train_ohlcv)
+    monkeypatch.setattr("app.backtest.system_runner.get_holdout_start_time", lambda path: None)
+
+    # Eşiği ulaşılamaz yaparak "hiç işlem açılmadı" durumunu zorla
+    request = SystemBacktestRequest(
+        symbol="BTC/USDT:USDT", timeframe="1h", candles=600, initial_balance=1000.0, open_confidence=1.0
+    )
+    report = run_system_backtest(exchange, model, None, request)
+
+    assert report.trades_closed == 0
+    assert any("HİÇ işlem açılmadı" in w for w in report.warnings)
+    # bu senaryoda yönlü karar ÜRETİLDİ ama eşik aşılamadı -> en yüksek güven raporlanmalı
+    assert any("EN YÜKSEK yönlü güven" in w for w in report.warnings)
+
+
 def test_lstm_predictions_skip_windows_that_contain_a_mid_series_nan():
     """Regresyon: `raw_features.dropna()` sonrası `valid_positions` ISINMA
     SONRASI olsa da ardışık olmak ZORUNDA değildir — bir gösterge (ör.

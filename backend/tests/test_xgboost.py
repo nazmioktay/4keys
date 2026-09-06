@@ -122,7 +122,7 @@ def test_shap_values_only_supported_for_xgboost():
 
 def test_split_out_of_sample_never_leaks_future_rows_into_train():
     exchange = TrendExchange(seed=4)
-    X, y, time_frac, _bar_timestamp = build_training_dataset_with_time(exchange, ["UPUSDT"], "4h", 400, horizon=5, threshold_pct=0.5)
+    X, y, time_frac, _bar_ts, _symbol = build_training_dataset_with_time(exchange, ["UPUSDT"], "4h", 400, horizon=5, threshold_pct=0.5)
     X_train, y_train, X_holdout, y_holdout = split_out_of_sample(X, y, time_frac, holdout_frac=0.2)
 
     assert len(X_train) + len(X_holdout) == len(X)
@@ -249,6 +249,7 @@ def test_train_signal_model_validated_records_holdout_start_time(tmp_path, monke
     from app.ml.model_status import get_holdout_start_time
 
     monkeypatch.setattr(settings, "ml_min_balanced_accuracy", 0.0)
+    monkeypatch.setattr(settings, "ml_primary_symbol", "UPUSDT")
     status_target = tmp_path / "signal_model.joblib"
     monkeypatch.setattr(train_module, "DEFAULT_MODEL_PATH", status_target)
     monkeypatch.setattr(SignalModel, "save", lambda self, path=None: None)
@@ -260,6 +261,63 @@ def test_train_signal_model_validated_records_holdout_start_time(tmp_path, monke
     assert holdout_start is not None
     # kayıtlı zaman damgası ayrıştırılabilir (geçerli bir ISO tarih) olmalı
     pd.Timestamp(holdout_start)
+
+
+class _TwoSymbolDifferentEraExchange(Exchange):
+    """İki sembol, TAMAMEN FARKLI takvim aralıklarında: "OLD" 2020'de,
+    "PRIMARY" 2024'te. Gerçek üretimdeki durumun (BTC + kendi geçmişi/DB
+    önbellek kapsamı farklı, korelasyonlu bir altcoin) sadeleştirilmiş
+    karşılığı."""
+
+    def __init__(self) -> None:
+        self._rng = np.random.default_rng(3)
+
+    def list_symbols(self, quote_currency: str, market_type: str) -> list[str]:
+        return ["PRIMARY", "OLD"]
+
+    def fetch_ohlcv(self, symbol: str, timeframe: str, limit: int, since: int | None = None) -> pd.DataFrame:
+        n = max(limit, 400)
+        start = "2024-01-01" if symbol == "PRIMARY" else "2020-01-01"
+        close = np.linspace(100, 200, n) + self._rng.normal(0, 1.0, n)
+        return pd.DataFrame(
+            {
+                "timestamp": pd.date_range(start, periods=n, freq="4h"),
+                "open": close,
+                "high": close + 1,
+                "low": close - 1,
+                "close": close,
+                "volume": self._rng.uniform(800, 1200, n),
+            }
+        )
+
+
+def test_holdout_start_time_uses_primary_symbol_not_earliest_across_symbols(tmp_path, monkeypatch):
+    """Regresyon (gerçek üretim hatası): eğitim BTC + korelasyonlu ikinci
+    bir sembolle yapıldığında, holdout başlangıcı TÜM sembollerin EN ERKEN
+    tarihinden alınıyordu. İkinci sembolün geçmişi farklı bir takvim
+    aralığındaysa bu, kaydedilen tarihi ÇOK ERKENE çekiyor ve backtest'in
+    holdout filtresi HİÇBİR barı dışlamıyordu (0 işlem / tüm dönem).
+    Doğrusu: yalnızca `settings.ml_primary_symbol`'ün kendi holdout'u."""
+    from app.core.config import settings
+    from app.ml import train as train_module
+    from app.ml.model import SignalModel
+    from app.ml.model_status import get_holdout_start_time
+
+    monkeypatch.setattr(settings, "ml_min_balanced_accuracy", 0.0)
+    monkeypatch.setattr(settings, "ml_primary_symbol", "PRIMARY")
+    status_target = tmp_path / "signal_model.joblib"
+    monkeypatch.setattr(train_module, "DEFAULT_MODEL_PATH", status_target)
+    monkeypatch.setattr(SignalModel, "save", lambda self, path=None: None)
+
+    exchange = _TwoSymbolDifferentEraExchange()
+    train_signal_model_validated(exchange, ["PRIMARY", "OLD"], horizon=5, threshold_pct=0.5, timeframe="4h", lookback=400)
+
+    holdout_start = pd.Timestamp(get_holdout_start_time(status_target))
+    # PRIMARY 2024'te başlıyor; "OLD" (2020) sembolünün holdout'u ASLA
+    # seçilmemeli — aksi halde tarih 2020'ye düşerdi.
+    assert holdout_start.year == 2024
+    # ve holdout, PRIMARY'nin serisinin SONLARINA doğru olmalı (ilk barı değil)
+    assert holdout_start > pd.Timestamp("2024-01-01")
 
 
 def test_sweep_lookback_values_returns_one_point_per_lookback():
