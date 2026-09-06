@@ -27,12 +27,20 @@ docker rm -f 4keys-backend 2>/dev/null || true
 # başlamasına yol açardı. Volume zaten varsa `create` no-op'tur.
 docker volume create fourkeys_ml_artifacts >/dev/null
 
+# --oom-score-adj=-500: kernel'e "kutu bellek yetersizliğine düşerse EN SON
+# bunu öldür" der (bkz. deploy/train-all.sh'teki eğitim konteynerinin
+# +500'ü, "ÖNCE bunu öldür"). Ayrı konteynerler bile olsalar, --memory
+# sınırının TEK BAŞINA canlı API'yi korumadığı üretimde görüldü (toplam
+# sistem belleği fiziksel RAM'i aşınca kernel'in GENEL OOM-killer'ı devreye
+# giriyor ve hangi konteyner olursa olsun seçebiliyor) — bu, sıkışma anında
+# kernel'in tercihini canlı API LEHİNE, eğitim ALEYHİNE açıkça yönlendirir.
 if docker network inspect "$NETWORK" >/dev/null 2>&1; then
   echo "==> 4keys-net ağı bulundu, backend ona bağlanacak (veritabanı erişimi için)."
   docker run -d \
     --name 4keys-backend \
     --network "$NETWORK" \
     --restart unless-stopped \
+    --oom-score-adj=-500 \
     --publish 127.0.0.1:8000:8000 \
     --env-file "$ENV_FILE" \
     -v fourkeys_ml_artifacts:/app/app/ml/artifacts \
@@ -42,6 +50,7 @@ else
   docker run -d \
     --name 4keys-backend \
     --restart unless-stopped \
+    --oom-score-adj=-500 \
     --publish 127.0.0.1:8000:8000 \
     --env-file "$ENV_FILE" \
     -v fourkeys_ml_artifacts:/app/app/ml/artifacts \

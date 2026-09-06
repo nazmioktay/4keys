@@ -15,13 +15,22 @@ set -euo pipefail
 # konteyneri ICINDE degil, AYRI, tek seferlik bir konteynerde
 # (docker run --rm) calisir — ayni image, farkli komut (python -m app.cli
 # train-all). Onceden HTTP ile (curl POST /ml/train-all) canli API'yi
-# calistiran AYNI process'e gonderiliyordu; bu process ayni zamanda arka
-# plan zamanlayicisini da barindirdigindan, bes agir adimin TOPLAM bellek
-# kullanimi kutunun fiziksel RAM'ini asip kernel OOM-killer'in canli API'yi
-# oldurmesine yol acti (uretimde 3 kez gozlendi). Ayri konteyner + bellek
-# ustsiniri (--memory) sayesinde bu egitim ne kadar bellek yerse yesin,
-# canli API process'i ARTIK ETKILENMEZ — en kotu ihtimalle bu egitim
-# konteyneri kendi ici sinirinda oldurulur, canli API dokunulmamis kalir
+# calistiran AYNI process'e gonderiliyordu.
+#
+# TEK BASINA AYRI KONTEYNER YETERLI DEGIL (uretimde 4. kez gozlendi):
+# --memory sinirinin canli API'yi KORUMADIGI ortaya cikti — bu sinir yalnizca
+# BU konteynerin KENDI ust sinirini belirler; canli API'nin tabani (~1.8GB)
+# ile bu egitim konteynerinin izin verilen ustu (once 2GB) TOPLANDIGINDA
+# kutunun fiziksel RAM'ini (3.7GB) asiyor, kernel'in GENEL (host-capinda)
+# OOM-killer'i devreye girip yine uvicorn'u secebiliyor - konteynerler AYRI
+# olsa bile. Iki ek onlem eklendi:
+#   1. Bellek sinirini daha muhafazakar yapmak (--memory=1500m): canli API'nin
+#      tabaniyla toplandiginda fiziksel RAM'i ASMAMASI hedeflenir - global
+#      OOM-killer'a hic ulasilmamasi, boylece.
+#   2. --oom-score-adj=500: kernel'e "sikisirsa ONCE bunu oldur" der (bkz.
+#      deploy/recreate-backend.sh'teki canli API'nin -500'u - "bunu EN SON
+#      oldur"). Boylece 1500m yine de yetersiz kalirsa, feda edilen HER ZAMAN
+#      bu (yeniden calistirilabilir) egitim islemi olur, canli API degil.
 # (bkz. README "OOM uretim olayi").
 #
 # Cogunlukla ILK KURULUMDA (henuz hicbir model yokken, ör. yeni bir
@@ -44,7 +53,8 @@ docker rm -f 4keys-train-all 2>/dev/null || true
 docker run --rm \
   --name 4keys-train-all \
   "${NETWORK_ARGS[@]}" \
-  --memory=2g \
+  --memory=1500m \
+  --oom-score-adj=500 \
   --env-file "$ENV_FILE" \
   -v fourkeys_ml_artifacts:/app/app/ml/artifacts \
   4keys-backend \
