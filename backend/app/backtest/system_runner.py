@@ -1,3 +1,5 @@
+from dataclasses import dataclass
+
 import numpy as np
 import pandas as pd
 
@@ -12,6 +14,7 @@ from app.ml.multi_timeframe_features import MULTI_TIMEFRAME_FEATURE_COLUMNS, com
 from app.ml.model import DEFAULT_MODEL_PATH, Prediction, SignalModel
 from app.ml.model_status import get_balanced_accuracy, get_holdout_start_time
 from app.ml.online_model import DEFAULT_ONLINE_MODEL_PATH, OnlineSignalModel
+from app.portfolio.risk_manager import calculate_kelly_position_size, calculate_position_size
 
 from app.exchanges.cache import fetch_ohlcv_cached
 
@@ -30,11 +33,94 @@ def _fmt_mult(mult: float | None) -> str:
     return f"{mult}xATR" if mult is not None else "kapalı"
 
 
-_SIZE_EXPLANATION = (
-    "Kademeli alım/satım, Kelly boyutlandırma ve VIX rejim filtresi burada simüle edilmez — her işlemde "
-    "o anki equity'nin TAMAMI ile tek giriş/tek çıkış yapılır (gerçek canlı/paper motorunda "
-    "PortfolioManager farklı, riske göre kademeli boyutlandırma uygular)."
+_SIZE_METHOD_WARNING = (
+    "Kademeli alım/satım (tranche) ve VIX rejim filtresi burada simüle edilmez — her sinyalde tek giriş/tek "
+    "çıkış yapılır. Pozisyon boyutu ise `app.portfolio.risk_manager`'daki (gerçek canlı/paper motorunun "
+    "KULLANDIĞI) AYNI Kelly/fixed-risk fonksiyonlarıyla hesaplanır — bkz. her işlemin `size_explanation` alanı."
 )
+
+
+def _compute_position_size(
+    equity: float,
+    entry_price: float,
+    stop_loss_price: float | None,
+    atr_now: float,
+    direction: str,
+    confidence: float,
+    closed_trade_pnls: list[float],
+    request: SystemBacktestRequest,
+) -> tuple[float, str]:
+    """Gerçek canlı/paper motorunun (`PortfolioManager._size_new_position` +
+    `_confidence_scale`) İZLEDİĞİ AYNI adımları uygular — backtest'e ÖZGÜ
+    farklı bir boyutlandırma icat edilmez:
+
+    1. `position_sizing_method="kelly"` VE yeterli (`kelly_min_trades`)
+       kapanmış işlem geçmişi varsa: Kelly kriteri (`calculate_kelly_position_size`).
+    2. Aksi halde (yetersiz geçmiş veya `"fixed_risk"`): stop mesafesine göre
+       sabit risk yüzdesi (`calculate_position_size`) — stop-loss KAPALIYSA
+       (`atr_stop_loss_mult=null`) mesafe olarak 1×ATR kullanılır (canlıda
+       da `assumed_stop_loss_pct` benzeri bir varsayımla çalışılır).
+    3. Sonuç AYRICA tahminin güvenine göre ölçeklenir (`confidence_scaling_*`).
+    4. Güvenlik ağı: `max_position_exposure_pct` ile üstten sınırlanır (ör.
+       çok dar bir ATR'de fixed_risk formülünün aşırı kaldıraca sıçramasına
+       karşı — bu, canlıda `RiskRules.max_symbol_exposure_pct`'in karşılığıdır).
+    """
+    detail: str
+    base_size: float | None = None
+
+    if request.position_sizing_method == "kelly" and len(closed_trade_pnls) >= request.kelly_min_trades:
+        wins = [p for p in closed_trade_pnls if p > 0]
+        losses = [p for p in closed_trade_pnls if p < 0]
+        win_rate_pct = len(wins) / len(closed_trade_pnls) * 100
+        avg_win_pct = sum(wins) / len(wins) if wins else 0.0
+        avg_loss_pct = sum(losses) / len(losses) if losses else 0.0
+        if avg_loss_pct < 0:
+            base_size, applied_pct, full_kelly_pct = calculate_kelly_position_size(
+                equity, win_rate_pct, avg_win_pct, avg_loss_pct, request.kelly_multiplier, request.max_kelly_fraction_pct
+            )
+            detail = (
+                f"Kelly ({len(closed_trade_pnls)} işlem geçmişi: kazanma=%{win_rate_pct:.1f}, "
+                f"ort.kazanç=%{avg_win_pct:.2f}, ort.kayıp=%{avg_loss_pct:.2f} -> tam Kelly=%{full_kelly_pct:.1f}, "
+                f"uygulanan {request.kelly_multiplier}x=%{applied_pct:.1f})"
+            )
+
+    if base_size is None:
+        effective_stop_price = stop_loss_price
+        if effective_stop_price is None:
+            effective_stop_price = entry_price - atr_now if direction == "long" else entry_price + atr_now
+        base_size, _risk_amount, stop_distance_pct = calculate_position_size(
+            equity, entry_price, effective_stop_price, request.risk_per_trade_pct, direction
+        )
+        if request.position_sizing_method != "kelly":
+            why = "fixed_risk yöntemi"
+        elif len(closed_trade_pnls) < request.kelly_min_trades:
+            why = "Kelly için yeterli işlem geçmişi yok"
+        else:
+            # Yeterli işlem sayısı var ama hiç kayıp yok (avg_loss_pct=0) —
+            # Kelly formülü b=kazanç/kayıp oranını sıfıra bölmeden çalışamaz.
+            why = "Kelly için henüz kayıp işlem yok (bölme güvenliği)"
+        detail = f"{why} -> sabit risk: equity'nin %{request.risk_per_trade_pct}'i (stop mesafesi %{stop_distance_pct:.2f})"
+
+    scale = 1.0
+    if request.confidence_scaling_enabled:
+        min_conf = request.open_confidence  # RiskRules ile AYNI kural: open_confidence eşiğiyle tutarlı olmalı
+        min_scale = request.confidence_scaling_min_scale
+        if confidence <= min_conf:
+            scale = min_scale
+        elif confidence >= 1.0:
+            scale = 1.0
+        else:
+            scale = min_scale + (confidence - min_conf) / (1.0 - min_conf) * (1.0 - min_scale)
+    size_quote = base_size * scale
+
+    cap = equity * request.max_position_exposure_pct / 100
+    capped_note = ""
+    if size_quote > cap:
+        size_quote = cap
+        capped_note = f"; max_position_exposure_pct=%{request.max_position_exposure_pct} sınırına küçültüldü"
+
+    explanation = f"{detail}; güven ölçeği x{scale:.2f} (confidence={confidence:.2f}){capped_note} -> {size_quote:.2f} USDT."
+    return max(size_quote, 0.0), explanation
 
 
 def _lstm_predictions_for_series(
@@ -108,6 +194,7 @@ def run_system_backtest(
     request: SystemBacktestRequest,
     lstm_model: LSTMSignalModel | None = None,
     online_model: OnlineSignalModel | None = None,
+    persist: bool = True,
 ) -> SystemBacktestReport:
     """Canlı karar motorunun kullandığı AYNI modelleri (XGBoost birincil +
     varsa meta-label filtresi + varsa LSTM/online ensemble) `request.symbol`
@@ -124,13 +211,18 @@ def run_system_backtest(
       (Üst zaman dilimi/4h-1d trend bağlamı bu basitleştirmeye DAHİL
       DEĞİL — kaynak OHLCV'den resample edilir, harici kaynağa bağlı
       değildir, burada da GERÇEK değerlerle hesaplanır.)
-    - Kademeli alım/satım (tranche) ve Kelly boyutlandırma YOK — her
-      sinyalde TÜM equity ile tek giriş/tek çıkış simüle edilir (bkz.
-      `PortfolioManager` gerçek canlı/paper motorunda bunlar var, ama
-      orası ayrı bir katman) — bkz. her işlemin `size_explanation` alanı.
+    - Kademeli alım/satım (tranche) YOK — her sinyalde tek giriş/tek çıkış
+      simüle edilir. Pozisyon boyutu ise `PortfolioManager`'ın (gerçek
+      canlı/paper motoru) KULLANDIĞI AYNI Kelly/fixed-risk fonksiyonlarıyla
+      hesaplanır (bkz. `SystemBacktestRequest.position_sizing_method` ve
+      her işlemin `size_explanation` alanı).
     - Risk yönetimi: sabit yüzdelik YERİNE ATR (Average True Range)
       tabanlı stop-loss/kâr-alma/trailing-stop (kullanıcı isteği) —
       bkz. `SystemBacktestRequest.atr_*` alanları.
+
+    `persist=False` verilirse sonuç `backtest_runs` tablosuna YAZILMAZ (id=None
+    döner) — ör. `sweep_confidence_thresholds` gibi arka arkaya çok sayıda
+    deneme yapan çağrılarda geçmişi/Grafana panellerini kirletmemek için.
     """
     timeframe = request.timeframe or "1h"
     # `fetch_full_history` (DCA/JSON-strateji backtest'inde kullanılan)
@@ -245,6 +337,7 @@ def run_system_backtest(
     trades: list[dict] = []
     equity = request.initial_balance
     equity_curve = [equity]
+    closed_trade_pnls: list[float] = []  # Kelly istatistikleri için (bkz. _compute_position_size) — yalnızca GEÇMİŞ kapanmış işlemler, sızıntı yok
     directional_bars = 0
     max_directional_confidence = 0.0
     meta_label_vetoes = 0
@@ -323,6 +416,7 @@ def run_system_backtest(
                 net_pct = gross_pct - cost_pct_roundtrip
                 pnl_quote = position["size_quote"] * net_pct / 100
                 equity += pnl_quote
+                closed_trade_pnls.append(net_pct)
                 trades.append(
                     {
                         "direction": position["direction"],
@@ -336,7 +430,7 @@ def run_system_backtest(
                         "exit_reason": exit_reason,
                         "duration_candles": i - position["entry_index"],
                         "size_quote": position["size_quote"],
-                        "size_explanation": _SIZE_EXPLANATION,
+                        "size_explanation": position["size_explanation"],
                         "xgboost_direction": position["decision"]["xgboost_direction"],
                         "xgboost_confidence": position["decision"]["xgboost_confidence"],
                         "lstm_direction": position["decision"]["lstm_direction"],
@@ -370,6 +464,9 @@ def run_system_backtest(
                     if direction == "long"
                     else price - request.atr_take_profit_mult * atr_now
                 )
+            size_quote, size_explanation = _compute_position_size(
+                equity, price, initial_stop_loss_price, atr_now, direction, confidence, closed_trade_pnls, request
+            )
             position = {
                 "direction": direction,
                 "entry_price": price,
@@ -379,7 +476,8 @@ def run_system_backtest(
                 "trailing_stop_price": initial_stop_loss_price,
                 "take_profit_price": take_profit_price,
                 "best_price": price,
-                "size_quote": equity,
+                "size_quote": size_quote,
+                "size_explanation": size_explanation,
                 "decision": {
                     "xgboost_direction": xgb_pred.direction,
                     "xgboost_confidence": round(xgb_pred.confidence, 4),
@@ -432,7 +530,7 @@ def run_system_backtest(
             else "LSTM/online model bu backtest'e DAHİL DEĞİL (kullanılabilir/etkin değil veya use_ensemble=false) — yalnızca "
             "birincil (XGBoost) model" + (" + meta-label filtresi" if meta_model is not None and request.use_meta_label else "") + " kullanılır."
         ),
-        _SIZE_EXPLANATION,
+        _SIZE_METHOD_WARNING,
         (
             f"Risk yönetimi: ATR({request.atr_period}) tabanlı — "
             f"stop-loss={_fmt_mult(request.atr_stop_loss_mult)}, kâr-alma={_fmt_mult(request.atr_take_profit_mult)}, "
@@ -518,7 +616,11 @@ def run_system_backtest(
     # `fetch_ohlcv_cached` kullanılan geçmişi zaten `ohlcv_raw`'a yazdı
     # (Grafana'nın candlestick paneli buradan okur) — burada ayrıca
     # yazmaya gerek yok.
-    run_id = db.save_backtest_run(run_row, trade_rows)
+    # `persist=False`: `sweep_confidence_thresholds` gibi arka arkaya çok
+    # sayıda deneme yapan çağrılarda `backtest_runs` tablosunu (ve
+    # /system/latest, Grafana panelleri) kirletmemek için — bkz.
+    # `app.ml.train.train_signal_model_validated(persist=...)` ile AYNI desen.
+    run_id = db.save_backtest_run(run_row, trade_rows) if persist else None
 
     return SystemBacktestReport(
         id=run_id,
@@ -565,3 +667,81 @@ def run_system_backtest(
         ],
         warnings=warnings,
     )
+
+
+@dataclass
+class ConfidenceSweepPoint:
+    open_confidence: float
+    close_confidence: float
+    trades_closed: int
+    win_rate_pct: float
+    total_pnl_pct: float
+    daily_pnl_pct: float
+    max_drawdown_pct: float
+    error: str | None = None
+
+
+def sweep_confidence_thresholds(
+    exchange: Exchange,
+    model: SignalModel,
+    meta_model: MetaLabelModel | None,
+    base_request: SystemBacktestRequest,
+    open_confidence_values: list[float],
+    close_confidence_gap: float = 0.05,
+    lstm_model: LSTMSignalModel | None = None,
+    online_model: OnlineSignalModel | None = None,
+) -> list[ConfidenceSweepPoint]:
+    """Farklı `open_confidence` eşikleriyle art arda `run_system_backtest`
+    çalıştırıp her biri için işlem sayısı/kazanma oranı/PnL/max drawdown
+    döner — "eşiği sıkılaştırmak (daha az ama daha 'seçici' işlem) kârlılığı
+    artırır mı" sorusuna CEVAP değil, CEVABI BULMAK İÇİN VERİ sağlar (bkz.
+    `app.ml.train.sweep_lookback_values` ile AYNI felsefe: otomatik "en iyi"
+    seçimi dayatmaz, çünkü işlem sayısı ile istatistiksel güvenilirlik
+    arasında bir değer yargısı var — ör. 3 işlemle görülen %90 kazanma oranı
+    169 işlemle görülen %51'den DAHA GÜVENİLİR değildir).
+
+    Her nokta `base_request`'in bir KOPYASI üzerinde çalışır (yalnızca
+    `open_confidence`/`close_confidence` değişir, diğer tüm alanlar —
+    ATR ayarları, pozisyon boyutlandırma, candles, vb. — sabit kalır).
+    `close_confidence`, her eşik için `open_confidence - close_confidence_gap`
+    olarak türetilir (şemanın kendi 0.5/0.45 varsayılan boşluğuyla AYNI mantık)
+    — çağıran taraf `close_confidence`'ı ayrıca belirtmek zorunda kalmaz.
+
+    `run_system_backtest(persist=False)` ile çağrılır: ara denemeler
+    `backtest_runs` tablosuna/Grafana panellerine YAZILMAZ. Bir eşik
+    başarısız olursa (ör. o eşikte hiç bar kalmaz) `error` alanıyla
+    işaretlenir, taramanın geri kalanı durmaz.
+    """
+    results: list[ConfidenceSweepPoint] = []
+    for open_conf in open_confidence_values:
+        close_conf = max(open_conf - close_confidence_gap, 0.0)
+        request = base_request.model_copy(update={"open_confidence": open_conf, "close_confidence": close_conf})
+        try:
+            report = run_system_backtest(
+                exchange, model, meta_model, request, lstm_model=lstm_model, online_model=online_model, persist=False
+            )
+            results.append(
+                ConfidenceSweepPoint(
+                    open_confidence=open_conf,
+                    close_confidence=close_conf,
+                    trades_closed=report.trades_closed,
+                    win_rate_pct=report.win_rate_pct,
+                    total_pnl_pct=report.total_pnl_pct,
+                    daily_pnl_pct=report.daily_pnl_pct,
+                    max_drawdown_pct=report.max_drawdown_pct,
+                )
+            )
+        except ValueError as exc:
+            results.append(
+                ConfidenceSweepPoint(
+                    open_confidence=open_conf,
+                    close_confidence=close_conf,
+                    trades_closed=0,
+                    win_rate_pct=0.0,
+                    total_pnl_pct=0.0,
+                    daily_pnl_pct=0.0,
+                    max_drawdown_pct=0.0,
+                    error=str(exc),
+                )
+            )
+    return results

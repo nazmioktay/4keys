@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel, Field
 
 from app.backtest.runner import run_backtest_report
 from app.backtest.schemas import (
@@ -7,7 +8,7 @@ from app.backtest.schemas import (
     SystemBacktestReport,
     SystemBacktestRequest,
 )
-from app.backtest.system_runner import run_system_backtest
+from app.backtest.system_runner import ConfidenceSweepPoint, run_system_backtest, sweep_confidence_thresholds
 from app.core.config import settings
 from app.db import repository as db
 from app.exchanges import get_exchange
@@ -18,6 +19,19 @@ from app.ml.model_status import is_model_enabled
 from app.ml.online_model import DEFAULT_ONLINE_MODEL_PATH, OnlineSignalModel
 
 router = APIRouter(prefix="/backtest", tags=["backtest"])
+
+
+def _load_ensemble_models() -> tuple[SignalModel, MetaLabelModel | None, LSTMSignalModel | None, OnlineSignalModel | None]:
+    """`/system/run` ve `/system/sweep-confidence` AYNI eğitilmiş modelleri
+    (canlı karar motorunun kullandığı) yükler — bkz. `app.ml.model_status`:
+    bir model yalnızca EN SON eğitiminde kalite eşiğini geçtiyse aktiftir."""
+    if not DEFAULT_MODEL_PATH.exists():
+        raise HTTPException(status_code=422, detail="Model henüz eğitilmedi. Önce /ml/train çağırın.")
+    model = SignalModel.load_from()
+    meta_model = MetaLabelModel.load_from() if DEFAULT_META_MODEL_PATH.exists() else None
+    lstm_model = LSTMSignalModel.load_from() if is_model_enabled(DEFAULT_LSTM_MODEL_PATH) else None
+    online_model = OnlineSignalModel.load_from() if is_model_enabled(DEFAULT_ONLINE_MODEL_PATH) else None
+    return model, meta_model, lstm_model, online_model
 
 
 @router.post("/run", response_model=BacktestReport)
@@ -48,17 +62,8 @@ def run_system(payload: SystemBacktestRequest) -> SystemBacktestReport:
     1h, 10.000 mum) üzerinde bar-bar tekrar oynatır. Sonuç DB'ye kaydedilir
     (Grafana candlestick/PnL panelleri ve `GET /backtest/system/latest`
     buradan okur)."""
-    if not DEFAULT_MODEL_PATH.exists():
-        raise HTTPException(status_code=422, detail="Model henüz eğitilmedi. Önce /ml/train çağırın.")
-
     exchange = get_exchange(settings.exchange_id)
-    model = SignalModel.load_from()
-    meta_model = MetaLabelModel.load_from() if DEFAULT_META_MODEL_PATH.exists() else None
-    # Canlı karar motoruyla (bkz. app.engine.service.run_cycle_once) AYNI
-    # kural: bir model yalnızca EN SON eğitiminde kalite eşiğini
-    # (ml_min_balanced_accuracy) geçtiyse aktiftir (bkz. app.ml.model_status).
-    lstm_model = LSTMSignalModel.load_from() if is_model_enabled(DEFAULT_LSTM_MODEL_PATH) else None
-    online_model = OnlineSignalModel.load_from() if is_model_enabled(DEFAULT_ONLINE_MODEL_PATH) else None
+    model, meta_model, lstm_model, online_model = _load_ensemble_models()
     try:
         return run_system_backtest(exchange, model, meta_model, payload, lstm_model=lstm_model, online_model=online_model)
     except ValueError as exc:
@@ -73,3 +78,56 @@ def get_latest_system_run(symbol: str | None = None) -> SystemBacktestReport | N
     if run is None:
         return None
     return SystemBacktestReport(**run)
+
+
+class SweepConfidenceRequest(BaseModel):
+    base_request: SystemBacktestRequest = Field(default_factory=SystemBacktestRequest)
+    open_confidence_values: list[float] = [0.5, 0.55, 0.6, 0.65, 0.7]
+    close_confidence_gap: float = Field(
+        default=0.05,
+        description="Her denenen open_confidence için close_confidence = open_confidence - bu değer (şemanın kendi 0.5/0.45 varsayılan boşluğuyla AYNI).",
+    )
+
+
+class SweepConfidencePoint(BaseModel):
+    open_confidence: float
+    close_confidence: float
+    trades_closed: int
+    win_rate_pct: float
+    total_pnl_pct: float
+    daily_pnl_pct: float
+    max_drawdown_pct: float
+    error: str | None = None
+
+
+class SweepConfidenceResponse(BaseModel):
+    points: list[SweepConfidencePoint]
+
+
+@router.post("/system/sweep-confidence", response_model=SweepConfidenceResponse)
+def sweep_confidence(payload: SweepConfidenceRequest) -> SweepConfidenceResponse:
+    """Farklı `open_confidence` eşikleriyle art arda sistem backtest'i
+    çalıştırıp her biri için işlem sayısı/kazanma oranı/PnL/max drawdown
+    döner — "eşiği sıkılaştırmak kârlılığı artırır mı" sorusuna CEVAP
+    değil, CEVABI BULMAK İÇİN VERİ sağlar (otomatik "en iyi"yi seçmez, bkz.
+    `app.backtest.system_runner.sweep_confidence_thresholds` docstring'i:
+    az işlemle görülen yüksek bir kazanma oranı, çok işlemle görülen daha
+    düşük bir orandan DAHA GÜVENİLİR değildir — karar operatöre kalır).
+
+    `base_request`'teki `open_confidence`/`close_confidence` alanları HER
+    nokta için üzerine yazılır (`close_confidence_gap`'e göre türetilir);
+    diğer tüm alanlar (sembol, ATR ayarları, pozisyon boyutlandırma, vb.)
+    sabit kalır. Ara denemeler `backtest_runs` tablosuna YAZILMAZ."""
+    exchange = get_exchange(settings.exchange_id)
+    model, meta_model, lstm_model, online_model = _load_ensemble_models()
+    points: list[ConfidenceSweepPoint] = sweep_confidence_thresholds(
+        exchange,
+        model,
+        meta_model,
+        payload.base_request,
+        payload.open_confidence_values,
+        close_confidence_gap=payload.close_confidence_gap,
+        lstm_model=lstm_model,
+        online_model=online_model,
+    )
+    return SweepConfidenceResponse(points=[SweepConfidencePoint(**p.__dict__) for p in points])

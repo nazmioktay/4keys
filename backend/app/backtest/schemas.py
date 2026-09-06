@@ -152,6 +152,46 @@ class SystemBacktestRequest(BaseModel):
         description="En iyi fiyattan bu kadar ATR geride trailing stop; null (varsayılan) ise trailing yok",
     )
 
+    # --- Pozisyon boyutlandırma (kullanıcı isteği) ---
+    # Önceden HER işlemde equity'nin TAMAMI kullanılıyordu (bilerek basit
+    # tutulmuştu). Artık gerçek canlı/paper motorunun (`app.portfolio.manager`
+    # / `app.portfolio.risk_manager`) KULLANDIĞI AYNI Kelly/fixed-risk
+    # fonksiyonları burada da uygulanır — iki motor arasında farklı bir
+    # boyutlandırma icat edilmedi.
+    position_sizing_method: Literal["fixed_risk", "kelly"] = Field(
+        default="kelly",
+        description=(
+            "'kelly' (varsayılan): yeterli kapanmış işlem geçmişi (bkz. kelly_min_trades) birikene kadar "
+            "fixed_risk'e düşer, sonra Kelly kriterine geçer. 'fixed_risk': her zaman stop mesafesine göre "
+            "sabit risk yüzdesi kullanır."
+        ),
+    )
+    risk_per_trade_pct: float = Field(
+        default=1.0, gt=0,
+        description="fixed_risk yönteminde (veya Kelly için yeterli geçmiş birikene kadar) işlem başına riske edilecek equity yüzdesi — stop mesafesine göre boyut geriye hesaplanır.",
+    )
+    kelly_multiplier: float = Field(
+        default=0.5, gt=0, le=1.5,
+        description="Full Kelly'nin uygulanacak kesri — 0.25 çeyrek, 0.5 yarım (önerilen/varsayılan, `app.portfolio.schemas.RiskRules` ile AYNI), 1.0 tam Kelly.",
+    )
+    kelly_min_trades: int = Field(
+        default=20, ge=5,
+        description="Kelly istatistiklerinin (kazanma oranı, ort. kazanç/kayıp) güvenilir sayılması için gereken minimum kapanmış işlem sayısı.",
+    )
+    max_kelly_fraction_pct: float = Field(
+        default=25.0, gt=0,
+        description="Kelly formülü ne derse desin, bir işleme ayrılacak sermayenin üst güvenlik sınırı (%).",
+    )
+    max_position_exposure_pct: float = Field(
+        default=15.0, gt=0,
+        description="Boyutlandırma yöntemi ne olursa olsun, tek bir pozisyonun equity'ye oranının üst güvenlik sınırı (`RiskRules.max_symbol_exposure_pct` ile AYNI varsayılan) — ör. dar bir ATR'de fixed_risk formülünün aşırı kaldıraca sıçramasına karşı.",
+    )
+    confidence_scaling_enabled: bool = Field(
+        default=True,
+        description="Açıksa, Kelly/fixed_risk ile hesaplanan boyut AYRICA tahminin güvenine göre ölçeklenir (open_confidence eşiğinde min_scale, confidence=1.0'da tam boyut) — `PortfolioManager._confidence_scale` ile AYNI.",
+    )
+    confidence_scaling_min_scale: float = Field(default=0.5, gt=0, le=1.0)
+
 
 class SystemTradeRecord(BaseModel):
     direction: str  # "long" | "short"

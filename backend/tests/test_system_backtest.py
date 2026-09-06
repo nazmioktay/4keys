@@ -2,8 +2,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from app.backtest.schemas import SystemBacktestRequest
-from app.backtest.system_runner import _lstm_predictions_for_series, run_system_backtest
+from app.backtest.schemas import SystemBacktestReport, SystemBacktestRequest
+from app.backtest.system_runner import (
+    _compute_position_size,
+    _lstm_predictions_for_series,
+    run_system_backtest,
+    sweep_confidence_thresholds,
+)
 from app.ml.features import FEATURE_COLUMNS, build_features
 from app.ml.lstm_model import LSTMSignalModel
 from app.ml.model import SignalModel
@@ -458,3 +463,294 @@ def test_lstm_predictions_skip_windows_that_contain_a_mid_series_nan():
     assert directions[far_row_idx] is not None
     assert confidences[far_row_idx] is not None
     assert not np.isnan(confidences[far_row_idx])
+
+
+# --- Pozisyon boyutlandırma (_compute_position_size) ---
+# Doğrudan birim test: tam bir backtest koşusundan bağımsız, deterministik
+# senaryolarla Kelly/fixed_risk dallanmasını, güven ölçeğini ve
+# max_position_exposure_pct güvenlik ağını doğrular.
+
+
+def test_fixed_risk_sizing_matches_stop_distance_formula():
+    """fixed_risk boyutu, `calculate_position_size` ile AYNI formülü
+    (stop mesafesine göre geriye hesaplanan risk) üretmeli: equity=1000,
+    risk=%1 -> risk_amount=10; stop mesafesi %2 -> size=10/0.02=500."""
+    request = SystemBacktestRequest(
+        position_sizing_method="fixed_risk",
+        risk_per_trade_pct=1.0,
+        confidence_scaling_enabled=False,
+        max_position_exposure_pct=100.0,  # bu testte üst sınır devre dışı
+    )
+    size_quote, explanation = _compute_position_size(
+        equity=1000.0, entry_price=100.0, stop_loss_price=98.0, atr_now=2.0,
+        direction="long", confidence=0.9, closed_trade_pnls=[], request=request,
+    )
+    assert size_quote == pytest.approx(500.0)
+    assert "fixed_risk" in explanation
+
+
+def test_kelly_falls_back_to_fixed_risk_before_min_trades():
+    """`position_sizing_method="kelly"` seçili olsa bile, kapanmış işlem
+    sayısı `kelly_min_trades`'in ALTINDAYSA Kelly formülü hiç çalıştırılmamalı
+    — fixed_risk'e (AYNI stop-mesafesi formülüne) düşmeli."""
+    request = SystemBacktestRequest(
+        position_sizing_method="kelly",
+        kelly_min_trades=20,
+        risk_per_trade_pct=1.0,
+        confidence_scaling_enabled=False,
+        max_position_exposure_pct=100.0,
+    )
+    size_quote, explanation = _compute_position_size(
+        equity=1000.0, entry_price=100.0, stop_loss_price=98.0, atr_now=2.0,
+        direction="long", confidence=0.9, closed_trade_pnls=[2.0, -1.0, 1.5, -0.5, 3.0],
+        request=request,
+    )
+    assert size_quote == pytest.approx(500.0), "yetersiz geçmişte fixed_risk ile AYNI boyut beklenir"
+    assert "Kelly için yeterli işlem geçmişi yok" in explanation
+
+
+def test_kelly_activates_after_min_trades_and_uses_kelly_formula():
+    """Yeterli (>= kelly_min_trades) kapanmış işlem VE en az bir kayıp
+    varsa, boyut Kelly formülünden gelmeli — fixed_risk'ten FARKLI bir
+    sonuç (bu senaryoda 250, fixed_risk'in vereceği 500'den farklı)."""
+    request = SystemBacktestRequest(
+        position_sizing_method="kelly",
+        kelly_min_trades=5,
+        kelly_multiplier=0.5,
+        max_kelly_fraction_pct=25.0,
+        risk_per_trade_pct=1.0,
+        confidence_scaling_enabled=False,
+        max_position_exposure_pct=100.0,
+    )
+    # 5 işlem: 4 kazanç %2, 1 kayıp %-1 -> kazanma=%80, b=2.0, full Kelly=%70,
+    # yarım Kelly=%35, max_kelly_fraction_pct=%25 ile kırpılır -> equity*0.25=250.
+    closed_trade_pnls = [2.0, 2.0, 2.0, 2.0, -1.0]
+    size_quote, explanation = _compute_position_size(
+        equity=1000.0, entry_price=100.0, stop_loss_price=98.0, atr_now=2.0,
+        direction="long", confidence=0.9, closed_trade_pnls=closed_trade_pnls, request=request,
+    )
+    assert size_quote == pytest.approx(250.0)
+    assert "Kelly (" in explanation
+    assert "tam Kelly=%70.0" in explanation
+    assert "uygulanan 0.5x=%25.0" in explanation
+
+
+def test_kelly_falls_back_safely_when_no_losing_trades_yet():
+    """Kenar durum: yeterli işlem sayısı var ama HİÇ kayıp yok (avg_loss=0) —
+    Kelly'nin b=kazanç/kayıp oranı sıfıra bölünmeden çöker. fixed_risk'e
+    güvenli şekilde düşmeli ve nedeni AÇIKÇA ('yeterli geçmiş yok' değil,
+    'henüz kayıp yok') söylemeli — aksi halde işlem geçmişi zaten yeterliyken
+    yanlış bir sebep raporlanmış olurdu."""
+    request = SystemBacktestRequest(
+        position_sizing_method="kelly",
+        kelly_min_trades=20,
+        risk_per_trade_pct=1.0,
+        confidence_scaling_enabled=False,
+        max_position_exposure_pct=100.0,
+    )
+    size_quote, explanation = _compute_position_size(
+        equity=1000.0, entry_price=100.0, stop_loss_price=98.0, atr_now=2.0,
+        direction="long", confidence=0.9, closed_trade_pnls=[1.0] * 20, request=request,
+    )
+    assert size_quote == pytest.approx(500.0), "kayıpsız kenar durumda fixed_risk'e düşmeli"
+    assert "henüz kayıp işlem yok" in explanation
+    assert "yeterli işlem geçmişi yok" not in explanation, "yanıltıcı olurdu: işlem geçmişi zaten yeterli"
+
+
+@pytest.mark.parametrize(
+    "confidence,expected_scale",
+    [
+        (0.5, 0.5),   # == open_confidence (eşik) -> min_scale
+        (0.75, 0.75), # tam ortada -> min_scale ile 1.0 arası ortada
+        (1.0, 1.0),   # maksimum güven -> tam boyut
+        (0.3, 0.5),   # eşiğin ALTINDA bile olsa min_scale'de kırpılır (negatif ölçek yok)
+    ],
+)
+def test_confidence_scaling_interpolates_between_min_scale_and_full_size(confidence, expected_scale):
+    request = SystemBacktestRequest(
+        position_sizing_method="fixed_risk",
+        risk_per_trade_pct=1.0,
+        confidence_scaling_enabled=True,
+        open_confidence=0.5,
+        confidence_scaling_min_scale=0.5,
+        max_position_exposure_pct=100.0,
+    )
+    size_quote, explanation = _compute_position_size(
+        equity=1000.0, entry_price=100.0, stop_loss_price=98.0, atr_now=2.0,
+        direction="long", confidence=confidence, closed_trade_pnls=[], request=request,
+    )
+    base_size = 500.0  # bkz. test_fixed_risk_sizing_matches_stop_distance_formula
+    assert size_quote == pytest.approx(base_size * expected_scale)
+    assert f"x{expected_scale:.2f}" in explanation
+
+
+def test_max_position_exposure_pct_caps_oversized_position():
+    """Çok dar bir stop mesafesinde (fixed_risk formülü kaldıraç gibi
+    davranıp equity'nin KAT KAT üstünde bir boyut önerebilir) güvenlik ağı
+    devreye girip `max_position_exposure_pct` sınırına küçültmeli."""
+    request = SystemBacktestRequest(
+        position_sizing_method="fixed_risk",
+        risk_per_trade_pct=1.0,
+        confidence_scaling_enabled=False,
+        max_position_exposure_pct=15.0,
+    )
+    # stop mesafesi yalnızca %0.1 -> ham formül equity'nin 10 katını (10000) önerir
+    size_quote, explanation = _compute_position_size(
+        equity=1000.0, entry_price=100.0, stop_loss_price=99.9, atr_now=2.0,
+        direction="long", confidence=0.9, closed_trade_pnls=[], request=request,
+    )
+    assert size_quote == pytest.approx(150.0), "equity'nin %15'ine (max_position_exposure_pct) kırpılmalı"
+    assert "sınırına küçültüldü" in explanation
+
+
+def test_position_size_falls_back_to_one_atr_when_stop_loss_disabled():
+    """`atr_stop_loss_mult=None` (stop-loss kapalı) olsa bile boyutlandırma
+    BİR mesafe varsayımına ihtiyaç duyar — kod 1×ATR kullanır. `stop_loss_price=None`
+    geçilerek bu yol tetiklenir ve sonucun 1×ATR mesafesiyle tutarlı olduğu
+    doğrulanır (entry=100, atr=5 -> mesafe=%5 -> size=10/0.05=200)."""
+    request = SystemBacktestRequest(
+        position_sizing_method="fixed_risk",
+        risk_per_trade_pct=1.0,
+        confidence_scaling_enabled=False,
+        max_position_exposure_pct=100.0,
+    )
+    size_quote, _explanation = _compute_position_size(
+        equity=1000.0, entry_price=100.0, stop_loss_price=None, atr_now=5.0,
+        direction="long", confidence=0.9, closed_trade_pnls=[], request=request,
+    )
+    assert size_quote == pytest.approx(200.0)
+
+
+def test_position_size_wired_into_backtest_is_not_flat_full_equity():
+    """Regresyon: ESKİ davranışta HER işlem `size_quote = equity` (o anki
+    TÜM sermaye) idi — Kelly/fixed-risk yalnızca `warnings`'te bir YORUMDU,
+    gerçekte UYGULANMIYORDU. ATR bar bar değiştiği için fixed_risk formülü
+    hemen hemen HİÇBİR ZAMAN flat-equity ile aynı sonucu vermez; bu test
+    gerçek bir backtest koşusunda en az bir işlemin boyutunun o anki
+    equity'den FARKLI olduğunu doğrular."""
+    exchange = FakeOscillatingExchange(total_candles=600)
+    train_ohlcv = exchange.full_df.iloc[:400].reset_index(drop=True)
+    model = _trained_model(train_ohlcv)
+
+    request = SystemBacktestRequest(
+        symbol="BTC/USDT:USDT", timeframe="1h", candles=600, initial_balance=1000.0,
+        position_sizing_method="fixed_risk", risk_per_trade_pct=1.0,
+        atr_stop_loss_mult=1.5, confidence_scaling_enabled=False,
+        restrict_to_holdout=False,
+    )
+    report = run_system_backtest(exchange, model, None, request)
+
+    assert report.trades, "test verisiyle en az bir işlem beklenir"
+    equity_before = request.initial_balance
+    saw_non_flat_size = False
+    for t in report.trades:
+        if t.size_quote != pytest.approx(equity_before, rel=1e-6):
+            saw_non_flat_size = True
+        equity_before = t.equity_after
+    assert saw_non_flat_size, "boyutlandırma hâlâ eski 'her zaman tüm equity' davranışına eşit görünüyor"
+
+
+# --- Güven eşiği taraması (sweep_confidence_thresholds) ---
+
+
+def test_persist_false_does_not_write_to_backtest_run_table(tmp_path, monkeypatch):
+    """`persist=False`, `sweep_confidence_thresholds` gibi arka arkaya çok
+    sayıda deneme yapan çağrılarda `backtest_runs` tablosunu/Grafana
+    panellerini kirletmemek için vardır — rapor dönmeli ama DB'ye YAZMAMALI."""
+    from app.db import repository as db
+    from app.db import session as db_session
+
+    monkeypatch.setattr(db_session.settings, "database_url", f"sqlite:///{tmp_path}/test.db")
+    db_session.reset_for_tests()
+    db_session.init_db()
+
+    exchange = FakeOscillatingExchange(total_candles=600)
+    train_ohlcv = exchange.full_df.iloc[:400].reset_index(drop=True)
+    model = _trained_model(train_ohlcv)
+
+    request = SystemBacktestRequest(
+        symbol="BTC/USDT:USDT", timeframe="1h", candles=600, initial_balance=1000.0, restrict_to_holdout=False
+    )
+    report = run_system_backtest(exchange, model, None, request, persist=False)
+
+    assert report.id is None
+    assert db.get_latest_backtest_run(symbol="BTC/USDT:USDT") is None, "persist=False olsa bile DB'ye yazılmış"
+
+    db_session.reset_for_tests()
+
+
+def test_sweep_confidence_thresholds_covers_all_values_without_persisting(tmp_path, monkeypatch):
+    """Her `open_confidence` adayı için bir nokta dönmeli, `close_confidence`
+    doğru şekilde türetilmeli (open - gap) ve ara denemeler `backtest_runs`
+    tablosunu KİRLETMEMELİ (bkz. `test_persist_false_...`)."""
+    from app.db import repository as db
+    from app.db import session as db_session
+
+    monkeypatch.setattr(db_session.settings, "database_url", f"sqlite:///{tmp_path}/test.db")
+    db_session.reset_for_tests()
+    db_session.init_db()
+
+    exchange = FakeOscillatingExchange(total_candles=600)
+    train_ohlcv = exchange.full_df.iloc[:400].reset_index(drop=True)
+    model = _trained_model(train_ohlcv)
+
+    base_request = SystemBacktestRequest(
+        symbol="BTC/USDT:USDT", timeframe="1h", candles=600, initial_balance=1000.0, restrict_to_holdout=False
+    )
+    values = [0.5, 0.6, 0.7]
+    points = sweep_confidence_thresholds(exchange, model, None, base_request, values, close_confidence_gap=0.05)
+
+    assert [p.open_confidence for p in points] == values
+    for p in points:
+        assert p.close_confidence == pytest.approx(p.open_confidence - 0.05)
+        assert p.error is None
+
+    assert db.get_latest_backtest_run(symbol="BTC/USDT:USDT") is None, "tarama backtest_runs tablosunu kirletmemeli"
+
+    db_session.reset_for_tests()
+
+
+def test_sweep_confidence_thresholds_records_error_without_stopping(monkeypatch):
+    """Bir eşikte backtest çökerse (ör. beklenmedik bir ValueError) taramanın
+    GERİ KALANI durmamalı — hatalı nokta `error` alanıyla işaretlenip diğer
+    eşikler normal şekilde denenmeye devam etmeli (bkz.
+    `app.ml.train.sweep_lookback_values` ile AYNI dayanıklılık deseni)."""
+    from app.backtest import system_runner
+
+    def fake_run_system_backtest(exchange, model, meta_model, request, lstm_model=None, online_model=None, persist=True):
+        if request.open_confidence == 0.6:
+            raise ValueError("simüle edilmiş hata")
+        return SystemBacktestReport(
+            symbol=request.symbol,
+            timeframe="1h",
+            candles_used=100,
+            period_start="2024-01-01T00:00:00",
+            period_end="2024-01-05T00:00:00",
+            initial_balance=1000.0,
+            final_equity=1000.0,
+            trades_closed=1,
+            win_rate_pct=100.0,
+            total_pnl_quote=0.0,
+            total_pnl_pct=0.0,
+            daily_pnl_quote=0.0,
+            daily_pnl_pct=0.0,
+            monthly_pnl_quote=0.0,
+            monthly_pnl_pct=0.0,
+            max_drawdown_pct=0.0,
+            trades=[],
+        )
+
+    monkeypatch.setattr(system_runner, "run_system_backtest", fake_run_system_backtest)
+
+    points = system_runner.sweep_confidence_thresholds(
+        exchange=None,
+        model=None,
+        meta_model=None,
+        base_request=SystemBacktestRequest(),
+        open_confidence_values=[0.5, 0.6, 0.7],
+    )
+
+    assert [p.open_confidence for p in points] == [0.5, 0.6, 0.7]
+    assert points[1].error is not None and "simüle edilmiş hata" in points[1].error
+    assert points[0].error is None and points[0].trades_closed == 1
+    assert points[2].error is None and points[2].trades_closed == 1
