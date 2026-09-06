@@ -1,5 +1,8 @@
+from __future__ import annotations
+
 import logging
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import pandas as pd
 
@@ -7,12 +10,15 @@ from app.db import repository as db
 from app.exchanges.base import Exchange
 from app.exchanges.cache import fetch_ohlcv_cached
 from app.ml.features import latest_feature_vector
-from app.ml.lstm_model import DEFAULT_LSTM_MODEL_PATH, LSTMSignalModel
 from app.ml.macro_features import latest_macro_feature_row
 from app.monitoring.metrics import record_ml_prediction
 from app.ml.meta_label import MetaLabelModel
 from app.ml.model import DEFAULT_MODEL_PATH, Prediction, SignalModel
+from app.ml.model_paths import DEFAULT_LSTM_MODEL_PATH
 from app.ml.model_status import get_balanced_accuracy
+
+if TYPE_CHECKING:
+    from app.ml.lstm_model import LSTMSignalModel
 from app.ml.multi_timeframe_features import MULTI_TIMEFRAME_FEATURE_COLUMNS, compute_multi_timeframe_features
 from app.ml.online_model import DEFAULT_ONLINE_MODEL_PATH, OnlineSignalModel
 from app.ml.openinterest_features import latest_open_interest_feature_row

@@ -9,12 +9,11 @@ from app.exchanges import get_exchange
 from app.ml.dataset import LabelingMethod
 from app.ml.features import latest_feature_vector
 from app.ml.meta_label import DEFAULT_META_MODEL_PATH, MetaLabelModel
-from app.ml.lstm_model import DEFAULT_LSTM_MODEL_PATH, LSTMSignalModel
 from app.ml.macro_features import latest_macro_feature_row
 from app.ml.orderbook_features import latest_orderbook_feature_row
 from app.ml.orderflow_features import latest_taker_buy_ratio_norm
 from app.ml.model import DEFAULT_MODEL_PATH, Algorithm, SignalModel
-from app.ml.patchtst_model import DEFAULT_PATCHTST_MODEL_PATH, PatchTSTSignalModel
+from app.ml.model_paths import DEFAULT_LSTM_MODEL_PATH, DEFAULT_PATCHTST_MODEL_PATH
 from app.ml.sequence_dataset import build_sequence_dataset
 from app.ml.symbol_selection import select_training_symbols
 from app.ml.train import (
@@ -423,6 +422,8 @@ def predict_lstm(symbol: str = Query(..., description="Örn: BTC/USDT:USDT")) ->
     if not Path(DEFAULT_LSTM_MODEL_PATH).exists():
         raise HTTPException(status_code=409, detail="LSTM modeli henüz eğitilmedi. Önce /ml/train-lstm çağırın.")
 
+    from app.ml.lstm_model import LSTMSignalModel  # lazy: torch (~460MB) yalnızca bu uç nokta çağrılınca yüklenir
+
     exchange = get_exchange(settings.exchange_id)
     model = LSTMSignalModel.load_from()
 
@@ -501,6 +502,8 @@ def train_patchtst(payload: TrainPatchTSTRequest) -> TrainPatchTSTResponse:
 def predict_patchtst(symbol: str = Query(..., description="Örn: BTC/USDT:USDT")) -> PredictPatchTSTResponse:
     if not Path(DEFAULT_PATCHTST_MODEL_PATH).exists():
         raise HTTPException(status_code=409, detail="PatchTST modeli henüz eğitilmedi. Önce /ml/train-patchtst çağırın.")
+
+    from app.ml.patchtst_model import PatchTSTSignalModel  # lazy: torch (~460MB) yalnızca bu uç nokta çağrılınca yüklenir
 
     exchange = get_exchange(settings.exchange_id)
     model = PatchTSTSignalModel.load_from()

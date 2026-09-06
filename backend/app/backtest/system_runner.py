@@ -1,4 +1,7 @@
+from __future__ import annotations
+
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
@@ -8,15 +11,18 @@ from app.engine.decision import DecisionEngine
 from app.exchanges.base import Exchange
 from app.ml.advanced_indicators import average_true_range
 from app.ml.features import FEATURE_COLUMNS, build_features
-from app.ml.lstm_model import DEFAULT_LSTM_MODEL_PATH, LSTMSignalModel
 from app.ml.meta_label import MetaLabelModel
 from app.ml.multi_timeframe_features import MULTI_TIMEFRAME_FEATURE_COLUMNS, compute_multi_timeframe_features
 from app.ml.model import DEFAULT_MODEL_PATH, Prediction, SignalModel
+from app.ml.model_paths import DEFAULT_LSTM_MODEL_PATH
 from app.ml.model_status import get_balanced_accuracy, get_holdout_start_time
 from app.ml.online_model import DEFAULT_ONLINE_MODEL_PATH, OnlineSignalModel
 from app.portfolio.risk_manager import calculate_kelly_position_size, calculate_position_size
 
 from app.exchanges.cache import fetch_ohlcv_cached
+
+if TYPE_CHECKING:
+    from app.ml.lstm_model import LSTMSignalModel
 
 from .schemas import SystemBacktestReport, SystemBacktestRequest
 

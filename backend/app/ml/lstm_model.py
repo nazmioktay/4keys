@@ -6,8 +6,7 @@ import torch
 from torch import nn
 
 from .model import Prediction
-
-DEFAULT_LSTM_MODEL_PATH = Path(__file__).parent / "artifacts" / "lstm_model.pt"
+from .model_paths import DEFAULT_LSTM_MODEL_PATH
 
 _LABEL_TO_DIRECTION = {1: "long", -1: "short", 0: "neutral"}
 

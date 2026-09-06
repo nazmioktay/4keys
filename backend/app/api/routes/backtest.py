@@ -1,3 +1,7 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
@@ -12,11 +16,14 @@ from app.backtest.system_runner import ConfidenceSweepPoint, run_system_backtest
 from app.core.config import settings
 from app.db import repository as db
 from app.exchanges import get_exchange
-from app.ml.lstm_model import DEFAULT_LSTM_MODEL_PATH, LSTMSignalModel
 from app.ml.meta_label import DEFAULT_META_MODEL_PATH, MetaLabelModel
 from app.ml.model import DEFAULT_MODEL_PATH, SignalModel
+from app.ml.model_paths import DEFAULT_LSTM_MODEL_PATH
 from app.ml.model_status import is_model_enabled
 from app.ml.online_model import DEFAULT_ONLINE_MODEL_PATH, OnlineSignalModel
+
+if TYPE_CHECKING:
+    from app.ml.lstm_model import LSTMSignalModel
 
 router = APIRouter(prefix="/backtest", tags=["backtest"])
 
@@ -24,12 +31,19 @@ router = APIRouter(prefix="/backtest", tags=["backtest"])
 def _load_ensemble_models() -> tuple[SignalModel, MetaLabelModel | None, LSTMSignalModel | None, OnlineSignalModel | None]:
     """`/system/run` ve `/system/sweep-confidence` AYNI eğitilmiş modelleri
     (canlı karar motorunun kullandığı) yükler — bkz. `app.ml.model_status`:
-    bir model yalnızca EN SON eğitiminde kalite eşiğini geçtiyse aktiftir."""
+    bir model yalnızca EN SON eğitiminde kalite eşiğini geçtiyse aktiftir.
+
+    `LSTMSignalModel` (torch, ~460MB) BİLEREK burada, sadece GERÇEKTEN
+    aktifse import edilir — bkz. `app.ml.model_paths` docstring'i."""
     if not DEFAULT_MODEL_PATH.exists():
         raise HTTPException(status_code=422, detail="Model henüz eğitilmedi. Önce /ml/train çağırın.")
     model = SignalModel.load_from()
     meta_model = MetaLabelModel.load_from() if DEFAULT_META_MODEL_PATH.exists() else None
-    lstm_model = LSTMSignalModel.load_from() if is_model_enabled(DEFAULT_LSTM_MODEL_PATH) else None
+    lstm_model = None
+    if is_model_enabled(DEFAULT_LSTM_MODEL_PATH):
+        from app.ml.lstm_model import LSTMSignalModel
+
+        lstm_model = LSTMSignalModel.load_from()
     online_model = OnlineSignalModel.load_from() if is_model_enabled(DEFAULT_ONLINE_MODEL_PATH) else None
     return model, meta_model, lstm_model, online_model
 

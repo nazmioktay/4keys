@@ -1,8 +1,8 @@
 from app.core.config import settings
 from app.exchanges import get_exchange
-from app.ml.lstm_model import DEFAULT_LSTM_MODEL_PATH, LSTMSignalModel
 from app.ml.meta_label import DEFAULT_META_MODEL_PATH, MetaLabelModel
 from app.ml.model import DEFAULT_MODEL_PATH, SignalModel
+from app.ml.model_paths import DEFAULT_LSTM_MODEL_PATH
 from app.ml.model_status import is_model_enabled
 from app.ml.online_model import DEFAULT_ONLINE_MODEL_PATH, OnlineSignalModel
 from app.portfolio.shared import get_portfolio
@@ -46,9 +46,11 @@ def run_cycle_once() -> list[Action]:
     # varsayılan 0.37). Bir model eşiği geçtiği eğitimden sonra otomatik
     # devreye girer; bir sonraki eğitiminde eşiğin altında kalırsa (eski
     # dosyası hâlâ diskte olsa bile) otomatik devre dışı kalır.
-    lstm_model = (
-        LSTMSignalModel.load_from() if is_model_enabled(DEFAULT_LSTM_MODEL_PATH) else None
-    )
+    lstm_model = None
+    if is_model_enabled(DEFAULT_LSTM_MODEL_PATH):
+        from app.ml.lstm_model import LSTMSignalModel  # lazy: torch (~460MB) yalnızca LSTM gerçekten aktifse yüklenir
+
+        lstm_model = LSTMSignalModel.load_from()
     online_model = (
         OnlineSignalModel.load_from() if is_model_enabled(DEFAULT_ONLINE_MODEL_PATH) else None
     )

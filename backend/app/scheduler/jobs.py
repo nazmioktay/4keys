@@ -5,9 +5,9 @@ from app.core.config import settings
 from app.engine.service import ModelNotTrained, run_cycle_once
 from app.exchanges import get_exchange
 from app.macro.service import refresh_and_record_macro_snapshot
-from app.ml.lstm_model import DEFAULT_LSTM_MODEL_PATH, LSTMSignalModel
 from app.ml.meta_label import DEFAULT_META_MODEL_PATH
 from app.ml.model import SignalModel
+from app.ml.model_paths import DEFAULT_LSTM_MODEL_PATH
 from app.ml.online_model import DEFAULT_ONLINE_MODEL_PATH
 from app.ml.regime import DEFAULT_REGIME_MODEL_PATH
 from app.ml.train import (

@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 import logging
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 
@@ -9,15 +11,26 @@ from app.exchanges.base import Exchange
 
 from .dataset import LabelingMethod, build_training_dataset, build_training_dataset_with_time
 from .features import ALL_FEATURE_COLUMNS
-from .lstm_model import DEFAULT_LSTM_MODEL_PATH, LSTMSignalModel, LSTMTrainingReport
 from .meta_label import MetaLabelModel, build_meta_dataset
 from .model import DEFAULT_MODEL_PATH, Algorithm, SignalModel
+from .model_paths import DEFAULT_LSTM_MODEL_PATH, DEFAULT_PATCHTST_MODEL_PATH
 from .model_status import write_model_status
 from .online_model import DEFAULT_ONLINE_MODEL_PATH, OnlineSignalModel, PrequentialReport, run_prequential_evaluation
-from .patchtst_model import DEFAULT_PATCHTST_MODEL_PATH, PatchTSTSignalModel, PatchTSTTrainingReport
 from .regime import RegimeModel, build_regime_labeled_dataset, fit_regime_model
 from .sequence_dataset import build_sequence_dataset
 from .validation import OutOfSampleReport, WalkForwardReport, evaluate_out_of_sample, run_walk_forward_validation, split_out_of_sample
+
+# `torch` (LSTM/PatchTST) BİLEREK modül seviyesinde import edilmez — ölçüldü,
+# TEK BAŞINA ~460MB'lık bir bellek maliyeti taşıyor (bkz. README). Bu modül
+# `app/api/routes/ml.py` üzerinden HER API isteğinde (XGBoost eğitimi dahil)
+# yükleniyor; torch'u yalnızca GERÇEKTEN bir LSTM/PatchTST modeli inşa
+# edilecek fonksiyonların İÇİNDE (train_lstm_signal_model/
+# train_patchtst_signal_model) import ederek bu maliyet, o fonksiyonlar
+# GERÇEKTEN çağrılana kadar hiç ödenmez. Tip belirteçleri için (çalışma
+# zamanında hiç çözülmez, yalnızca mypy/IDE için) TYPE_CHECKING kullanılır.
+if TYPE_CHECKING:
+    from .lstm_model import LSTMSignalModel, LSTMTrainingReport
+    from .patchtst_model import PatchTSTSignalModel, PatchTSTTrainingReport
 
 logger = logging.getLogger(__name__)
 
@@ -372,6 +385,8 @@ def train_lstm_signal_model(
     `sweep_labeling_lstm`). `seed` (varsayılan 42) sonucu tekrarlanabilir
     kılar — etiketleme taramasında aynı hiperparametrelerin farklı
     çalıştırmalarda dalgalanmasının (bkz. README) nedeni buydu."""
+    from .lstm_model import LSTMSignalModel  # lazy: torch yalnızca burada, gerçekten gerektiğinde yüklenir
+
     model = LSTMSignalModel(seq_len=seq_len, hidden_size=hidden_size, num_layers=num_layers, dropout=dropout)
     model, rows_used, training_report, oos_report, accepted, rejection_reason = _train_sequence_model(
         model,
@@ -444,6 +459,8 @@ def train_patchtst_signal_model(
     sınamalarda hem lookback artırma hem model küçültme ile ~%38-39
     balanced_accuracy tavanına takılı kalması üzerine eklendi). Ortak
     eğitim iskeleti için bkz. `_train_sequence_model`."""
+    from .patchtst_model import PatchTSTSignalModel  # lazy: torch yalnızca burada, gerçekten gerektiğinde yüklenir
+
     model = PatchTSTSignalModel(
         seq_len=seq_len, patch_len=patch_len, stride=stride, d_model=d_model, nhead=nhead, num_layers=num_layers, dropout=dropout
     )
