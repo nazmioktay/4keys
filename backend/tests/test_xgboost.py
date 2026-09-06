@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 
 from app.exchanges.base import Exchange
 from app.ml.dataset import build_training_dataset, build_training_dataset_with_time
@@ -350,3 +351,39 @@ def test_sweep_lookback_values_reports_error_without_stopping_the_sweep(monkeypa
 
     assert points[0].error is not None
     assert points[1].error is None
+
+
+def test_stale_model_features_raise_clear_error(tmp_path):
+    """Regresyon (üretimde yaşandı): kod `ALL_FEATURE_COLUMNS`'a yeni özellik
+    eklendikten sonra modeller yeniden eğitilmezse, XGBoost ham bir
+    "feature_names mismatch" dökümü fırlatıyordu — kullanıcı için anlamsız.
+    Artık ne yapılması gerektiğini SÖYLEYEN bir hata veriyor."""
+    from app.ml.model import SignalModel, StaleModelFeaturesError
+
+    X, y = _synthetic_features_and_labels(40)
+    model = SignalModel()
+    model.fit(X, y)
+    path = tmp_path / "m.joblib"
+    model.save(path)
+
+    # diskteki model ESKİ bir özellik setiyle eğitilmiş gibi davran
+    reloaded = SignalModel.load_from(path)
+    reloaded.feature_columns = [c for c in reloaded.feature_columns if c != reloaded.feature_columns[-1]]
+
+    with pytest.raises(StaleModelFeaturesError) as exc:
+        reloaded.predict_batch(X)
+    assert "train-all.sh" in str(exc.value)
+
+
+def test_freshly_trained_model_records_current_feature_columns(tmp_path):
+    from app.ml.features import ALL_FEATURE_COLUMNS
+    from app.ml.model import SignalModel
+
+    X, y = _synthetic_features_and_labels(40)
+    model = SignalModel()
+    model.fit(X, y)
+    assert model.feature_columns == list(ALL_FEATURE_COLUMNS)
+
+    path = tmp_path / "m.joblib"
+    model.save(path)
+    assert SignalModel.load_from(path).feature_columns == list(ALL_FEATURE_COLUMNS)

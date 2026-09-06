@@ -17,6 +17,17 @@ from .features import ALL_FEATURE_COLUMNS as FEATURE_COLUMNS
 DEFAULT_MODEL_PATH = Path(__file__).parent / "artifacts" / "signal_model.joblib"
 
 
+class StaleModelFeaturesError(ValueError):
+    """Diskteki model, kodun ŞU ANKİ özellik listesinden (`ALL_FEATURE_COLUMNS`)
+    FARKLI bir özellik setiyle eğitilmiş — yani kod güncellendikten sonra
+    modeller yeniden eğitilmemiş.
+
+    `ValueError`'dan türer, çünkü API katmanındaki mevcut `except ValueError`
+    işleyicileri bunu otomatik olarak 422 + anlaşılır mesaja çevirir
+    (bkz. `app.api.routes.backtest`). Aksi halde kullanıcı, XGBoost'un ham
+    "feature_names mismatch" dökümünü görüyordu."""
+
+
 def _select_features(X: pd.DataFrame) -> pd.DataFrame:
     """`FEATURE_COLUMNS`'ı seçer; eksik kolonları (ör. makro geçmişi henüz
     kısa olduğu için NaN kalan satırlar, veya makro merge'den geçmemiş
@@ -169,8 +180,16 @@ class SignalModel:
         self._calibration_cv = 3
         self._is_fitted = False
         self.is_calibrated = False
+        # Modelin EĞİTİLDİĞİ özellik listesi — diske de yazılır. Kod tarafında
+        # `ALL_FEATURE_COLUMNS`'a yeni bir özellik eklendiğinde (ör. open
+        # interest, üst zaman dilimi), DİSKTEKİ eski model artık uyumsuz kalır;
+        # bu liste sayesinde durum ANLAŞILIR bir hatayla bildirilir (bkz.
+        # `StaleModelFeaturesError`) — aksi halde kullanıcı ham bir XGBoost
+        # "feature_names mismatch" dökümüyle karşılaşıyordu.
+        self.feature_columns: list[str] | None = None
 
     def fit(self, X: pd.DataFrame, y: pd.Series) -> None:
+        self.feature_columns = list(FEATURE_COLUMNS)
         X_features = _select_features(X)
         class_counts = y.value_counts()
         min_class_count = int(class_counts.min()) if len(class_counts) else 0
@@ -226,6 +245,24 @@ class SignalModel:
     def _require_fitted(self) -> None:
         if not self._is_fitted:
             raise RuntimeError("Model henüz eğitilmedi. Önce fit() veya load() çağırın.")
+        self._require_current_features()
+
+    def _require_current_features(self) -> None:
+        """Diskten yüklenen model, kodun ŞU ANKİ özellik listesiyle mi
+        eğitilmiş? Değilse ANLAŞILIR bir hata ver — bu, kod güncellendikten
+        (yeni özellik eklendikten) sonra `deploy/train-all.sh` çalıştırmayı
+        UNUTMANIN normal ve tekrar eden sonucudur."""
+        if self.feature_columns is None:  # eski dosya: bilgi yok, kontrol edilemez
+            return
+        if list(self.feature_columns) == list(FEATURE_COLUMNS):
+            return
+        missing = [c for c in FEATURE_COLUMNS if c not in self.feature_columns]
+        extra = [c for c in self.feature_columns if c not in FEATURE_COLUMNS]
+        raise StaleModelFeaturesError(
+            "Diskteki model ESKİ bir özellik setiyle eğitilmiş — kod güncellendikten sonra modeller yeniden "
+            "eğitilmemiş görünüyor. Çözüm: sunucuda `bash deploy/train-all.sh` çalıştırın. "
+            f"(modelde eksik olan yeni özellikler: {missing or 'yok'}; modelde olup kodda olmayanlar: {extra or 'yok'})"
+        )
 
     def predict(self, feature_row: pd.Series) -> Prediction:
         self._require_fitted()
@@ -323,7 +360,15 @@ class SignalModel:
 
     def save(self, path: Path = DEFAULT_MODEL_PATH) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
-        joblib.dump({"pipeline": self._pipeline, "base_pipeline": self._base_pipeline, "algorithm": self.algorithm}, path)
+        joblib.dump(
+            {
+                "pipeline": self._pipeline,
+                "base_pipeline": self._base_pipeline,
+                "algorithm": self.algorithm,
+                "feature_columns": self.feature_columns,
+            },
+            path,
+        )
 
     def load(self, path: Path = DEFAULT_MODEL_PATH) -> None:
         payload = joblib.load(path)
@@ -331,6 +376,9 @@ class SignalModel:
             self._pipeline = payload["pipeline"]
             self._base_pipeline = payload["base_pipeline"]
             self.algorithm = payload.get("algorithm", "xgboost")
+            # Eski dosyalarda bu alan yok -> None (kontrol atlanır, geriye
+            # dönük uyumluluk; yeni bir eğitim yapılınca dolar).
+            self.feature_columns = payload.get("feature_columns")
         else:
             # Geriye dönük uyumluluk: eski model dosyaları çıplak pipeline'dı (MLP).
             self._pipeline = payload
