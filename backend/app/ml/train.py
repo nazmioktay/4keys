@@ -989,7 +989,12 @@ _ENSEMBLE_LABELING = {
 }
 
 
-def train_all_models(exchange: Exchange, symbols: list[str], skip_steps: frozenset[str] = frozenset()) -> list[TrainAllStepResult]:
+def train_all_models(
+    exchange: Exchange,
+    symbols: list[str],
+    skip_steps: frozenset[str] = frozenset(),
+    lookback: int | None = None,
+) -> list[TrainAllStepResult]:
     """Tüm modelleri (XGBoost -> meta-label -> LSTM -> online -> regime)
     sırayla, deploy script'lerinde (`deploy/train-xgboost-best-labeling.sh`,
     `train-meta.sh`, `train-lstm-btc-best-labeling.sh`, `train-online-btc.sh`,
@@ -1011,6 +1016,10 @@ def train_all_models(exchange: Exchange, symbols: list[str], skip_steps: frozens
     kutuda LSTM'i (kalite eşiğini hiç geçemiyorsa, atlamanın pratik bir
     kaybı da yoktur) atlamak, kalan adımların tamamlanma şansını belirgin
     şekilde artırabilir.
+
+    `lookback` verilirse `settings.ml_train_lookback`'i EZER — ör. kutunun
+    belleğine göre mum sayısını hızlıca deneyerek (kod/`.env` değişikliği
+    olmadan) test etmek için (bkz. `python -m app.cli train-all --lookback`).
 
     KRİTİK — TÜM ensemble üyeleri AYNI hedefi öğrenir: XGBoost, LSTM ve
     online model `_ENSEMBLE_LABELING` ile TEK BİR etiketleme tanımını
@@ -1041,7 +1050,7 @@ def train_all_models(exchange: Exchange, symbols: list[str], skip_steps: frozens
             # dengeli bir 3 sınıf dağılımı veriyor (üretimde doğrulandı: nötr
             # oranı %84.7 -> %17.7); gerçek dağılım her eğitimde
             # `true_class_counts` ile raporlanır.
-            primary = train_signal_model_validated(exchange, symbols, **_ENSEMBLE_LABELING)
+            primary = train_signal_model_validated(exchange, symbols, lookback=lookback, **_ENSEMBLE_LABELING)
             detail = (
                 f"{primary.rows_used} satır, oos_balanced_acc={primary.out_of_sample.balanced_accuracy:.3f}, "
                 f"gerçek={primary.out_of_sample.true_class_counts}, "
@@ -1077,7 +1086,7 @@ def train_all_models(exchange: Exchange, symbols: list[str], skip_steps: frozens
             # yapar (XGBoost, kendi öğrendiği sorunun cevabını doğru verse
             # bile FARKLI bir soruya göre "yanlış" sayılır) — üretimde tam
             # olarak bu yaşandı: 768 açılış girişiminin 767'si veto edildi.
-            _, meta_rows = train_meta_label_model(exchange, symbols, primary.model, **_ENSEMBLE_LABELING)
+            _, meta_rows = train_meta_label_model(exchange, symbols, primary.model, lookback=lookback, **_ENSEMBLE_LABELING)
             results.append(TrainAllStepResult("meta_label", True, f"{meta_rows} satır"))
         except ValueError as exc:
             results.append(TrainAllStepResult("meta_label", False, str(exc)))
@@ -1098,7 +1107,7 @@ def train_all_models(exchange: Exchange, symbols: list[str], skip_steps: frozens
         results.append(TrainAllStepResult("online", True, "atlandı (skip_steps)"))
     else:
         try:
-            _, online_report = train_online_signal_model(exchange, symbols, window_size=500, **_ENSEMBLE_LABELING)
+            _, online_report = train_online_signal_model(exchange, symbols, window_size=500, lookback=lookback, **_ENSEMBLE_LABELING)
             detail = f"{online_report.rows_used} satır, overall_balanced_acc={online_report.overall_balanced_accuracy:.3f}"
             if not online_report.accepted:
                 detail = f"REDDEDİLDİ: {online_report.rejection_reason} ({detail})"

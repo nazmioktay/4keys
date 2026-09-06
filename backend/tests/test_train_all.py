@@ -191,3 +191,34 @@ def test_train_all_models_skip_steps_can_skip_multiple_independent_steps(monkeyp
     assert by_step["xgboost"].ok is True
     assert by_step["meta_label"].ok is True
     assert by_step["regime"].ok is True
+
+
+def test_train_all_models_lookback_override_forwarded_to_active_steps(monkeypatch):
+    """Bkz. README "temel sadeleşme": `lookback`, kutunun belleğine göre mum
+    sayısını `.env` değişikliği olmadan hızlıca denemek için eklendi —
+    XGBoost/meta-label/online çağrılarına GERÇEKTEN ulaştığını doğrular."""
+    seen: dict[str, int | None] = {}
+
+    def _fake_primary(exchange, symbols, lookback=None, **_k):
+        seen["xgboost"] = lookback
+        return _FakePrimaryResult()
+
+    def _fake_meta(exchange, symbols, primary_model, lookback=None, **_k):
+        seen["meta_label"] = lookback
+        return (object(), 500)
+
+    def _fake_online(exchange, symbols, window_size=500, lookback=None, **_k):
+        seen["online"] = lookback
+        return (object(), _FakeOnlineReport())
+
+    monkeypatch.setattr(train_module, "train_signal_model_validated", _fake_primary)
+    monkeypatch.setattr(train_module, "train_meta_label_model", _fake_meta)
+    monkeypatch.setattr(train_module, "train_online_signal_model", _fake_online)
+    monkeypatch.setattr(train_module, "train_lstm_signal_model", lambda *a, **k: _FakeLSTMResult())
+    monkeypatch.setattr(
+        train_module, "train_signal_models_by_regime", lambda *a, **k: (object(), [_FakeRegimeResult(0)])
+    )
+
+    train_module.train_all_models(object(), ["BTC/USDT:USDT"], lookback=15000)
+
+    assert seen == {"xgboost": 15000, "meta_label": 15000, "online": 15000}

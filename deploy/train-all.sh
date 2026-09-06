@@ -90,6 +90,12 @@ if [ "${#SKIP_LIST[@]}" -gt 0 ]; then
   SKIP_ARGS=(--skip "${SKIP_LIST[@]}")
 fi
 
+LOOKBACK_ARGS=()
+if [ -n "${LOOKBACK:-}" ]; then
+  echo "==> Mum sayisi ${LOOKBACK} ile eziliyor (settings.ml_train_lookback yerine)."
+  LOOKBACK_ARGS=(--lookback "$LOOKBACK")
+fi
+
 NETWORK_ARGS=()
 if docker network inspect "$NETWORK" >/dev/null 2>&1; then
   echo "==> 4keys-net agi bulundu, egitim konteyneri ona baglanacak (veritabani erisimi icin)."
@@ -117,7 +123,7 @@ docker run --rm \
   --env-file "$ENV_FILE" \
   -v fourkeys_ml_artifacts:/app/app/ml/artifacts \
   4keys-backend \
-  python -m app.cli train-all "${SYMBOLS_ARGS[@]}" "${SKIP_ARGS[@]}"
+  python -m app.cli train-all "${SYMBOLS_ARGS[@]}" "${SKIP_ARGS[@]}" "${LOOKBACK_ARGS[@]}"
 TRAIN_EXIT=$?
 
 echo

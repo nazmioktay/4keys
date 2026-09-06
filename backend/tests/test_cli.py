@@ -11,8 +11,9 @@ def test_train_all_cli_prints_json_and_returns_zero_on_success(monkeypatch, caps
     def fake_resolve_symbols(exchange, symbols):
         return symbols or ["BTC/USDT:USDT"]
 
-    def fake_train_all_models(exchange, symbols, skip_steps=frozenset()):
+    def fake_train_all_models(exchange, symbols, skip_steps=frozenset(), lookback=None):
         assert skip_steps == frozenset()
+        assert lookback is None
         return [TrainAllStepResult("xgboost", True, "detail")]
 
     monkeypatch.setattr("app.api.routes.ml._resolve_symbols", fake_resolve_symbols)
@@ -37,7 +38,7 @@ def test_train_all_cli_skip_forwards_to_train_all_models(monkeypatch, capsys):
     def fake_resolve_symbols(exchange, symbols):
         return symbols or ["BTC/USDT:USDT"]
 
-    def fake_train_all_models(exchange, symbols, skip_steps=frozenset()):
+    def fake_train_all_models(exchange, symbols, skip_steps=frozenset(), lookback=None):
         seen_skip_steps["value"] = skip_steps
         return [TrainAllStepResult("lstm", True, "atlandı (skip_steps)")]
 
@@ -49,6 +50,26 @@ def test_train_all_cli_skip_forwards_to_train_all_models(monkeypatch, capsys):
     exit_code = main(["train-all", "--skip", "lstm"])
     assert exit_code == 0
     assert seen_skip_steps["value"] == frozenset({"lstm"})
+
+
+def test_train_all_cli_lookback_forwards_to_train_all_models(monkeypatch, capsys):
+    seen_lookback = {}
+
+    def fake_resolve_symbols(exchange, symbols):
+        return symbols or ["BTC/USDT:USDT"]
+
+    def fake_train_all_models(exchange, symbols, skip_steps=frozenset(), lookback=None):
+        seen_lookback["value"] = lookback
+        return [TrainAllStepResult("xgboost", True, "detail")]
+
+    monkeypatch.setattr("app.api.routes.ml._resolve_symbols", fake_resolve_symbols)
+    monkeypatch.setattr("app.ml.train.train_all_models", fake_train_all_models)
+    monkeypatch.setattr(cli_module, "init_db", lambda: None)
+    monkeypatch.setattr(cli_module, "get_exchange", lambda exchange_id: object())
+
+    exit_code = main(["train-all", "--lookback", "15000"])
+    assert exit_code == 0
+    assert seen_lookback["value"] == 15000
 
 
 def test_train_all_cli_returns_nonzero_when_no_symbols_found(monkeypatch, capsys):

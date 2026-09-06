@@ -301,6 +301,7 @@ def train(payload: TrainRequest) -> TrainResponse:
 class TrainAllRequest(BaseModel):
     symbols: list[str] | None = None
     skip_steps: list[Literal["xgboost", "meta_label", "lstm", "online", "regime"]] | None = None
+    lookback: int | None = None  # settings.ml_train_lookback'i EZER — bkz. app.cli --lookback ile AYNI amaç
 
 
 class TrainAllStepModel(BaseModel):
@@ -330,7 +331,7 @@ def train_all(payload: TrainAllRequest) -> TrainAllResponse:
     if not symbols:
         raise HTTPException(status_code=400, detail="Eğitim için sembol bulunamadı.")
 
-    results = train_all_models(exchange, symbols, skip_steps=frozenset(payload.skip_steps or []))
+    results = train_all_models(exchange, symbols, skip_steps=frozenset(payload.skip_steps or []), lookback=payload.lookback)
     return TrainAllResponse(
         symbols_used=len(symbols),
         steps=[TrainAllStepModel(step=r.step, ok=r.ok, detail=r.detail) for r in results],
