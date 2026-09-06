@@ -110,6 +110,20 @@ fi
 if [ "${SKIP_RECREATE:-0}" != "1" ]; then
   echo "==> Canli API taze bellek tabaniyla yeniden olusturuluyor (birkac saniyelik kisa kesinti)..."
   bash "$(dirname "$0")/recreate-backend.sh"
+
+  # Egitimi HEMEN baslatmak, backend'in KENDI baslangic yukunu (pandas/
+  # xgboost/sklearn import'lari, init_db) egitimin yukuyle CAKISTIRIRDI -
+  # ikisi ayni anda bellek isteyip birbirini kotulestirebilir. /health
+  # yanit verene kadar (import'lar/uvicorn baslama BITTI demektir) kisa bir
+  # sure beklenir - sabit bir sleep yerine, gercek hazir olma durumuna gore.
+  echo "==> Canli API'nin tam baslamasi bekleniyor..."
+  for _ in $(seq 1 30); do
+    if curl -sf -o /dev/null http://127.0.0.1:8000/health; then
+      echo "==> Canli API hazir."
+      break
+    fi
+    sleep 1
+  done
 else
   echo "==> Canli API yeniden olusturma ATLANDI (SKIP_RECREATE=1) - mevcut (buyumus olabilecek) bellek tabaniyla devam ediliyor."
 fi
