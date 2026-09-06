@@ -39,6 +39,16 @@ OUT_FILE="/tmp/diagnose-oom-$(date +%Y%m%d-%H%M%S).txt"
   echo "--- (macro/orderbook/open_interest_snapshots: egitim/canli karar dongusu bunlarin TAMAMINI (200.000 satira kadar, lookback'ten BAGIMSIZ) yukluyor - buyukse muhtemel OOM kaynagi) ---"
   echo "--- (feature_snapshots/signals buyukse ENDISELENME: incelendi, feature_snapshots SADECE YAZILIYOR - egitim/canli kod bunu OKUMUYOR (bkz. README) - artik varsayilan olarak da yazilmiyor (ml_persist_feature_snapshots=False); eskiden birikmis satirlari temizlemek icin: bash deploy/truncate-feature-snapshots.sh) ---"
   docker exec 4keys-db bash -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "SELECT relname AS tablo, n_live_tup AS satir_sayisi, pg_size_pretty(pg_total_relation_size(relid)) AS boyut FROM pg_stat_user_tables ORDER BY n_live_tup DESC;"' 2>&1
+  echo
+  echo "=== Model durumlari (LSTM/online aktif mi? - aktifse backtest/karar dongusu torch'u/modeli yukler) ==="
+  echo "--- LSTM (varsa) ---"
+  docker exec 4keys-backend cat /app/app/ml/artifacts/lstm_model.pt.status.json 2>&1
+  echo
+  echo "--- Online (varsa) ---"
+  docker exec 4keys-backend cat /app/app/ml/artifacts/online_model.joblib.status.json 2>&1
+  echo
+  echo "--- artifacts klasorundeki tum dosyalar (boyutlariyla) ---"
+  docker exec 4keys-backend ls -la /app/app/ml/artifacts/ 2>&1
 } | tee "$OUT_FILE"
 
 echo
