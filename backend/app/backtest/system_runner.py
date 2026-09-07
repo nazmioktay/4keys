@@ -960,3 +960,171 @@ def run_periodic_optimization(
         current_total_pnl_pct=current_report.total_pnl_pct,
         current_max_drawdown_pct=current_report.max_drawdown_pct,
     )
+
+
+@dataclass
+class XGBHyperparameterSweepPoint:
+    n_estimators: int
+    max_depth: int
+    learning_rate: float
+    oos_balanced_accuracy: float
+    trades_closed: int
+    win_rate_pct: float
+    total_pnl_pct: float
+    max_drawdown_pct: float
+    error: str | None = None
+
+
+def sweep_xgboost_hyperparameters(
+    exchange: Exchange,
+    symbols: list[str],
+    base_request: SystemBacktestRequest,
+    n_estimators_values: list[int],
+    max_depth_values: list[int],
+    learning_rate_values: list[float],
+    meta_model: MetaLabelModel | None = None,
+    online_model: OnlineSignalModel | None = None,
+) -> list[XGBHyperparameterSweepPoint]:
+    """`n_estimators` × `max_depth` × `learning_rate` ızgarasında YENİ bir
+    XGBoost modeli eğitip (bkz. README "karlılık" — bu hiperparametreler
+    şimdiye kadar HİÇ ayarlanmadı, hep `_XGBClassifierWrapper`'ın sabit
+    varsayılanlarıyla — 300/4/0.05 — çalıştı) her kombinasyon için HEM
+    kendi izole `oos_balanced_accuracy`'sini HEM DE (bkz. README "LSTM
+    denendi" bulgusu — izole doğruluk ensemble'a katkıyı GARANTİ ETMEZ)
+    TAM SİSTEM backtest metriklerini (işlem sayısı/kazanma oranı/PnL/max
+    drawdown) döner. Karar için asıl güvenilecek olan PnL/drawdown'dır,
+    yalnızca oos_balanced_accuracy DEĞİL.
+
+    Her aday `persist=False` ile eğitilir (üretim modelinin üzerine
+    YAZILMAZ) ve `run_system_backtest(persist=False)` ile değerlendirilir
+    (`backtest_runs` tablosunu kirletmez). YAKLAŞıK BİR NOKTA: holdout
+    sınırı (`restrict_to_holdout=True` iken) hâlâ o an DİSKTE KAYITLI
+    üretim modelinin kendi holdout başlangıcından okunur (bkz.
+    `run_system_backtest`) — semboller/lookback/etiketleme AYNI kaldığı
+    sürece (yalnızca hiperparametreler değiştiği için) bu sınır adaylar
+    arasında pratikte hemen hemen AYNIDIR, ama üretim modeli YAKIN
+    zamanda farklı bir veriyle eğitilmişse küçük bir sapma olabilir.
+
+    Otomatik "en iyi"yi SEÇMEZ — karar operatöre kalır.
+    """
+    from app.ml.train import _ENSEMBLE_LABELING, train_signal_model_validated
+
+    results: list[XGBHyperparameterSweepPoint] = []
+    for n_estimators in n_estimators_values:
+        for max_depth in max_depth_values:
+            for learning_rate in learning_rate_values:
+                xgb_params = {"n_estimators": n_estimators, "max_depth": max_depth, "learning_rate": learning_rate}
+                try:
+                    train_result = train_signal_model_validated(
+                        exchange, symbols, persist=False, xgb_params=xgb_params, **_ENSEMBLE_LABELING
+                    )
+                    report = run_system_backtest(
+                        exchange, train_result.model, meta_model, base_request, online_model=online_model, persist=False
+                    )
+                    results.append(
+                        XGBHyperparameterSweepPoint(
+                            n_estimators=n_estimators,
+                            max_depth=max_depth,
+                            learning_rate=learning_rate,
+                            oos_balanced_accuracy=train_result.out_of_sample.balanced_accuracy,
+                            trades_closed=report.trades_closed,
+                            win_rate_pct=report.win_rate_pct,
+                            total_pnl_pct=report.total_pnl_pct,
+                            max_drawdown_pct=report.max_drawdown_pct,
+                        )
+                    )
+                except ValueError as exc:
+                    results.append(
+                        XGBHyperparameterSweepPoint(
+                            n_estimators=n_estimators,
+                            max_depth=max_depth,
+                            learning_rate=learning_rate,
+                            oos_balanced_accuracy=0.0,
+                            trades_closed=0,
+                            win_rate_pct=0.0,
+                            total_pnl_pct=0.0,
+                            max_drawdown_pct=0.0,
+                            error=str(exc),
+                        )
+                    )
+    return results
+
+
+@dataclass
+class LabelingTargetSweepPoint:
+    horizon: int
+    atr_multiplier: float
+    oos_balanced_accuracy: float
+    trades_closed: int
+    win_rate_pct: float
+    total_pnl_pct: float
+    max_drawdown_pct: float
+    error: str | None = None
+
+
+def sweep_xgboost_labeling_targets(
+    exchange: Exchange,
+    symbols: list[str],
+    base_request: SystemBacktestRequest,
+    horizon_values: list[int],
+    atr_multiplier_values: list[float],
+    meta_model: MetaLabelModel | None = None,
+    online_model: OnlineSignalModel | None = None,
+) -> list[LabelingTargetSweepPoint]:
+    """`horizon` (ATR-triple-barrier'da ZAMAN bariyeri, bar) × `atr_multiplier`
+    (kâr/zarar bariyerinin ATR çarpanı — `take_profit_pct`/`stop_loss_pct`
+    ile AYNI değer kullanılır, simetrik bariyer) ızgarasında YENİ bir
+    XGBoost modeli eğitip TAM SİSTEM backtest metriklerini döner.
+
+    NEDEN: şu anki hedef (3 bar/1.0×ATR, bkz. `app.ml.train._ENSEMBLE_LABELING`)
+    yalnızca TEK bir sentetik saf-gürültü kontrolüyle (sınıf dağılımı sağlıklı
+    mı) seçilmişti — gerçek veride/backtest'te sistematik olarak TARANMADI.
+    Bu, o boşluğu kapatır.
+
+    Diğer sweep'lerle AYNI desen: `persist=False`, `run_system_backtest(persist=False)`,
+    otomatik "en iyi"yi SEÇMEZ, holdout sınırı yaklaşıklığı (bkz.
+    `sweep_xgboost_hyperparameters` docstring'i) burada da geçerli.
+    """
+    from app.ml.train import train_signal_model_validated
+
+    results: list[LabelingTargetSweepPoint] = []
+    for horizon in horizon_values:
+        for atr_multiplier in atr_multiplier_values:
+            try:
+                train_result = train_signal_model_validated(
+                    exchange,
+                    symbols,
+                    persist=False,
+                    labeling_method="atr_triple_barrier",
+                    horizon=horizon,
+                    take_profit_pct=atr_multiplier,
+                    stop_loss_pct=atr_multiplier,
+                )
+                report = run_system_backtest(
+                    exchange, train_result.model, meta_model, base_request, online_model=online_model, persist=False
+                )
+                results.append(
+                    LabelingTargetSweepPoint(
+                        horizon=horizon,
+                        atr_multiplier=atr_multiplier,
+                        oos_balanced_accuracy=train_result.out_of_sample.balanced_accuracy,
+                        trades_closed=report.trades_closed,
+                        win_rate_pct=report.win_rate_pct,
+                        total_pnl_pct=report.total_pnl_pct,
+                        max_drawdown_pct=report.max_drawdown_pct,
+                    )
+                )
+            except ValueError as exc:
+                results.append(
+                    LabelingTargetSweepPoint(
+                        horizon=horizon,
+                        atr_multiplier=atr_multiplier,
+                        oos_balanced_accuracy=0.0,
+                        trades_closed=0,
+                        win_rate_pct=0.0,
+                        total_pnl_pct=0.0,
+                        max_drawdown_pct=0.0,
+                        error=str(exc),
+                    )
+                )
+    return results

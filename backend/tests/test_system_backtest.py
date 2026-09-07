@@ -908,3 +908,157 @@ def test_run_periodic_optimization_skips_unreliable_points_and_never_persists(mo
     assert result.current_kelly_multiplier == base_request.kelly_multiplier
     assert result.current_kelly_min_trades == base_request.kelly_min_trades
     assert result.current_total_pnl_pct == pytest.approx(1.0)
+
+
+# --- XGBoost hiperparametre taraması (sweep_xgboost_hyperparameters) ---
+
+
+def test_sweep_xgboost_hyperparameters_covers_full_grid_and_reports_backtest_metrics(monkeypatch):
+    """Her (n_estimators, max_depth, learning_rate) kombinasyonu için YENİ
+    bir aday eğitilip (`persist=False`) TAM SİSTEM backtest'i (`persist=False`)
+    çalıştırılmalı — kendi izole oos_balanced_accuracy'si VE gerçek backtest
+    metrikleri (PnL/kazanma/drawdown) birlikte raporlanmalı (bkz. README
+    'LSTM denendi' bulgusu: izole doğruluk tek başına yeterli değil)."""
+    from app.backtest import system_runner
+    from app.ml import train as train_module
+
+    seen_xgb_params = []
+
+    class _FakeOutOfSample:
+        balanced_accuracy = 0.42
+
+    class _FakeTrainResult:
+        model = object()
+        out_of_sample = _FakeOutOfSample()
+
+    def fake_train_signal_model_validated(exchange, symbols, persist=True, xgb_params=None, **kwargs):
+        assert persist is False
+        seen_xgb_params.append(xgb_params)
+        return _FakeTrainResult()
+
+    def fake_run_system_backtest(exchange, model, meta_model, request, lstm_model=None, online_model=None, persist=True):
+        assert persist is False
+        return SystemBacktestReport(
+            symbol=request.symbol, timeframe="1h", candles_used=100,
+            period_start="2024-01-01T00:00:00", period_end="2024-01-05T00:00:00",
+            initial_balance=1000.0, final_equity=1000.0, trades_closed=10,
+            win_rate_pct=60.0, total_pnl_quote=0.0, total_pnl_pct=1.5,
+            daily_pnl_quote=0.0, daily_pnl_pct=0.0, monthly_pnl_quote=0.0, monthly_pnl_pct=0.0,
+            max_drawdown_pct=0.5, trades=[],
+        )
+
+    monkeypatch.setattr(train_module, "train_signal_model_validated", fake_train_signal_model_validated)
+    monkeypatch.setattr(system_runner, "run_system_backtest", fake_run_system_backtest)
+
+    points = system_runner.sweep_xgboost_hyperparameters(
+        exchange=None,
+        symbols=["BTC/USDT:USDT"],
+        base_request=SystemBacktestRequest(),
+        n_estimators_values=[150, 300],
+        max_depth_values=[3, 4],
+        learning_rate_values=[0.05],
+    )
+
+    assert len(points) == 4  # 2 x 2 x 1
+    assert len(seen_xgb_params) == 4
+    assert {"n_estimators": 150, "max_depth": 3, "learning_rate": 0.05} in seen_xgb_params
+    for p in points:
+        assert p.error is None
+        assert p.oos_balanced_accuracy == 0.42
+        assert p.total_pnl_pct == 1.5
+
+
+def test_sweep_xgboost_hyperparameters_records_error_without_stopping(monkeypatch):
+    from app.backtest import system_runner
+    from app.ml import train as train_module
+
+    def fake_train_signal_model_validated(exchange, symbols, persist=True, xgb_params=None, **kwargs):
+        if xgb_params["max_depth"] == 4:
+            raise ValueError("simüle edilmiş hata")
+
+        class _R:
+            model = object()
+
+            class out_of_sample:
+                balanced_accuracy = 0.4
+
+        return _R()
+
+    def fake_run_system_backtest(exchange, model, meta_model, request, lstm_model=None, online_model=None, persist=True):
+        return SystemBacktestReport(
+            symbol=request.symbol, timeframe="1h", candles_used=100,
+            period_start="2024-01-01T00:00:00", period_end="2024-01-05T00:00:00",
+            initial_balance=1000.0, final_equity=1000.0, trades_closed=5,
+            win_rate_pct=50.0, total_pnl_quote=0.0, total_pnl_pct=0.5,
+            daily_pnl_quote=0.0, daily_pnl_pct=0.0, monthly_pnl_quote=0.0, monthly_pnl_pct=0.0,
+            max_drawdown_pct=0.3, trades=[],
+        )
+
+    monkeypatch.setattr(train_module, "train_signal_model_validated", fake_train_signal_model_validated)
+    monkeypatch.setattr(system_runner, "run_system_backtest", fake_run_system_backtest)
+
+    points = system_runner.sweep_xgboost_hyperparameters(
+        exchange=None,
+        symbols=["BTC/USDT:USDT"],
+        base_request=SystemBacktestRequest(),
+        n_estimators_values=[300],
+        max_depth_values=[3, 4],
+        learning_rate_values=[0.05],
+    )
+
+    assert len(points) == 2
+    ok_point = next(p for p in points if p.max_depth == 3)
+    err_point = next(p for p in points if p.max_depth == 4)
+    assert ok_point.error is None
+    assert err_point.error is not None and "simüle edilmiş hata" in err_point.error
+
+
+# --- Etiketleme hedefi taraması (sweep_xgboost_labeling_targets) ---
+
+
+def test_sweep_xgboost_labeling_targets_covers_full_grid(monkeypatch):
+    from app.backtest import system_runner
+    from app.ml import train as train_module
+
+    seen_calls = []
+
+    class _FakeOutOfSample:
+        balanced_accuracy = 0.4
+
+    class _FakeTrainResult:
+        model = object()
+        out_of_sample = _FakeOutOfSample()
+
+    def fake_train_signal_model_validated(exchange, symbols, persist=True, labeling_method=None, horizon=None, take_profit_pct=None, stop_loss_pct=None, **kwargs):
+        assert persist is False
+        assert labeling_method == "atr_triple_barrier"
+        assert take_profit_pct == stop_loss_pct  # simetrik bariyer
+        seen_calls.append((horizon, take_profit_pct))
+        return _FakeTrainResult()
+
+    def fake_run_system_backtest(exchange, model, meta_model, request, lstm_model=None, online_model=None, persist=True):
+        return SystemBacktestReport(
+            symbol=request.symbol, timeframe="1h", candles_used=100,
+            period_start="2024-01-01T00:00:00", period_end="2024-01-05T00:00:00",
+            initial_balance=1000.0, final_equity=1000.0, trades_closed=8,
+            win_rate_pct=55.0, total_pnl_quote=0.0, total_pnl_pct=2.0,
+            daily_pnl_quote=0.0, daily_pnl_pct=0.0, monthly_pnl_quote=0.0, monthly_pnl_pct=0.0,
+            max_drawdown_pct=0.4, trades=[],
+        )
+
+    monkeypatch.setattr(train_module, "train_signal_model_validated", fake_train_signal_model_validated)
+    monkeypatch.setattr(system_runner, "run_system_backtest", fake_run_system_backtest)
+
+    points = system_runner.sweep_xgboost_labeling_targets(
+        exchange=None,
+        symbols=["BTC/USDT:USDT"],
+        base_request=SystemBacktestRequest(),
+        horizon_values=[3, 5],
+        atr_multiplier_values=[1.0, 1.5],
+    )
+
+    assert len(points) == 4
+    assert set(seen_calls) == {(3, 1.0), (3, 1.5), (5, 1.0), (5, 1.5)}
+    for p in points:
+        assert p.error is None
+        assert p.total_pnl_pct == 2.0

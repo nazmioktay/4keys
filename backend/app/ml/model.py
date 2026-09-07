@@ -127,9 +127,9 @@ class _XGBClassifierWrapper(ClassifierMixin, BaseEstimator):
         return self._model
 
 
-def _build_base_pipeline(algorithm: Algorithm = "xgboost", early_stopping: bool = True) -> Pipeline:
+def _build_base_pipeline(algorithm: Algorithm = "xgboost", early_stopping: bool = True, xgb_params: dict | None = None) -> Pipeline:
     if algorithm == "xgboost":
-        return Pipeline([("xgb", _XGBClassifierWrapper())])
+        return Pipeline([("xgb", _XGBClassifierWrapper(**(xgb_params or {})))])
 
     return Pipeline(
         [
@@ -171,9 +171,17 @@ class SignalModel:
         algorithm: Algorithm = "xgboost",
         calibrate: bool = True,
         calibration_method: Literal["sigmoid", "isotonic"] = "sigmoid",
+        xgb_params: dict | None = None,
     ) -> None:
+        # `xgb_params` (ör. {"n_estimators": 500, "max_depth": 6,
+        # "learning_rate": 0.03}) — bkz. README "karlılık": şu ana kadar
+        # XGBoost'un kendi hiperparametreleri HİÇ ayarlanmadı, hep
+        # `_XGBClassifierWrapper`'ın sabit varsayılanlarıyla (300/4/0.05)
+        # çalıştı. `app.backtest.system_runner.sweep_xgboost_hyperparameters`
+        # bunu tarayabilmek için ekler.
         self.algorithm = algorithm
-        self._base_pipeline = _build_base_pipeline(algorithm)
+        self.xgb_params = xgb_params
+        self._base_pipeline = _build_base_pipeline(algorithm, xgb_params=xgb_params)
         self._pipeline = self._base_pipeline
         self._calibrate = calibrate
         self._calibration_method = calibration_method
@@ -200,7 +208,7 @@ class SignalModel:
         # bunu kapatmak gerekir, yoksa fit() hata fırlatır. XGBoost için
         # bu kısıt yok.
         early_stopping = min_class_count >= 5
-        self._base_pipeline = _build_base_pipeline(self.algorithm, early_stopping=early_stopping)
+        self._base_pipeline = _build_base_pipeline(self.algorithm, early_stopping=early_stopping, xgb_params=self.xgb_params)
 
         # CalibratedClassifierCV, StratifiedKFold(cv) kullanır; bir sınıfın örnek
         # sayısı cv'den azsa (küçük/dengesiz eğitim setlerinde olur) hata verir.

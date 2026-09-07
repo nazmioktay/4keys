@@ -234,3 +234,101 @@ def get_optimization_history(symbol: str | None = None, limit: int = 20) -> list
     ("tutarlı mı, tek seferlik gürültü mü") gözden geçirip elle karar
     vermeli."""
     return [OptimizationRunSummary(**row) for row in db.get_recent_optimization_runs(symbol=symbol, limit=limit)]
+
+
+class SweepXGBHyperparametersRequest(BaseModel):
+    base_request: SystemBacktestRequest = Field(default_factory=SystemBacktestRequest)
+    symbols: list[str] | None = None
+    n_estimators_values: list[int] = [150, 300, 500]
+    max_depth_values: list[int] = [3, 4, 6]
+    learning_rate_values: list[float] = [0.03, 0.05, 0.1]
+
+
+class SweepXGBHyperparametersPoint(BaseModel):
+    n_estimators: int
+    max_depth: int
+    learning_rate: float
+    oos_balanced_accuracy: float
+    trades_closed: int
+    win_rate_pct: float
+    total_pnl_pct: float
+    max_drawdown_pct: float
+    error: str | None = None
+
+
+class SweepXGBHyperparametersResponse(BaseModel):
+    points: list[SweepXGBHyperparametersPoint]
+
+
+@router.post("/system/sweep-xgboost-hyperparameters", response_model=SweepXGBHyperparametersResponse)
+def sweep_xgboost_hyperparameters_route(payload: SweepXGBHyperparametersRequest) -> SweepXGBHyperparametersResponse:
+    """`n_estimators` × `max_depth` × `learning_rate` ızgarasında YENİ
+    XGBoost adayları eğitip her biri için TAM SİSTEM backtest metriklerini
+    döner — bkz. `app.backtest.system_runner.sweep_xgboost_hyperparameters`
+    docstring'i. Üretim modelinin ÜZERİNE YAZMAZ (`persist=False`), ara
+    denemeler `backtest_runs`'a YAZILMAZ. Otomatik "en iyi"yi SEÇMEZ."""
+    from app.api.routes.ml import _resolve_symbols
+    from app.backtest.system_runner import sweep_xgboost_hyperparameters
+
+    exchange = get_exchange(settings.exchange_id)
+    symbols = _resolve_symbols(exchange, payload.symbols)
+    _model, meta_model, _lstm_model, online_model = _load_ensemble_models()
+    points = sweep_xgboost_hyperparameters(
+        exchange,
+        symbols,
+        payload.base_request,
+        payload.n_estimators_values,
+        payload.max_depth_values,
+        payload.learning_rate_values,
+        meta_model=meta_model,
+        online_model=online_model,
+    )
+    return SweepXGBHyperparametersResponse(points=[SweepXGBHyperparametersPoint(**p.__dict__) for p in points])
+
+
+class SweepLabelingTargetsRequest(BaseModel):
+    base_request: SystemBacktestRequest = Field(default_factory=SystemBacktestRequest)
+    symbols: list[str] | None = None
+    horizon_values: list[int] = [2, 3, 5, 8, 12]
+    atr_multiplier_values: list[float] = [0.75, 1.0, 1.5, 2.0]
+
+
+class SweepLabelingTargetsPoint(BaseModel):
+    horizon: int
+    atr_multiplier: float
+    oos_balanced_accuracy: float
+    trades_closed: int
+    win_rate_pct: float
+    total_pnl_pct: float
+    max_drawdown_pct: float
+    error: str | None = None
+
+
+class SweepLabelingTargetsResponse(BaseModel):
+    points: list[SweepLabelingTargetsPoint]
+
+
+@router.post("/system/sweep-labeling-targets", response_model=SweepLabelingTargetsResponse)
+def sweep_labeling_targets_route(payload: SweepLabelingTargetsRequest) -> SweepLabelingTargetsResponse:
+    """`horizon` × `atr_multiplier` (ATR-triple-barrier hedefi) ızgarasında
+    YENİ XGBoost adayları eğitip her biri için TAM SİSTEM backtest
+    metriklerini döner — bkz. `app.backtest.system_runner.sweep_xgboost_labeling_targets`
+    docstring'i: şu anki hedef (3 bar/1.0×ATR) yalnızca tek bir sentetik
+    kontrolle seçilmişti, bu sweep gerçek veride sistematik tarar. Üretim
+    modelinin ÜZERİNE YAZMAZ, otomatik "en iyi"yi SEÇMEZ."""
+    from app.api.routes.ml import _resolve_symbols
+    from app.backtest.system_runner import sweep_xgboost_labeling_targets
+
+    exchange = get_exchange(settings.exchange_id)
+    symbols = _resolve_symbols(exchange, payload.symbols)
+    _model, meta_model, _lstm_model, online_model = _load_ensemble_models()
+    points = sweep_xgboost_labeling_targets(
+        exchange,
+        symbols,
+        payload.base_request,
+        payload.horizon_values,
+        payload.atr_multiplier_values,
+        meta_model=meta_model,
+        online_model=online_model,
+    )
+    return SweepLabelingTargetsResponse(points=[SweepLabelingTargetsPoint(**p.__dict__) for p in points])

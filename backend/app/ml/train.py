@@ -108,6 +108,7 @@ def train_signal_model_validated(
     walk_forward_splits: int = 5,
     embargo_frac: float = 0.02,
     persist: bool = True,
+    xgb_params: dict | None = None,
 ) -> TrainingResult:
     """`app.ml.validation`'daki overfitting korumalarıyla (walk-forward +
     purged/embargo CV + out-of-sample holdout) eğitim yapar (bkz. rehber
@@ -163,7 +164,7 @@ def train_signal_model_validated(
             )
 
     def _factory() -> SignalModel:
-        return SignalModel(algorithm=algorithm, calibrate=calibrate, calibration_method=calibration_method)
+        return SignalModel(algorithm=algorithm, calibrate=calibrate, calibration_method=calibration_method, xgb_params=xgb_params)
 
     wf_report = run_walk_forward_validation(
         X_train, y_train, train_time_frac, _factory, n_splits=walk_forward_splits, embargo_frac=embargo_frac

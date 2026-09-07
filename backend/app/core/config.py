@@ -46,13 +46,17 @@ class Settings(BaseSettings):
     # korelasyonu (aynı rejimde hareket ediyor mu) + minimum likidite.
     #
     # GÜNCELLEME (temel sadeleşme, bkz. README): `ml_train_max_symbols=1`
-    # yapıldı — sistem artık YALNIZCA BTC/USDT ile eğitiliyor, başka hiçbir
-    # sembolün OHLC verisiyle işlem/öğrenme yapılmıyor (bkz.
-    # `select_training_symbols`/`_resolve_symbols`'daki kısa-devre: limit<=1
-    # olduğunda diğer sembollerin verisi HİÇ ÇEKİLMEZ). Eski değer (5)
-    # `frozenset`/yorum olarak değil, doğrudan buradan geri açılabilir.
+    # yapılmıştı — sistem yalnızca BTC/USDT ile eğitiliyordu, bellek
+    # baskısını (o zamanki OOM krizi) azaltmak için. OOM kök nedeni
+    # (online model sınırsız büyümesi, bkz. README "OOM üretim olayı")
+    # o zamandan beri BULUNUP DÜZELTİLDİ; kullanıcı isteğiyle ("karlılığı
+    # artırmak için gereken her şeyi yap") tekrar GERİ AÇILDI — BTC-only'de
+    # ayda yalnızca ~18-20 işlem oluyordu, bu mutlak getiriyi doğrudan
+    # sınırlıyordu. `select_training_symbols`/`_resolve_symbols`'daki
+    # kısa-devre limit<=1 olduğunda hâlâ geçerli — limit>1 olunca normal
+    # (BTC + korelasyonlu ek semboller) akışa döner.
     ml_primary_symbol: str = "BTC/USDT:USDT"
-    ml_train_max_symbols: int = 1
+    ml_train_max_symbols: int = 5
     ml_min_correlation_with_primary: float = 0.4
     ml_min_quote_volume_24h: float = 5_000_000.0
 
