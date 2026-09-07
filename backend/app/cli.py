@@ -55,6 +55,7 @@ def _cmd_train_all(args: argparse.Namespace) -> int:
     results = train_all_models(exchange, symbols, skip_steps=frozenset(args.skip or []), lookback=args.lookback)
     output = {
         "symbols_used": len(symbols),
+        "symbols": symbols,
         "steps": [{"step": r.step, "ok": r.ok, "detail": r.detail} for r in results],
     }
     print(json.dumps(output, indent=2, ensure_ascii=False))

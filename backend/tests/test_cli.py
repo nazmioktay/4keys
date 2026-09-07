@@ -26,6 +26,11 @@ def test_train_all_cli_prints_json_and_returns_zero_on_success(monkeypatch, caps
 
     output = json.loads(capsys.readouterr().out)
     assert output["symbols_used"] == 1
+    # Bkz. README/kullanıcı sorusu: "uyumlu ek semboller kaç tane, neler
+    # var?" — önceden yalnızca SAYI raporlanıyordu, hangi sembollerin
+    # seçildiği (BTC + korelasyon filtresinden geçen adaylar) HİÇBİR
+    # ÇIKTIDA görünmüyordu.
+    assert output["symbols"] == ["BTC/USDT:USDT"]
     assert output["steps"] == [{"step": "xgboost", "ok": True, "detail": "detail"}]
 
 
