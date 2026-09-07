@@ -169,18 +169,40 @@ class Settings(BaseSettings):
 
     # --- Periyodik parametre optimizasyonu (walk-forward, bkz. README "karlılık") ---
     # Kullanıcı isteği: "tam otomatik... gerekli optimizasyonları öğrenme
-    # algoritmalarıyla yapacak, otonom bir bot" — bunun İLK, GÜVENLİ adımı:
-    # her hafta güncel modelle `sweep_confidence_thresholds` +
-    # `sweep_position_sizing` çalıştırıp SONUCU KAYDEDER (`optimization_runs`
-    # tablosu, `GET /backtest/system/optimization-history`) — CANLI ayarları
-    # OTOMATİK DEĞİŞTİRMEZ. Tek bir sweep'in (0.55 -> zarar) az önce
-    # gösterdiği gibi, küçük örneklemli önerileri otomatik uygulamak
-    # tehlikelidir — operatör önce birden fazla haftalık öneriyi ("tutarlı
-    # mı, tek seferlik gürültü mü") gözden geçirmeli. Otomatik uygulama
-    # (Seviye 2+) yalnızca burada birkaç haftalık bir güven geçmişi
-    # biriktikten SONRA, bilinçli bir sonraki adım olarak eklenmeli.
+    # algoritmalarıyla yapacak, otonom bir bot" — her hafta güncel modelle
+    # `sweep_confidence_thresholds` + `sweep_position_sizing` çalıştırıp
+    # sonucu KAYDEDER (`optimization_runs` tablosu, `GET
+    # /backtest/system/optimization-history`).
     ml_periodic_optimization_enabled: bool = True
     ml_periodic_optimization_seconds: int = 604800  # 7 gün
+
+    # Otomatik uygulama (kullanıcının "Seviye 2"si, açıkça istendi: "şimdi
+    # kur"): AÇIKSA, öneri iki güvenlik kapısından GEÇERSE canlı
+    # ayarlara uygulanır — (1) yeterli örneklem (bkz.
+    # `MIN_RELIABLE_TRADES_FOR_OPTIMIZATION`), (2) mevcut PnL'den en az
+    # `ml_periodic_optimization_min_improvement_pct` kadar İYİ (aksi halde
+    # gürültü farkı yüzünden gereksiz churn olur). Geçse bile TAM sıçrama
+    # YAPILMAZ — yalnızca mevcutla önerilen arasındaki mesafenin
+    # `ml_periodic_optimization_max_step_fraction`'ı kadarı uygulanır
+    # (kullanıcının kendi Level 2 önerisindeki uyarı: "öğrenme hızı düşük
+    # tutulmalı" — tek bir gürültülü haftanın parametreleri UÇTAN UCA
+    # sıçratmasını önler, birkaç hafta boyunca kademeli yakınsar). Bkz.
+    # `app.scheduler.jobs.job_periodic_optimization`.
+    ml_periodic_optimization_auto_apply_enabled: bool = True
+    ml_periodic_optimization_min_improvement_pct: float = 0.1
+    ml_periodic_optimization_max_step_fraction: float = 0.5
+
+    # Canlı karar motorunun (`app.engine.service.run_cycle_once`) HER
+    # döngüde okuduğu, `job_periodic_optimization`'ın (auto-apply açıksa)
+    # güncelleyebildiği güven eşikleri — `DecisionEngine.__init__`'in
+    # kendi varsayılanlarıyla (0.5/0.45) AYNI başlangıç değeri, ama
+    # ORADAN farklı olarak ÇALIŞMA ZAMANINDA değişebilir (kod
+    # değişikliği/`docker build` GEREKMEDEN). Kelly parametreleri
+    # (`kelly_min_trades`/`kelly_multiplier`) için ayrı bir alana gerek
+    # yok — onlar zaten `app.portfolio.shared.get_portfolio().rules`
+    # üzerinde doğrudan (ve aynı şekilde çalışma zamanında) güncellenir.
+    live_open_confidence: float = 0.5
+    live_close_confidence: float = 0.45
 
     # --- Eğitim kalite kapısı ---
     # Bir modelin out-of-sample (veya online modelde prequential) dengeli

@@ -1,5 +1,6 @@
 import pytest
 
+from app.core.config import settings
 from app.engine.service import ModelNotTrained
 from app.scheduler import jobs, status
 from app.scheduler.scheduler import get_scheduler, start_scheduler, stop_scheduler
@@ -304,16 +305,34 @@ def test_job_periodic_optimization_skips_when_no_primary_model(monkeypatch):
     assert "atlandı" in result.detail
 
 
-def test_job_periodic_optimization_records_result_without_changing_live_settings(monkeypatch):
-    """Bkz. README 'karlılık' — bu iş CANLI ayarları ASLA değiştirmemeli,
-    yalnızca `db.record_optimization_run`'a bir kayıt yazmalı (`applied=False`)."""
-    from app.backtest.system_runner import OptimizationRunResult
+def _fake_portfolio_with_rules(kelly_min_trades=40, kelly_multiplier=0.75):
+    from app.portfolio.manager import PortfolioManager
+    from app.portfolio.schemas import RiskRules
 
+    return PortfolioManager(
+        starting_equity=1000.0,
+        rules=RiskRules(position_sizing_method="kelly", kelly_min_trades=kelly_min_trades, kelly_multiplier=kelly_multiplier),
+    )
+
+
+def _setup_common_optimization_mocks(monkeypatch, fake_portfolio):
     monkeypatch.setattr(jobs, "DEFAULT_MODEL_PATH", type("P", (), {"exists": staticmethod(lambda: True)})())
     monkeypatch.setattr(jobs, "SignalModel", type("M", (), {"load_from": staticmethod(lambda: object())}))
     monkeypatch.setattr(jobs, "DEFAULT_META_MODEL_PATH", type("P", (), {"exists": staticmethod(lambda: False)})())
     monkeypatch.setattr(jobs, "get_exchange", lambda exchange_id: object())
     monkeypatch.setattr(jobs, "is_model_enabled", lambda path: False)
+    monkeypatch.setattr(jobs, "get_portfolio", lambda: fake_portfolio)
+
+
+def test_job_periodic_optimization_records_result_without_changing_live_settings_when_auto_apply_disabled(monkeypatch):
+    """Bkz. README 'karlılık' — `ml_periodic_optimization_auto_apply_enabled=False`
+    iken bu iş CANLI ayarları DEĞİŞTİRMEMELİ, yalnızca `db.record_optimization_run`'a
+    bir kayıt yazmalı (`applied=False`)."""
+    from app.backtest.system_runner import OptimizationRunResult
+
+    monkeypatch.setattr(settings, "ml_periodic_optimization_auto_apply_enabled", False)
+    fake_portfolio = _fake_portfolio_with_rules()
+    _setup_common_optimization_mocks(monkeypatch, fake_portfolio)
 
     fake_result = OptimizationRunResult(
         symbol="BTC/USDT:USDT",
@@ -339,6 +358,7 @@ def test_job_periodic_optimization_records_result_without_changing_live_settings
     recorded = {}
     monkeypatch.setattr(jobs.db, "record_optimization_run", lambda run: recorded.update(run) or 1)
 
+    original_open_confidence = settings.live_open_confidence
     jobs.job_periodic_optimization()
 
     result = status.get_all()[jobs.PERIODIC_OPTIMIZATION_JOB_ID]
@@ -347,6 +367,101 @@ def test_job_periodic_optimization_records_result_without_changing_live_settings
     assert recorded["applied"] is False
     assert recorded["recommended_open_confidence"] == 0.6
     assert recorded["current_open_confidence"] == 0.5
+    assert settings.live_open_confidence == original_open_confidence  # dokunulmadı
+    assert fake_portfolio.rules.kelly_multiplier == 0.75  # dokunulmadı
+
+
+def test_job_periodic_optimization_auto_apply_takes_a_dampened_step_not_a_full_jump(monkeypatch):
+    """Kullanıcı isteği: "şimdi kur" (otomatik uygulama, Seviye 2) — ama
+    KADEMELİ: `ml_periodic_optimization_max_step_fraction` (varsayılan 0.5)
+    kadarı uygulanmalı, önerilen değere TAM SIÇRAMA yapılmamalı (bkz.
+    kullanıcının kendi Level 2 önerisi: "öğrenme hızı düşük tutulmalı")."""
+    from app.backtest.system_runner import OptimizationRunResult
+
+    monkeypatch.setattr(settings, "ml_periodic_optimization_auto_apply_enabled", True)
+    monkeypatch.setattr(settings, "ml_periodic_optimization_max_step_fraction", 0.5)
+    monkeypatch.setattr(settings, "ml_periodic_optimization_min_improvement_pct", 0.1)
+    monkeypatch.setattr(settings, "live_open_confidence", 0.5)
+    monkeypatch.setattr(settings, "live_close_confidence", 0.45)
+    fake_portfolio = _fake_portfolio_with_rules(kelly_min_trades=40, kelly_multiplier=0.75)
+    _setup_common_optimization_mocks(monkeypatch, fake_portfolio)
+
+    fake_result = OptimizationRunResult(
+        symbol="BTC/USDT:USDT",
+        recommended_open_confidence=0.6,  # mevcuttan 0.1 uzakta
+        recommended_close_confidence=0.55,
+        recommended_kelly_min_trades=20,  # mevcuttan -20 uzakta
+        recommended_kelly_multiplier=1.0,  # mevcuttan 0.25 uzakta
+        recommended_trades_closed=50,
+        recommended_win_rate_pct=60.0,
+        recommended_total_pnl_pct=5.5,  # mevcuttan (1.0) belirgin iyi
+        recommended_max_drawdown_pct=1.0,
+        current_open_confidence=0.5,
+        current_close_confidence=0.45,
+        current_kelly_min_trades=40,
+        current_kelly_multiplier=0.75,
+        current_trades_closed=50,
+        current_win_rate_pct=55.0,
+        current_total_pnl_pct=1.0,
+        current_max_drawdown_pct=0.8,
+    )
+    monkeypatch.setattr(jobs, "run_periodic_optimization", lambda *a, **k: fake_result)
+
+    recorded = {}
+    monkeypatch.setattr(jobs.db, "record_optimization_run", lambda run: recorded.update(run) or 1)
+
+    jobs.job_periodic_optimization()
+
+    result = status.get_all()[jobs.PERIODIC_OPTIMIZATION_JOB_ID]
+    assert result.ok is True
+    assert "UYGULANDI" in result.detail
+    assert recorded["applied"] is True
+
+    # %50 adım -> tam ortada, ne mevcutta ne önerilende
+    assert settings.live_open_confidence == pytest.approx(0.55)
+    assert settings.live_close_confidence == pytest.approx(0.5)
+    assert fake_portfolio.rules.kelly_multiplier == pytest.approx(0.875)
+    assert fake_portfolio.rules.kelly_min_trades == 30  # round(40 + 0.5*(20-40))
+
+
+def test_job_periodic_optimization_does_not_apply_when_improvement_too_small(monkeypatch):
+    """Öneri mevcuttan yalnızca çok az iyiyse (gürültü payı içinde
+    kalabilir) uygulanmamalı — `ml_periodic_optimization_min_improvement_pct`
+    kapısı."""
+    from app.backtest.system_runner import OptimizationRunResult
+
+    monkeypatch.setattr(settings, "ml_periodic_optimization_auto_apply_enabled", True)
+    monkeypatch.setattr(settings, "ml_periodic_optimization_min_improvement_pct", 0.1)
+    fake_portfolio = _fake_portfolio_with_rules()
+    _setup_common_optimization_mocks(monkeypatch, fake_portfolio)
+
+    fake_result = OptimizationRunResult(
+        symbol="BTC/USDT:USDT",
+        recommended_open_confidence=0.55,
+        recommended_close_confidence=0.5,
+        recommended_kelly_min_trades=40,
+        recommended_kelly_multiplier=0.8,
+        recommended_trades_closed=50,
+        recommended_win_rate_pct=60.0,
+        recommended_total_pnl_pct=1.02,  # mevcuttan yalnızca %0.02 iyi (< 0.1 eşiği)
+        recommended_max_drawdown_pct=1.0,
+        current_open_confidence=0.5,
+        current_close_confidence=0.45,
+        current_kelly_min_trades=40,
+        current_kelly_multiplier=0.75,
+        current_trades_closed=50,
+        current_win_rate_pct=55.0,
+        current_total_pnl_pct=1.0,
+        current_max_drawdown_pct=0.8,
+    )
+    monkeypatch.setattr(jobs, "run_periodic_optimization", lambda *a, **k: fake_result)
+    monkeypatch.setattr(jobs.db, "record_optimization_run", lambda run: 1)
+
+    jobs.job_periodic_optimization()
+
+    result = status.get_all()[jobs.PERIODIC_OPTIMIZATION_JOB_ID]
+    assert "CANLI AYARLAR DEĞİŞTİRİLMEDİ" in result.detail
+    assert fake_portfolio.rules.kelly_multiplier == 0.75
 
 
 def test_start_scheduler_registers_periodic_optimization_job_by_default():

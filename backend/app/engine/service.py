@@ -71,6 +71,12 @@ def run_cycle_once() -> list[Action]:
         # devam eder — bkz. app/screener/scanner.py).
         timeframe=settings.ml_train_timeframe,
         lookback=settings.ml_train_lookback,
+        # Sabit kod değeri DEĞİL, `settings.live_open_confidence`/
+        # `live_close_confidence`'tan okunur — bkz. `Settings` docstring'i:
+        # `job_periodic_optimization` (auto-apply açıksa) bunu ÇALIŞMA
+        # ZAMANINDA güncelleyebilir, `docker build` gerekmeden.
+        open_confidence=settings.live_open_confidence,
+        close_confidence=settings.live_close_confidence,
         portfolio=get_portfolio(),
         meta_model=meta_model,
         lstm_model=lstm_model,

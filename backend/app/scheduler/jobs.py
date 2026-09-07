@@ -23,6 +23,7 @@ from app.ml.train import (
 )
 from app.openinterest.service import refresh_all_configured_symbols as refresh_open_interest_symbols
 from app.orderbook.service import refresh_all_configured_symbols
+from app.portfolio.shared import get_portfolio
 from app.screener.scanner import top_long, top_short
 from app.screener.service import refresh as refresh_screener
 from app.security.kill_switch import KillSwitchActive
@@ -276,14 +277,32 @@ def job_auto_retrain_regime() -> None:
         status.record(AUTO_RETRAIN_REGIME_JOB_ID, ok=False, detail=str(exc))
 
 
+def _dampened_step(current: float, recommended: float, fraction: float) -> float:
+    """Mevcut ile önerilen arasındaki mesafenin yalnızca `fraction`'ını
+    uygular — bkz. `Settings.ml_periodic_optimization_max_step_fraction`
+    docstring'i: tek bir gürültülü haftanın parametreleri uçtan uca
+    sıçratmasını önler."""
+    return current + fraction * (recommended - current)
+
+
 def job_periodic_optimization() -> None:
     """Periyodik iş (bkz. `Settings.ml_periodic_optimization_enabled`,
     varsayılan AÇIK, haftalık): `app.backtest.system_runner.run_periodic_optimization`
     ile güncel modelin güven eşiği + Kelly boyutlandırma parametrelerini
-    tarayıp SONUCU `optimization_runs` tablosuna kaydeder — bkz. o
-    fonksiyonun docstring'i: CANLI ayarları OTOMATİK DEĞİŞTİRMEZ, yalnızca
-    ölçüp raporlar (`GET /backtest/system/optimization-history`). YALNIZCA
-    birincil (XGBoost) model daha önce eğitilmişse çalışır."""
+    tarayıp SONUCU `optimization_runs` tablosuna kaydeder (`GET
+    /backtest/system/optimization-history`). YALNIZCA birincil (XGBoost)
+    model daha önce eğitilmişse çalışır.
+
+    `Settings.ml_periodic_optimization_auto_apply_enabled` AÇIKSA (kullanıcı
+    isteği: "şimdi kur"), öneri iki güvenlik kapısından GEÇERSE CANLI
+    ayarlara (`settings.live_open_confidence`/`live_close_confidence`,
+    `get_portfolio().rules.kelly_min_trades`/`.kelly_multiplier`) — TAM
+    değil, KADEMELİ (bkz. `_dampened_step`) olarak — uygulanır: (1) öneri
+    yeterli örneklemli olmalı (bkz. `run_periodic_optimization`'ın kendi
+    güvenilirlik filtresi — filtrelenmişse zaten `recommended == current`
+    döner, bu kapı fiilen otomatik sağlanır), (2) mevcut PnL'den en az
+    `ml_periodic_optimization_min_improvement_pct` kadar İYİ olmalı (aksi
+    halde gürültü farkı yüzünden gereksiz churn olur)."""
     if not DEFAULT_MODEL_PATH.exists():
         status.record(PERIODIC_OPTIMIZATION_JOB_ID, ok=True, detail="atlandı: birincil model hiç eğitilmemiş")
         return
@@ -298,10 +317,34 @@ def job_periodic_optimization() -> None:
             lstm_model = LSTMSignalModel.load_from()
         online_model = OnlineSignalModel.load_from() if is_model_enabled(DEFAULT_ONLINE_MODEL_PATH) else None
 
-        base_request = SystemBacktestRequest(symbol=settings.ml_primary_symbol)
+        portfolio_rules = get_portfolio().rules
+        # ŞEMANIN KENDİ varsayılanları DEĞİL — o an CANLIDA GERÇEKTEN
+        # kullanılan değerler (bkz. yukarıdaki docstring: auto-apply
+        # zaten bunları çalışma zamanında değiştirmiş olabilir, bir
+        # sonraki haftanın "mevcut"u DOĞRU raporlanmalı).
+        base_request = SystemBacktestRequest(
+            symbol=settings.ml_primary_symbol,
+            open_confidence=settings.live_open_confidence,
+            close_confidence=settings.live_close_confidence,
+            kelly_min_trades=portfolio_rules.kelly_min_trades,
+            kelly_multiplier=portfolio_rules.kelly_multiplier,
+        )
         result = run_periodic_optimization(
             exchange, model, meta_model, base_request, lstm_model=lstm_model, online_model=online_model
         )
+
+        applied = False
+        if settings.ml_periodic_optimization_auto_apply_enabled and (
+            result.recommended_total_pnl_pct
+            >= result.current_total_pnl_pct + settings.ml_periodic_optimization_min_improvement_pct
+        ):
+            fraction = settings.ml_periodic_optimization_max_step_fraction
+            settings.live_open_confidence = _dampened_step(result.current_open_confidence, result.recommended_open_confidence, fraction)
+            settings.live_close_confidence = _dampened_step(result.current_close_confidence, result.recommended_close_confidence, fraction)
+            portfolio_rules.kelly_multiplier = _dampened_step(result.current_kelly_multiplier, result.recommended_kelly_multiplier, fraction)
+            portfolio_rules.kelly_min_trades = max(5, round(_dampened_step(result.current_kelly_min_trades, result.recommended_kelly_min_trades, fraction)))
+            applied = True
+
         db.record_optimization_run(
             {
                 "symbol": result.symbol,
@@ -321,8 +364,15 @@ def job_periodic_optimization() -> None:
                 "current_win_rate_pct": result.current_win_rate_pct,
                 "current_total_pnl_pct": result.current_total_pnl_pct,
                 "current_max_drawdown_pct": result.current_max_drawdown_pct,
-                "applied": False,
+                "applied": applied,
             }
+        )
+        applied_note = (
+            f"UYGULANDI (kademeli, {settings.ml_periodic_optimization_max_step_fraction:.0%} adım) -> "
+            f"yeni canlı: eşik={settings.live_open_confidence:.3f}/{settings.live_close_confidence:.3f}, "
+            f"kelly={portfolio_rules.kelly_min_trades}/{portfolio_rules.kelly_multiplier:.3f}"
+            if applied
+            else "CANLI AYARLAR DEĞİŞTİRİLMEDİ (iyileşme eşiği geçilmedi veya auto-apply kapalı)"
         )
         status.record(
             PERIODIC_OPTIMIZATION_JOB_ID,
@@ -334,7 +384,7 @@ def job_periodic_optimization() -> None:
                 f"eşik={result.recommended_open_confidence}/{result.recommended_close_confidence}, "
                 f"kelly={result.recommended_kelly_min_trades}/{result.recommended_kelly_multiplier}, "
                 f"PnL=%{result.recommended_total_pnl_pct:.2f} ({result.recommended_trades_closed} işlem) "
-                f"— CANLI AYARLAR DEĞİŞTİRİLMEDİ, öneri kaydedildi"
+                f"— {applied_note}"
             ),
         )
     except Exception as exc:  # noqa: BLE001 - zamanlayıcı thread'i asla çökmemeli
