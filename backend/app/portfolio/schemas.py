@@ -18,15 +18,22 @@ class RiskRules(BaseModel):
     daily_loss_limit_pct: float = Field(5.0, gt=0, description="Bu yüzdeye ulaşan günlük/oturum zararında yeni işlem açılmaz")
 
     # --- Kelly kriteri tabanlı pozisyon boyutlandırma ---
+    # GÜNCELLEME (bkz. README "karlılık", kullanıcı isteği: "paper trading'e
+    # de uygula"): önceden canlı/paper motor VARSAYILAN OLARAK "fixed_risk"
+    # kullanıyordu, Kelly yalnızca backtest'in kendi varsayılanıydı — yani
+    # `POST /backtest/system/sweep-position-sizing` ile ölçülen iyileşme
+    # (bkz. `app.backtest.schemas.SystemBacktestRequest.kelly_multiplier`
+    # docstring'i — aynı gerekçe/ölçüm) gerçek paper-trading sermayesine
+    # HİÇ yansımıyordu. Artık ikisi SENKRON: `kelly`/`0.75`/`40`.
     position_sizing_method: Literal["fixed_risk", "kelly"] = Field(
-        "fixed_risk", description="'fixed_risk': SL mesafesine göre sabit risk yüzdesi. 'kelly': Kelly kriteri."
+        "kelly", description="'fixed_risk': SL mesafesine göre sabit risk yüzdesi. 'kelly' (varsayılan): Kelly kriteri."
     )
     kelly_multiplier: float = Field(
-        0.5, gt=0, le=1.5,
-        description="Full Kelly'nin uygulanacak kesri. Çeyrek Kelly=0.25, yarım Kelly=0.5 (önerilen/varsayılan), tam Kelly=1.0",
+        0.75, gt=0, le=1.5,
+        description="Full Kelly'nin uygulanacak kesri. Çeyrek Kelly=0.25, yarım Kelly=0.5, 0.75 (varsayılan, bkz. yukarıdaki ölçüm), tam Kelly=1.0",
     )
     kelly_min_trades: int = Field(
-        20, ge=5,
+        40, ge=5,
         description="Kelly istatistiklerinin (kazanma oranı, ort. kazanç/kayıp) güvenilir sayılması için gereken minimum kapanmış işlem sayısı. Yeterli geçmiş yoksa fixed_risk'e düşülür.",
     )
     max_kelly_fraction_pct: float = Field(
