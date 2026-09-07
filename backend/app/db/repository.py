@@ -14,6 +14,7 @@ from .models import (
     MacroSnapshot,
     OHLCVRaw,
     OpenInterestSnapshot,
+    OptimizationRun,
     OrderbookSnapshot,
     SignalRecord,
     TradeRecord,
@@ -652,4 +653,60 @@ def get_recent_signals(limit: int = 50, symbol: str | None = None, source: str |
             ]
     except SQLAlchemyError:
         logger.exception("failed to read recent signals")
+        return []
+
+
+def record_optimization_run(run: dict) -> int | None:
+    """Bir periyodik optimizasyon (`app.backtest.system_runner.run_periodic_optimization`)
+    çalıştırmasını kaydeder — CANLI ayarları etkilemez, yalnızca kayıt
+    tutar (bkz. `OptimizationRun` docstring'i)."""
+    if not is_enabled():
+        return None
+    try:
+        with session_scope() as db:
+            row = OptimizationRun(**run)
+            db.add(row)
+            db.flush()
+            return row.id
+    except SQLAlchemyError:
+        logger.exception("optimization run persist failed")
+        return None
+
+
+def get_recent_optimization_runs(symbol: str | None = None, limit: int = 20) -> list[dict]:
+    if not is_enabled():
+        return []
+    try:
+        with session_scope() as db:
+            query = select(OptimizationRun).order_by(OptimizationRun.created_at.desc())
+            if symbol:
+                query = query.where(OptimizationRun.symbol == symbol)
+            rows = db.execute(query.limit(limit)).scalars().all()
+            return [
+                {
+                    "id": r.id,
+                    "created_at": r.created_at.isoformat(),
+                    "symbol": r.symbol,
+                    "recommended_open_confidence": r.recommended_open_confidence,
+                    "recommended_close_confidence": r.recommended_close_confidence,
+                    "recommended_kelly_min_trades": r.recommended_kelly_min_trades,
+                    "recommended_kelly_multiplier": r.recommended_kelly_multiplier,
+                    "recommended_trades_closed": r.recommended_trades_closed,
+                    "recommended_win_rate_pct": r.recommended_win_rate_pct,
+                    "recommended_total_pnl_pct": r.recommended_total_pnl_pct,
+                    "recommended_max_drawdown_pct": r.recommended_max_drawdown_pct,
+                    "current_open_confidence": r.current_open_confidence,
+                    "current_close_confidence": r.current_close_confidence,
+                    "current_kelly_min_trades": r.current_kelly_min_trades,
+                    "current_kelly_multiplier": r.current_kelly_multiplier,
+                    "current_trades_closed": r.current_trades_closed,
+                    "current_win_rate_pct": r.current_win_rate_pct,
+                    "current_total_pnl_pct": r.current_total_pnl_pct,
+                    "current_max_drawdown_pct": r.current_max_drawdown_pct,
+                    "applied": r.applied,
+                }
+                for r in rows
+            ]
+    except SQLAlchemyError:
+        logger.exception("failed to read optimization runs")
         return []

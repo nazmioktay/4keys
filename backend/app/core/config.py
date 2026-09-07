@@ -167,6 +167,21 @@ class Settings(BaseSettings):
     ml_auto_retrain_refresh_fraction: float = 0.05
     ml_auto_retrain_max_seconds: int = 604800  # 7 gün — "en geç haftada bir" üst sınırı
 
+    # --- Periyodik parametre optimizasyonu (walk-forward, bkz. README "karlılık") ---
+    # Kullanıcı isteği: "tam otomatik... gerekli optimizasyonları öğrenme
+    # algoritmalarıyla yapacak, otonom bir bot" — bunun İLK, GÜVENLİ adımı:
+    # her hafta güncel modelle `sweep_confidence_thresholds` +
+    # `sweep_position_sizing` çalıştırıp SONUCU KAYDEDER (`optimization_runs`
+    # tablosu, `GET /backtest/system/optimization-history`) — CANLI ayarları
+    # OTOMATİK DEĞİŞTİRMEZ. Tek bir sweep'in (0.55 -> zarar) az önce
+    # gösterdiği gibi, küçük örneklemli önerileri otomatik uygulamak
+    # tehlikelidir — operatör önce birden fazla haftalık öneriyi ("tutarlı
+    # mı, tek seferlik gürültü mü") gözden geçirmeli. Otomatik uygulama
+    # (Seviye 2+) yalnızca burada birkaç haftalık bir güven geçmişi
+    # biriktikten SONRA, bilinçli bir sonraki adım olarak eklenmeli.
+    ml_periodic_optimization_enabled: bool = True
+    ml_periodic_optimization_seconds: int = 604800  # 7 gün
+
     # --- Eğitim kalite kapısı ---
     # Bir modelin out-of-sample (veya online modelde prequential) dengeli
     # doğruluğu (balanced_accuracy) bu eşiğin ALTINDAYSA, model diske

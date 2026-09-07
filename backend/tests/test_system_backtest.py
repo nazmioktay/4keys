@@ -840,3 +840,71 @@ def test_sweep_position_sizing_records_error_without_stopping(monkeypatch):
     err_point = next(p for p in points if p.kelly_min_trades == 20)
     assert ok_point.error is None and ok_point.trades_closed == 1
     assert err_point.error is not None and "simüle edilmiş hata" in err_point.error
+
+
+# --- Periyodik optimizasyon (run_periodic_optimization) ---
+
+
+def test_run_periodic_optimization_skips_unreliable_points_and_never_persists(monkeypatch):
+    """`run_periodic_optimization` (1) az işlemli/güvenilmez noktaları
+    (`MIN_RELIABLE_TRADES_FOR_OPTIMIZATION`'ın altında) ASLA seçmemeli —
+    ne kadar cazip bir PnL gösterirse göstersin, (2) her çağrıyı
+    `persist=False` ile yapmalı (bkz. README 'karlılık': canlı ayarları
+    OTOMATİK DEĞİŞTİRMEZ, `backtest_runs` tablosunu kirletmemeli)."""
+    from app.backtest import system_runner
+
+    def fake_run_system_backtest(exchange, model, meta_model, request, lstm_model=None, online_model=None, persist=True):
+        assert persist is False, "sweep/optimizasyon çağrıları backtest_runs'ı kirletmemeli"
+        if request.open_confidence == 0.7:
+            trades, base_pnl = 5, 999.0  # cazip ama GÜVENİLMEZ (az işlem) — seçilmemeli
+        elif request.open_confidence == 0.6:
+            trades, base_pnl = 50, 3.0
+        else:
+            trades, base_pnl = 50, 1.0
+        kelly_bonus = 2.0 if request.kelly_multiplier == 1.0 else 0.0
+        min_trades_bonus = 0.5 if request.kelly_min_trades == 20 else 0.0
+        return SystemBacktestReport(
+            symbol=request.symbol,
+            timeframe="1h",
+            candles_used=100,
+            period_start="2024-01-01T00:00:00",
+            period_end="2024-01-05T00:00:00",
+            initial_balance=1000.0,
+            final_equity=1000.0,
+            trades_closed=trades,
+            win_rate_pct=60.0,
+            total_pnl_quote=0.0,
+            total_pnl_pct=base_pnl + kelly_bonus + min_trades_bonus,
+            daily_pnl_quote=0.0,
+            daily_pnl_pct=0.0,
+            monthly_pnl_quote=0.0,
+            monthly_pnl_pct=0.0,
+            max_drawdown_pct=1.0,
+            trades=[],
+        )
+
+    monkeypatch.setattr(system_runner, "run_system_backtest", fake_run_system_backtest)
+
+    base_request = SystemBacktestRequest()  # varsayılan: open=0.5, kelly_multiplier=0.75, kelly_min_trades=40
+    result = system_runner.run_periodic_optimization(
+        exchange=None,
+        model=None,
+        meta_model=None,
+        base_request=base_request,
+        open_confidence_values=[0.5, 0.6, 0.7],
+        kelly_min_trades_values=[10, 20],
+        kelly_multiplier_values=[0.5, 1.0],
+    )
+
+    # 0.7 cazip (999) ama trades=5 < MIN_RELIABLE_TRADES_FOR_OPTIMIZATION -> ASLA seçilmemeli
+    assert result.recommended_open_confidence == 0.6
+    assert result.recommended_close_confidence == pytest.approx(0.55)
+    assert result.recommended_kelly_multiplier == 1.0
+    assert result.recommended_kelly_min_trades == 20
+    assert result.recommended_total_pnl_pct == pytest.approx(3.0 + 2.0 + 0.5)
+
+    # mevcut (base_request'in KENDİ değerleri) ayrı raporlanmalı, önerilenle KARIŞTIRILMAMALI
+    assert result.current_open_confidence == base_request.open_confidence
+    assert result.current_kelly_multiplier == base_request.kelly_multiplier
+    assert result.current_kelly_min_trades == base_request.kelly_min_trades
+    assert result.current_total_pnl_pct == pytest.approx(1.0)

@@ -14,12 +14,14 @@ from .jobs import (
     MACRO_REFRESH_JOB_ID,
     OPEN_INTEREST_REFRESH_JOB_ID,
     ORDERBOOK_REFRESH_JOB_ID,
+    PERIODIC_OPTIMIZATION_JOB_ID,
     SCREENER_REFRESH_JOB_ID,
     compute_auto_retrain_interval_seconds,
     job_auto_retrain,
     job_auto_retrain_lstm,
     job_auto_retrain_online,
     job_auto_retrain_regime,
+    job_periodic_optimization,
     job_refresh_macro,
     job_refresh_open_interest,
     job_refresh_orderbook,
@@ -114,6 +116,21 @@ def start_scheduler(enabled: bool | None = None) -> BackgroundScheduler | None:
                     max_instances=1,
                     coalesce=True,
                 )
+        if settings.ml_periodic_optimization_enabled:
+            # Haftalık walk-forward parametre optimizasyonu (bkz. README
+            # "karlılık", app.scheduler.jobs.job_periodic_optimization
+            # docstring'i) — CANLI ayarları DEĞİŞTİRMEZ, yalnızca öneriyi
+            # kaydeder. `next_run_time` KASITLI verilmez — auto_retrain
+            # ile AYNI gerekçe, uygulama her açılışta/redeploy'da hemen
+            # tetiklenmesin.
+            scheduler.add_job(
+                job_periodic_optimization,
+                "interval",
+                seconds=settings.ml_periodic_optimization_seconds,
+                id=PERIODIC_OPTIMIZATION_JOB_ID,
+                max_instances=1,
+                coalesce=True,
+            )
         scheduler.start()
         # İlk taramayı hemen tetikle ki motor döngüsü boş önbekleğe düşmesin.
         scheduler.modify_job(SCREENER_REFRESH_JOB_ID, next_run_time=datetime.now())

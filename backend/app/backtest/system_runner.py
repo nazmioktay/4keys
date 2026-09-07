@@ -825,3 +825,138 @@ def sweep_position_sizing(
                     )
                 )
     return results
+
+
+# En az bu kadar kapanmış işlemi olmayan bir güven eşiği adayı "güvenilir"
+# sayılmaz — bkz. README "karlılık": önceki turda 0.6+ eşiklerdeki 3/0/0
+# işlemlik noktalar yorumlanamaz seviyedeydi, öneri motoru bunları asla
+# seçmemeli.
+MIN_RELIABLE_TRADES_FOR_OPTIMIZATION = 30
+
+
+@dataclass
+class OptimizationRunResult:
+    symbol: str
+    recommended_open_confidence: float
+    recommended_close_confidence: float
+    recommended_kelly_min_trades: int
+    recommended_kelly_multiplier: float
+    recommended_trades_closed: int
+    recommended_win_rate_pct: float
+    recommended_total_pnl_pct: float
+    recommended_max_drawdown_pct: float
+    current_open_confidence: float
+    current_close_confidence: float
+    current_kelly_min_trades: int
+    current_kelly_multiplier: float
+    current_trades_closed: int
+    current_win_rate_pct: float
+    current_total_pnl_pct: float
+    current_max_drawdown_pct: float
+
+
+def run_periodic_optimization(
+    exchange: Exchange,
+    model: SignalModel,
+    meta_model: MetaLabelModel | None,
+    base_request: SystemBacktestRequest,
+    open_confidence_values: list[float] | None = None,
+    close_confidence_gap: float = 0.05,
+    kelly_min_trades_values: list[int] | None = None,
+    kelly_multiplier_values: list[float] | None = None,
+    lstm_model: "LSTMSignalModel | None" = None,
+    online_model: OnlineSignalModel | None = None,
+) -> OptimizationRunResult:
+    """Haftalık "walk-forward" parametre optimizasyonunun İLK, GÜVENLİ adımı
+    (bkz. README "karlılık" — kullanıcı isteği: "tam otomatik... öğrenme
+    algoritmalarıyla optimizasyon"): `sweep_confidence_thresholds` +
+    `sweep_position_sizing`'i ART ARDA çalıştırıp GÜVENİLİR (bkz.
+    `MIN_RELIABLE_TRADES_FOR_OPTIMIZATION`) en iyi kombinasyonu, O ANDA
+    `base_request`'te kullanılan (canlı/mevcut) değerlerle karşılaştırmalı
+    döner.
+
+    BİLEREK CANLI AYARLARI DEĞİŞTİRMEZ — yalnızca ÖLÇER/RAPORLAR (bkz.
+    `app.scheduler.jobs.job_periodic_optimization`, `OptimizationRun`
+    tablosu). Tek bir sweep'in küçük örneklemli önerisini (bkz. gerçek
+    üretim örneği: `open_confidence=0.55` bir turda kârlı, bir sonraki
+    turda ZARARDI) otomatik uygulamak tehlikelidir — operatör önce
+    birden fazla haftalık öneriyi ("tutarlı mı, tek seferlik gürültü mü")
+    gözden geçirmeli. Otomatik uygulama, burada bir güven geçmişi
+    biriktikten SONRA bilinçli bir sonraki adım olarak eklenmeli.
+
+    Adımlar:
+    1. `base_request`'in KENDİSİYLE (mevcut ayarlar) bir referans backtest'i.
+    2. Güven eşiği taraması; güvenilir noktalar arasında en yüksek `total_pnl_pct`.
+    3. En iyi güven eşiğiyle (bulunduysa) pozisyon boyutu taraması; en yüksek `total_pnl_pct`.
+    4. Önerilen TAM kombinasyonla (eşik + boyutlandırma BİRLİKTE) son bir
+       backtest — izole eksen taramalarının etkileşimini kaçırmamak için.
+    """
+    open_confidence_values = open_confidence_values or [0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7]
+    kelly_min_trades_values = kelly_min_trades_values or [10, 20, 40, 60]
+    kelly_multiplier_values = kelly_multiplier_values or [0.5, 0.75, 1.0]
+
+    current_report = run_system_backtest(
+        exchange, model, meta_model, base_request, lstm_model=lstm_model, online_model=online_model, persist=False
+    )
+
+    confidence_points = sweep_confidence_thresholds(
+        exchange, model, meta_model, base_request, open_confidence_values,
+        close_confidence_gap=close_confidence_gap, lstm_model=lstm_model, online_model=online_model,
+    )
+    reliable_confidence = [
+        p for p in confidence_points if p.error is None and p.trades_closed >= MIN_RELIABLE_TRADES_FOR_OPTIMIZATION
+    ]
+    best_confidence = max(reliable_confidence, key=lambda p: p.total_pnl_pct) if reliable_confidence else None
+
+    sizing_base_request = base_request
+    if best_confidence is not None:
+        sizing_base_request = base_request.model_copy(
+            update={"open_confidence": best_confidence.open_confidence, "close_confidence": best_confidence.close_confidence}
+        )
+
+    sizing_points = sweep_position_sizing(
+        exchange, model, meta_model, sizing_base_request, kelly_min_trades_values, kelly_multiplier_values,
+        lstm_model=lstm_model, online_model=online_model,
+    )
+    reliable_sizing = [p for p in sizing_points if p.error is None]
+    best_sizing = max(reliable_sizing, key=lambda p: p.total_pnl_pct) if reliable_sizing else None
+
+    recommended_open = best_confidence.open_confidence if best_confidence else base_request.open_confidence
+    recommended_close = best_confidence.close_confidence if best_confidence else base_request.close_confidence
+    recommended_min_trades = best_sizing.kelly_min_trades if best_sizing else base_request.kelly_min_trades
+    recommended_multiplier = best_sizing.kelly_multiplier if best_sizing else base_request.kelly_multiplier
+
+    final_request = base_request.model_copy(
+        update={
+            "open_confidence": recommended_open,
+            "close_confidence": recommended_close,
+            "kelly_min_trades": recommended_min_trades,
+            "kelly_multiplier": recommended_multiplier,
+        }
+    )
+    try:
+        final_report = run_system_backtest(
+            exchange, model, meta_model, final_request, lstm_model=lstm_model, online_model=online_model, persist=False
+        )
+    except ValueError:
+        final_report = current_report  # önerilen kombinasyonda veri yoksa, mevcut ayarlara düş
+
+    return OptimizationRunResult(
+        symbol=base_request.symbol,
+        recommended_open_confidence=recommended_open,
+        recommended_close_confidence=recommended_close,
+        recommended_kelly_min_trades=recommended_min_trades,
+        recommended_kelly_multiplier=recommended_multiplier,
+        recommended_trades_closed=final_report.trades_closed,
+        recommended_win_rate_pct=final_report.win_rate_pct,
+        recommended_total_pnl_pct=final_report.total_pnl_pct,
+        recommended_max_drawdown_pct=final_report.max_drawdown_pct,
+        current_open_confidence=base_request.open_confidence,
+        current_close_confidence=base_request.close_confidence,
+        current_kelly_min_trades=base_request.kelly_min_trades,
+        current_kelly_multiplier=base_request.kelly_multiplier,
+        current_trades_closed=current_report.trades_closed,
+        current_win_rate_pct=current_report.win_rate_pct,
+        current_total_pnl_pct=current_report.total_pnl_pct,
+        current_max_drawdown_pct=current_report.max_drawdown_pct,
+    )

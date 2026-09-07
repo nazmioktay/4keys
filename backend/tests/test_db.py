@@ -305,3 +305,39 @@ def test_repository_never_raises_when_db_url_invalid(monkeypatch):
         assert db.get_recent_trades() == []
     finally:
         reset_for_tests()
+
+
+def test_record_and_get_optimization_runs_roundtrip():
+    """`record_optimization_run`/`get_recent_optimization_runs` — bkz.
+    `OptimizationRun` docstring'i: yalnızca KAYIT tutar, `applied` her
+    zaman kaydedildiği gibi (varsayılan False) geri gelmeli."""
+    run_id = db.record_optimization_run(
+        {
+            "symbol": "BTC/USDT:USDT",
+            "recommended_open_confidence": 0.6,
+            "recommended_close_confidence": 0.55,
+            "recommended_kelly_min_trades": 20,
+            "recommended_kelly_multiplier": 1.0,
+            "recommended_trades_closed": 50,
+            "recommended_win_rate_pct": 60.0,
+            "recommended_total_pnl_pct": 5.5,
+            "recommended_max_drawdown_pct": 1.0,
+            "current_open_confidence": 0.5,
+            "current_close_confidence": 0.45,
+            "current_kelly_min_trades": 40,
+            "current_kelly_multiplier": 0.75,
+            "current_trades_closed": 50,
+            "current_win_rate_pct": 55.0,
+            "current_total_pnl_pct": 1.0,
+            "current_max_drawdown_pct": 0.8,
+            "applied": False,
+        }
+    )
+    assert run_id is not None
+
+    runs = db.get_recent_optimization_runs(symbol="BTC/USDT:USDT")
+    assert len(runs) == 1
+    assert runs[0]["symbol"] == "BTC/USDT:USDT"
+    assert runs[0]["recommended_open_confidence"] == 0.6
+    assert runs[0]["current_open_confidence"] == 0.5
+    assert runs[0]["applied"] is False

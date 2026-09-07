@@ -199,3 +199,38 @@ def sweep_position_sizing_route(payload: SweepPositionSizingRequest) -> SweepPos
         online_model=online_model,
     )
     return SweepPositionSizingResponse(points=[SweepPositionSizingPoint(**p.__dict__) for p in points])
+
+
+class OptimizationRunSummary(BaseModel):
+    id: int
+    created_at: str
+    symbol: str
+    recommended_open_confidence: float
+    recommended_close_confidence: float
+    recommended_kelly_min_trades: int
+    recommended_kelly_multiplier: float
+    recommended_trades_closed: int
+    recommended_win_rate_pct: float
+    recommended_total_pnl_pct: float
+    recommended_max_drawdown_pct: float
+    current_open_confidence: float
+    current_close_confidence: float
+    current_kelly_min_trades: int
+    current_kelly_multiplier: float
+    current_trades_closed: int
+    current_win_rate_pct: float
+    current_total_pnl_pct: float
+    current_max_drawdown_pct: float
+    applied: bool
+
+
+@router.get("/system/optimization-history", response_model=list[OptimizationRunSummary])
+def get_optimization_history(symbol: str | None = None, limit: int = 20) -> list[OptimizationRunSummary]:
+    """Haftalık walk-forward parametre optimizasyonu (bkz.
+    `app.scheduler.jobs.job_periodic_optimization`) çalıştırmalarının
+    geçmişini döner — her satır o hafta MEVCUT (canlıda kullanılan) ile
+    ÖNERİLEN parametreleri karşılaştırmalı raporlar. Bu iş CANLI ayarları
+    OTOMATİK DEĞİŞTİRMEZ — operatör birden fazla haftalık öneriyi
+    ("tutarlı mı, tek seferlik gürültü mü") gözden geçirip elle karar
+    vermeli."""
+    return [OptimizationRunSummary(**row) for row in db.get_recent_optimization_runs(symbol=symbol, limit=limit)]

@@ -292,3 +292,71 @@ def test_stop_scheduler_clears_instance():
     assert get_scheduler() is not None
     stop_scheduler()
     assert get_scheduler() is None
+
+
+def test_job_periodic_optimization_skips_when_no_primary_model(monkeypatch):
+    monkeypatch.setattr(jobs, "DEFAULT_MODEL_PATH", type("P", (), {"exists": staticmethod(lambda: False)})())
+
+    jobs.job_periodic_optimization()
+
+    result = status.get_all()[jobs.PERIODIC_OPTIMIZATION_JOB_ID]
+    assert result.ok is True
+    assert "atlandı" in result.detail
+
+
+def test_job_periodic_optimization_records_result_without_changing_live_settings(monkeypatch):
+    """Bkz. README 'karlılık' — bu iş CANLI ayarları ASLA değiştirmemeli,
+    yalnızca `db.record_optimization_run`'a bir kayıt yazmalı (`applied=False`)."""
+    from app.backtest.system_runner import OptimizationRunResult
+
+    monkeypatch.setattr(jobs, "DEFAULT_MODEL_PATH", type("P", (), {"exists": staticmethod(lambda: True)})())
+    monkeypatch.setattr(jobs, "SignalModel", type("M", (), {"load_from": staticmethod(lambda: object())}))
+    monkeypatch.setattr(jobs, "DEFAULT_META_MODEL_PATH", type("P", (), {"exists": staticmethod(lambda: False)})())
+    monkeypatch.setattr(jobs, "get_exchange", lambda exchange_id: object())
+    monkeypatch.setattr(jobs, "is_model_enabled", lambda path: False)
+
+    fake_result = OptimizationRunResult(
+        symbol="BTC/USDT:USDT",
+        recommended_open_confidence=0.6,
+        recommended_close_confidence=0.55,
+        recommended_kelly_min_trades=20,
+        recommended_kelly_multiplier=1.0,
+        recommended_trades_closed=50,
+        recommended_win_rate_pct=60.0,
+        recommended_total_pnl_pct=5.5,
+        recommended_max_drawdown_pct=1.0,
+        current_open_confidence=0.5,
+        current_close_confidence=0.45,
+        current_kelly_min_trades=40,
+        current_kelly_multiplier=0.75,
+        current_trades_closed=50,
+        current_win_rate_pct=55.0,
+        current_total_pnl_pct=1.0,
+        current_max_drawdown_pct=0.8,
+    )
+    monkeypatch.setattr(jobs, "run_periodic_optimization", lambda *a, **k: fake_result)
+
+    recorded = {}
+    monkeypatch.setattr(jobs.db, "record_optimization_run", lambda run: recorded.update(run) or 1)
+
+    jobs.job_periodic_optimization()
+
+    result = status.get_all()[jobs.PERIODIC_OPTIMIZATION_JOB_ID]
+    assert result.ok is True
+    assert "CANLI AYARLAR DEĞİŞTİRİLMEDİ" in result.detail
+    assert recorded["applied"] is False
+    assert recorded["recommended_open_confidence"] == 0.6
+    assert recorded["current_open_confidence"] == 0.5
+
+
+def test_start_scheduler_registers_periodic_optimization_job_by_default():
+    scheduler = start_scheduler(enabled=True)
+    assert scheduler.get_job(jobs.PERIODIC_OPTIMIZATION_JOB_ID) is not None
+
+
+def test_start_scheduler_can_disable_periodic_optimization(monkeypatch):
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "ml_periodic_optimization_enabled", False)
+    scheduler = start_scheduler(enabled=True)
+    assert scheduler.get_job(jobs.PERIODIC_OPTIMIZATION_JOB_ID) is None

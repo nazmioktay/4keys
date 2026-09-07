@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 
-from sqlalchemy import DateTime, Float, Integer, String, UniqueConstraint
+from sqlalchemy import Boolean, DateTime, Float, Integer, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .session import Base
@@ -241,6 +241,42 @@ class BacktestTradeRow(Base):
     online_direction: Mapped[str | None] = mapped_column(String, nullable=True)
     online_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     decision_reason: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class OptimizationRun(Base):
+    """Periyodik parametre optimizasyonu (`app.backtest.system_runner.run_periodic_optimization`)
+    çalıştırmasının özeti — güncel modelle güven eşiği + Kelly boyutlandırma
+    parametrelerini tarayıp EN İYİ (yeterli örneklemli) noktayı, O ANDA
+    CANLIDA KULLANILAN değerlerle karşılaştırmalı raporlar. Yalnızca
+    KAYDEDER — canlı ayarları OTOMATİK DEĞİŞTİRMEZ (bkz. README "karlılık":
+    tek bir sweep'in küçük örneklemli önerisini otomatik uygulamak
+    tehlikelidir, operatör birkaç haftalık öneriyi karşılaştırmalı)."""
+
+    __tablename__ = "optimization_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
+    symbol: Mapped[str] = mapped_column(String, index=True)
+
+    recommended_open_confidence: Mapped[float] = mapped_column(Float)
+    recommended_close_confidence: Mapped[float] = mapped_column(Float)
+    recommended_kelly_min_trades: Mapped[int] = mapped_column(Integer)
+    recommended_kelly_multiplier: Mapped[float] = mapped_column(Float)
+    recommended_trades_closed: Mapped[int] = mapped_column(Integer)
+    recommended_win_rate_pct: Mapped[float] = mapped_column(Float)
+    recommended_total_pnl_pct: Mapped[float] = mapped_column(Float)
+    recommended_max_drawdown_pct: Mapped[float] = mapped_column(Float)
+
+    current_open_confidence: Mapped[float] = mapped_column(Float)
+    current_close_confidence: Mapped[float] = mapped_column(Float)
+    current_kelly_min_trades: Mapped[int] = mapped_column(Integer)
+    current_kelly_multiplier: Mapped[float] = mapped_column(Float)
+    current_trades_closed: Mapped[int] = mapped_column(Integer)
+    current_win_rate_pct: Mapped[float] = mapped_column(Float)
+    current_total_pnl_pct: Mapped[float] = mapped_column(Float)
+    current_max_drawdown_pct: Mapped[float] = mapped_column(Float)
+
+    applied: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
 class TradeRecord(Base):

@@ -1,14 +1,18 @@
 import logging
 
 from app.backtest.data import timeframe_to_minutes
+from app.backtest.schemas import SystemBacktestRequest
+from app.backtest.system_runner import run_periodic_optimization
 from app.core.config import settings
+from app.db import repository as db
 from app.engine.service import ModelNotTrained, run_cycle_once
 from app.exchanges import get_exchange
 from app.macro.service import refresh_and_record_macro_snapshot
-from app.ml.meta_label import DEFAULT_META_MODEL_PATH
-from app.ml.model import SignalModel
+from app.ml.meta_label import DEFAULT_META_MODEL_PATH, MetaLabelModel
+from app.ml.model import DEFAULT_MODEL_PATH, SignalModel
 from app.ml.model_paths import DEFAULT_LSTM_MODEL_PATH
-from app.ml.online_model import DEFAULT_ONLINE_MODEL_PATH
+from app.ml.model_status import is_model_enabled
+from app.ml.online_model import DEFAULT_ONLINE_MODEL_PATH, OnlineSignalModel
 from app.ml.regime import DEFAULT_REGIME_MODEL_PATH
 from app.ml.train import (
     train_lstm_signal_model,
@@ -36,6 +40,7 @@ AUTO_RETRAIN_JOB_ID = "auto_retrain"
 AUTO_RETRAIN_LSTM_JOB_ID = "auto_retrain_lstm"
 AUTO_RETRAIN_ONLINE_JOB_ID = "auto_retrain_online"
 AUTO_RETRAIN_REGIME_JOB_ID = "auto_retrain_regime"
+PERIODIC_OPTIMIZATION_JOB_ID = "periodic_optimization"
 
 
 def compute_auto_retrain_interval_seconds() -> int:
@@ -269,3 +274,69 @@ def job_auto_retrain_regime() -> None:
     except Exception as exc:  # noqa: BLE001 - zamanlayıcı thread'i asla çökmemeli
         logger.exception("auto retrain (regime) job failed")
         status.record(AUTO_RETRAIN_REGIME_JOB_ID, ok=False, detail=str(exc))
+
+
+def job_periodic_optimization() -> None:
+    """Periyodik iş (bkz. `Settings.ml_periodic_optimization_enabled`,
+    varsayılan AÇIK, haftalık): `app.backtest.system_runner.run_periodic_optimization`
+    ile güncel modelin güven eşiği + Kelly boyutlandırma parametrelerini
+    tarayıp SONUCU `optimization_runs` tablosuna kaydeder — bkz. o
+    fonksiyonun docstring'i: CANLI ayarları OTOMATİK DEĞİŞTİRMEZ, yalnızca
+    ölçüp raporlar (`GET /backtest/system/optimization-history`). YALNIZCA
+    birincil (XGBoost) model daha önce eğitilmişse çalışır."""
+    if not DEFAULT_MODEL_PATH.exists():
+        status.record(PERIODIC_OPTIMIZATION_JOB_ID, ok=True, detail="atlandı: birincil model hiç eğitilmemiş")
+        return
+    try:
+        exchange = get_exchange(settings.exchange_id)
+        model = SignalModel.load_from()
+        meta_model = MetaLabelModel.load_from() if DEFAULT_META_MODEL_PATH.exists() else None
+        lstm_model = None
+        if is_model_enabled(DEFAULT_LSTM_MODEL_PATH):
+            from app.ml.lstm_model import LSTMSignalModel  # lazy — bkz. app.ml.model_paths docstring'i
+
+            lstm_model = LSTMSignalModel.load_from()
+        online_model = OnlineSignalModel.load_from() if is_model_enabled(DEFAULT_ONLINE_MODEL_PATH) else None
+
+        base_request = SystemBacktestRequest(symbol=settings.ml_primary_symbol)
+        result = run_periodic_optimization(
+            exchange, model, meta_model, base_request, lstm_model=lstm_model, online_model=online_model
+        )
+        db.record_optimization_run(
+            {
+                "symbol": result.symbol,
+                "recommended_open_confidence": result.recommended_open_confidence,
+                "recommended_close_confidence": result.recommended_close_confidence,
+                "recommended_kelly_min_trades": result.recommended_kelly_min_trades,
+                "recommended_kelly_multiplier": result.recommended_kelly_multiplier,
+                "recommended_trades_closed": result.recommended_trades_closed,
+                "recommended_win_rate_pct": result.recommended_win_rate_pct,
+                "recommended_total_pnl_pct": result.recommended_total_pnl_pct,
+                "recommended_max_drawdown_pct": result.recommended_max_drawdown_pct,
+                "current_open_confidence": result.current_open_confidence,
+                "current_close_confidence": result.current_close_confidence,
+                "current_kelly_min_trades": result.current_kelly_min_trades,
+                "current_kelly_multiplier": result.current_kelly_multiplier,
+                "current_trades_closed": result.current_trades_closed,
+                "current_win_rate_pct": result.current_win_rate_pct,
+                "current_total_pnl_pct": result.current_total_pnl_pct,
+                "current_max_drawdown_pct": result.current_max_drawdown_pct,
+                "applied": False,
+            }
+        )
+        status.record(
+            PERIODIC_OPTIMIZATION_JOB_ID,
+            ok=True,
+            detail=(
+                f"mevcut: eşik={result.current_open_confidence}/{result.current_close_confidence}, "
+                f"kelly={result.current_kelly_min_trades}/{result.current_kelly_multiplier}, "
+                f"PnL=%{result.current_total_pnl_pct:.2f} | önerilen: "
+                f"eşik={result.recommended_open_confidence}/{result.recommended_close_confidence}, "
+                f"kelly={result.recommended_kelly_min_trades}/{result.recommended_kelly_multiplier}, "
+                f"PnL=%{result.recommended_total_pnl_pct:.2f} ({result.recommended_trades_closed} işlem) "
+                f"— CANLI AYARLAR DEĞİŞTİRİLMEDİ, öneri kaydedildi"
+            ),
+        )
+    except Exception as exc:  # noqa: BLE001 - zamanlayıcı thread'i asla çökmemeli
+        logger.exception("periodic optimization job failed")
+        status.record(PERIODIC_OPTIMIZATION_JOB_ID, ok=False, detail=str(exc))
