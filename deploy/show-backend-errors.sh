@@ -13,13 +13,12 @@ set -uo pipefail
 # ============================================================
 
 OUT_FILE="/tmp/backend-errors-$(date +%Y%m%d-%H%M%S).txt"
+SINCE="${SINCE:-5m}"
 
 {
-  echo "=== Son 300 log satirindan hata/traceback icerenler ==="
-  docker logs --tail 300 4keys-backend 2>&1 | grep -B2 -A 40 -iE "unhandled exception|traceback|error" || echo "(hicbir hata/traceback satiri bulunamadi)"
-  echo
-  echo "=== Ham son 60 satir (referans icin) ==="
-  docker logs --tail 60 4keys-backend 2>&1
+  echo "=== Son ${SINCE} icinde /metrics ve /health DISINDA KALAN TUM satirlar ==="
+  echo "--- (bu, gurultuyu (Prometheus'un saniyede bir /metrics taramasi) eleyip gercek istek/hata satirlarini one cikarir) ---"
+  docker logs --since "$SINCE" 4keys-backend 2>&1 | grep -v -E "GET /metrics|GET /health" || echo "(bu surede metrics/health disinda hicbir satir yok)"
 } | tee "$OUT_FILE"
 
 echo
