@@ -12,7 +12,13 @@ from app.backtest.schemas import (
     SystemBacktestReport,
     SystemBacktestRequest,
 )
-from app.backtest.system_runner import ConfidenceSweepPoint, run_system_backtest, sweep_confidence_thresholds
+from app.backtest.system_runner import (
+    ConfidenceSweepPoint,
+    PositionSizingSweepPoint,
+    run_system_backtest,
+    sweep_confidence_thresholds,
+    sweep_position_sizing,
+)
 from app.core.config import settings
 from app.db import repository as db
 from app.exchanges import get_exchange
@@ -145,3 +151,51 @@ def sweep_confidence(payload: SweepConfidenceRequest) -> SweepConfidenceResponse
         online_model=online_model,
     )
     return SweepConfidenceResponse(points=[SweepConfidencePoint(**p.__dict__) for p in points])
+
+
+class SweepPositionSizingRequest(BaseModel):
+    base_request: SystemBacktestRequest = Field(default_factory=SystemBacktestRequest)
+    kelly_min_trades_values: list[int] = [10, 20, 40, 60]
+    kelly_multiplier_values: list[float] = [0.5, 0.75, 1.0]
+
+
+class SweepPositionSizingPoint(BaseModel):
+    kelly_min_trades: int
+    kelly_multiplier: float
+    trades_closed: int
+    win_rate_pct: float
+    total_pnl_pct: float
+    daily_pnl_pct: float
+    max_drawdown_pct: float
+    error: str | None = None
+
+
+class SweepPositionSizingResponse(BaseModel):
+    points: list[SweepPositionSizingPoint]
+
+
+@router.post("/system/sweep-position-sizing", response_model=SweepPositionSizingResponse)
+def sweep_position_sizing_route(payload: SweepPositionSizingRequest) -> SweepPositionSizingResponse:
+    """`kelly_min_trades` × `kelly_multiplier` ızgarasında art arda sistem
+    backtest'i çalıştırıp her kombinasyon için işlem sayısı/kazanma oranı/
+    PnL/max drawdown döner — bkz. `app.backtest.system_runner.sweep_position_sizing`
+    docstring'i: gerçek üretim backtest'inde, ilk ~40 işlemlik gürültülü
+    pencerede Kelly'nin "tam Kelly=%0" hesaplayıp ~25-30 işlemi TAMAMEN
+    SIFIR boyutla açtığı gözlendi (sermaye o dönem hiç kullanılmadı) —
+    `kelly_min_trades`'i artırmanın bunu önleyip önlemediğini, `kelly_multiplier`'ı
+    artırmanın (düşük drawdown'lı dönemlerde) getiriyi büyütüp büyütmediğini
+    ölçmek için. Otomatik "en iyi"yi seçmez, karar operatöre kalır. Ara
+    denemeler `backtest_runs` tablosuna YAZILMAZ."""
+    exchange = get_exchange(settings.exchange_id)
+    model, meta_model, lstm_model, online_model = _load_ensemble_models()
+    points: list[PositionSizingSweepPoint] = sweep_position_sizing(
+        exchange,
+        model,
+        meta_model,
+        payload.base_request,
+        payload.kelly_min_trades_values,
+        payload.kelly_multiplier_values,
+        lstm_model=lstm_model,
+        online_model=online_model,
+    )
+    return SweepPositionSizingResponse(points=[SweepPositionSizingPoint(**p.__dict__) for p in points])

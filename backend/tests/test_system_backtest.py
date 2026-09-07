@@ -754,3 +754,89 @@ def test_sweep_confidence_thresholds_records_error_without_stopping(monkeypatch)
     assert points[1].error is not None and "simüle edilmiş hata" in points[1].error
     assert points[0].error is None and points[0].trades_closed == 1
     assert points[2].error is None and points[2].trades_closed == 1
+
+
+# --- Pozisyon boyutlandırma taraması (sweep_position_sizing) ---
+
+
+def test_sweep_position_sizing_covers_full_grid_without_persisting(tmp_path, monkeypatch):
+    """`kelly_min_trades` x `kelly_multiplier` ızgarasının HER kombinasyonu
+    için bir nokta dönmeli, ara denemeler `backtest_runs` tablosunu
+    KİRLETMEMELİ (bkz. `test_persist_false_...`)."""
+    from app.backtest.system_runner import sweep_position_sizing
+    from app.db import repository as db
+    from app.db import session as db_session
+
+    monkeypatch.setattr(db_session.settings, "database_url", f"sqlite:///{tmp_path}/test.db")
+    db_session.reset_for_tests()
+    db_session.init_db()
+
+    exchange = FakeOscillatingExchange(total_candles=600)
+    train_ohlcv = exchange.full_df.iloc[:400].reset_index(drop=True)
+    model = _trained_model(train_ohlcv)
+
+    base_request = SystemBacktestRequest(
+        symbol="BTC/USDT:USDT", timeframe="1h", candles=600, initial_balance=1000.0, restrict_to_holdout=False
+    )
+    min_trades_values = [10, 20]
+    multiplier_values = [0.5, 1.0]
+    points = sweep_position_sizing(exchange, model, None, base_request, min_trades_values, multiplier_values)
+
+    assert len(points) == len(min_trades_values) * len(multiplier_values)
+    assert {(p.kelly_min_trades, p.kelly_multiplier) for p in points} == {
+        (mt, mu) for mt in min_trades_values for mu in multiplier_values
+    }
+    for p in points:
+        assert p.error is None
+
+    assert db.get_latest_backtest_run(symbol="BTC/USDT:USDT") is None, "tarama backtest_runs tablosunu kirletmemeli"
+
+    db_session.reset_for_tests()
+
+
+def test_sweep_position_sizing_records_error_without_stopping(monkeypatch):
+    """Bir kombinasyonda backtest çökerse taramanın GERİ KALANI durmamalı —
+    hatalı nokta `error` alanıyla işaretlenip diğer kombinasyonlar normal
+    şekilde denenmeye devam etmeli (bkz. `sweep_confidence_thresholds` ile
+    AYNI dayanıklılık deseni)."""
+    from app.backtest import system_runner
+
+    def fake_run_system_backtest(exchange, model, meta_model, request, lstm_model=None, online_model=None, persist=True):
+        if request.kelly_min_trades == 20:
+            raise ValueError("simüle edilmiş hata")
+        return SystemBacktestReport(
+            symbol=request.symbol,
+            timeframe="1h",
+            candles_used=100,
+            period_start="2024-01-01T00:00:00",
+            period_end="2024-01-05T00:00:00",
+            initial_balance=1000.0,
+            final_equity=1000.0,
+            trades_closed=1,
+            win_rate_pct=100.0,
+            total_pnl_quote=0.0,
+            total_pnl_pct=0.0,
+            daily_pnl_quote=0.0,
+            daily_pnl_pct=0.0,
+            monthly_pnl_quote=0.0,
+            monthly_pnl_pct=0.0,
+            max_drawdown_pct=0.0,
+            trades=[],
+        )
+
+    monkeypatch.setattr(system_runner, "run_system_backtest", fake_run_system_backtest)
+
+    points = system_runner.sweep_position_sizing(
+        exchange=None,
+        model=None,
+        meta_model=None,
+        base_request=SystemBacktestRequest(),
+        kelly_min_trades_values=[10, 20],
+        kelly_multiplier_values=[0.5],
+    )
+
+    assert len(points) == 2
+    ok_point = next(p for p in points if p.kelly_min_trades == 10)
+    err_point = next(p for p in points if p.kelly_min_trades == 20)
+    assert ok_point.error is None and ok_point.trades_closed == 1
+    assert err_point.error is not None and "simüle edilmiş hata" in err_point.error

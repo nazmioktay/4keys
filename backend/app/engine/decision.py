@@ -113,8 +113,20 @@ class DecisionEngine:
         # ~%0.6) küçülen örneklemle örtüşen işlemler arasındaki gürültü
         # payının içinde. TEK bir holdout penceresinde ölçüldü — kalıcı bir
         # kanun değil, yeni veriyle periyodik olarak yeniden ölçülmeli.
-        open_confidence: float = 0.55,
-        close_confidence: float = 0.5,
+        #
+        # GÜNCELLEME (bkz. README "karlılık" — OOM düzeltmelerinden ve
+        # "temel sadeleşme"den sonra model/veri kökten değişti, sweep
+        # YENİDEN ölçüldü): `open_confidence=0.55`'te ARTIK yalnızca 31
+        # işlem, kazanma=%45.16, PnL **NEGATİF** (-%0.888) — eski ölçümün
+        # tam tersi. `0.50`'de ise 149 işlem (5× daha büyük, çok daha
+        # güvenilir örneklem), kazanma=%63.09, PnL=+%2.68 — taramanın en
+        # iyi sonucu. 0.6+ eşiklerde örneklem 3/0/0'a çöküyor, yorumlanamaz.
+        # Şemanın ORİJİNAL varsayılanına (0.5/0.45) geri dönüldü — bu
+        # tersine dönüş, eşiğin kendisinin "doğru" olmadığını, periyodik
+        # yeniden ölçümün NEDEN gerekli olduğunu gösteriyor (yukarıdaki not
+        # zaten bunu öngörmüştü).
+        open_confidence: float = 0.5,
+        close_confidence: float = 0.45,
         portfolio: PortfolioManager | None = None,
         assumed_stop_loss_pct: float = 3.0,
         meta_model: MetaLabelModel | None = None,

@@ -102,10 +102,11 @@ class SystemBacktestRequest(BaseModel):
     # KALİBRE EDİLMİŞ 3 sınıflı olasılık ölçeğindedir (rastgele seviye
     # 0.333). `ge` sınırı 0.34 (rastgele seviyenin hemen üstü) — eski
     # sınır (0.5) doğru değerin API'den verilmesini bile ENGELLİYORDU.
-    # 0.55/0.5: `sweep_confidence_thresholds` ile GERÇEK holdout verisinde
-    # ölçüldü — bkz. `DecisionEngine.__init__`'teki tam gerekçe.
-    open_confidence: float = Field(default=0.55, ge=0.34, le=1.0)
-    close_confidence: float = Field(default=0.5, ge=0.34, le=1.0)
+    # 0.5/0.45: `sweep_confidence_thresholds` ile GERÇEK holdout verisinde
+    # ölçüldü — bkz. `DecisionEngine.__init__`'teki tam gerekçe (0.55'ten
+    # geri dönüldü, model/veri "temel sadeleşme" ile kökten değişti).
+    open_confidence: float = Field(default=0.5, ge=0.34, le=1.0)
+    close_confidence: float = Field(default=0.45, ge=0.34, le=1.0)
     commission_pct: float = Field(default=0.04, ge=0)
     slippage_pct: float = Field(default=0.02, ge=0)
     use_meta_label: bool = Field(default=True, description="Eğitilmiş bir meta-label modeli varsa sinyal filtresi olarak kullanılır")

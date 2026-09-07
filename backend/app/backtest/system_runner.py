@@ -751,3 +751,77 @@ def sweep_confidence_thresholds(
                 )
             )
     return results
+
+
+@dataclass
+class PositionSizingSweepPoint:
+    kelly_min_trades: int
+    kelly_multiplier: float
+    trades_closed: int
+    win_rate_pct: float
+    total_pnl_pct: float
+    daily_pnl_pct: float
+    max_drawdown_pct: float
+    error: str | None = None
+
+
+def sweep_position_sizing(
+    exchange: Exchange,
+    model: SignalModel,
+    meta_model: MetaLabelModel | None,
+    base_request: SystemBacktestRequest,
+    kelly_min_trades_values: list[int],
+    kelly_multiplier_values: list[float],
+    lstm_model: "LSTMSignalModel | None" = None,
+    online_model: OnlineSignalModel | None = None,
+) -> list[PositionSizingSweepPoint]:
+    """`sweep_confidence_thresholds` ile AYNI felsefe (veri sağlar, "en iyi"yi
+    dayatmaz), ama pozisyon boyutlandırmanın iki Kelly parametresi için:
+
+    - `kelly_min_trades`: Kelly'nin devreye girmeden önce beklediği minimum
+      kapanmış işlem sayısı. Küçükse Kelly, KÜÇÜK/GÜRÜLTÜLÜ bir örneklemin
+      kazanma oranına göre erken devreye girebilir — gerçek üretim
+      backtest'inde gözlendi: ilk ~40 işlemlik pencerede kazanma oranı
+      geçici olarak %50'nin altına düşünce Kelly formülü "tam Kelly=%0"
+      hesapladı ve o dönemdeki ~25-30 işlem TAMAMEN SIFIR boyutla açıldı
+      (sermaye o dönem hiç kullanılmadı) — nihai kazanma oranı (%63) çok
+      daha iyi olsa bile.
+    - `kelly_multiplier`: Full Kelly'nin uygulanacak kesri (0.5 varsayılan).
+
+    Her nokta `base_request`'in bir KOPYASI üzerinde çalışır (yalnızca bu
+    iki alan değişir); `run_system_backtest(persist=False)` ile ara
+    denemeler `backtest_runs`'ı kirletmez.
+    """
+    results: list[PositionSizingSweepPoint] = []
+    for min_trades in kelly_min_trades_values:
+        for multiplier in kelly_multiplier_values:
+            request = base_request.model_copy(update={"kelly_min_trades": min_trades, "kelly_multiplier": multiplier})
+            try:
+                report = run_system_backtest(
+                    exchange, model, meta_model, request, lstm_model=lstm_model, online_model=online_model, persist=False
+                )
+                results.append(
+                    PositionSizingSweepPoint(
+                        kelly_min_trades=min_trades,
+                        kelly_multiplier=multiplier,
+                        trades_closed=report.trades_closed,
+                        win_rate_pct=report.win_rate_pct,
+                        total_pnl_pct=report.total_pnl_pct,
+                        daily_pnl_pct=report.daily_pnl_pct,
+                        max_drawdown_pct=report.max_drawdown_pct,
+                    )
+                )
+            except ValueError as exc:
+                results.append(
+                    PositionSizingSweepPoint(
+                        kelly_min_trades=min_trades,
+                        kelly_multiplier=multiplier,
+                        trades_closed=0,
+                        win_rate_pct=0.0,
+                        total_pnl_pct=0.0,
+                        daily_pnl_pct=0.0,
+                        max_drawdown_pct=0.0,
+                        error=str(exc),
+                    )
+                )
+    return results
