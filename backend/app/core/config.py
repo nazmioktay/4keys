@@ -45,18 +45,19 @@ class Settings(BaseSettings):
     # gerektiğini belirtti (bkz. sohbet). Uyumluluk = BTC ile getiri
     # korelasyonu (aynı rejimde hareket ediyor mu) + minimum likidite.
     #
-    # GÜNCELLEME (temel sadeleşme, bkz. README): `ml_train_max_symbols=1`
-    # yapılmıştı — sistem yalnızca BTC/USDT ile eğitiliyordu, bellek
-    # baskısını (o zamanki OOM krizi) azaltmak için. OOM kök nedeni
-    # (online model sınırsız büyümesi, bkz. README "OOM üretim olayı")
-    # o zamandan beri BULUNUP DÜZELTİLDİ; kullanıcı isteğiyle ("karlılığı
-    # artırmak için gereken her şeyi yap") tekrar GERİ AÇILDI — BTC-only'de
-    # ayda yalnızca ~18-20 işlem oluyordu, bu mutlak getiriyi doğrudan
-    # sınırlıyordu. `select_training_symbols`/`_resolve_symbols`'daki
-    # kısa-devre limit<=1 olduğunda hâlâ geçerli — limit>1 olunca normal
-    # (BTC + korelasyonlu ek semboller) akışa döner.
+    # GÜNCELLEME (bkz. README "karlılık"): "karlılık" turunda `ml_train_max_symbols`
+    # kısaca 5'e AÇILIP gerçek üretim verisiyle TEST EDİLDİ — sonuç NET bir
+    # gerileme (176 işlem/%64,20 kazanma/+%6,43 PnL -> 101 işlem/%46,53
+    # kazanma/+%1,81 PnL, BTC + 1 ek sembolle). LSTM denemesiyle AYNI ders:
+    # teoride mantıklı ("daha fazla işlem fırsatı") bir değişiklik, gerçek
+    # backtest'te BTC'ye özgü sinyali seyreltip kötüleştirdi. `1`'e GERİ
+    # ALINDI — şu ana kadarki EN İYİ doğrulanmış konfigürasyon budur.
+    # `select_training_symbols`/`_resolve_symbols`'daki kısa-devre limit<=1
+    # olduğunda hâlâ geçerli — limit>1 olunca normal (BTC + korelasyonlu ek
+    # semboller) akışa döner, ileride daha dikkatli (ör. hangi sembolün
+    # eklendiğini görüp neden zarar verdiğini anlayarak) tekrar denenebilir.
     ml_primary_symbol: str = "BTC/USDT:USDT"
-    ml_train_max_symbols: int = 5
+    ml_train_max_symbols: int = 1
     ml_min_correlation_with_primary: float = 0.4
     ml_min_quote_volume_24h: float = 5_000_000.0
 
