@@ -31,6 +31,7 @@ function textToWeights(text) {
 export default function PaperTrading() {
   const [status, setStatus] = useState(null);
   const [pnl, setPnl] = useState(null);
+  const [schedulerStatus, setSchedulerStatus] = useState(null);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [runningCycle, setRunningCycle] = useState(false);
@@ -48,8 +49,23 @@ export default function PaperTrading() {
     }
   };
 
+  const loadSchedulerStatus = async () => {
+    try {
+      setSchedulerStatus(await api.get("/scheduler/status"));
+    } catch {
+      // Sessizce yut — bu yalnızca bilgilendirici bir rozet, sayfanın asıl
+      // işlevini (pozisyon/PNL görüntüleme) engellemesin.
+      setSchedulerStatus(null);
+    }
+  };
+
   useEffect(() => {
     load();
+    loadSchedulerStatus();
+    // Zamanlayıcı durumu her 30sn'de bir tazelenir — "devam ediyor" rozetinin
+    // canlı kalması için (sayfa açık kalsa bile son çalışma zamanı ilerlesin).
+    const id = setInterval(loadSchedulerStatus, 30_000);
+    return () => clearInterval(id);
   }, []);
 
   const runCycle = async () => {
@@ -82,12 +98,58 @@ export default function PaperTrading() {
         <p className="muted">
           Zamanlayıcı zaten otomatik olarak periyodik çalıştırıyor (arka planda); burası anlık/manuel tetikleme içindir.
         </p>
+        <SchedulerStatusBadge schedulerStatus={schedulerStatus} />
       </div>
 
       <PnlCard pnl={pnl} />
       <OpenPositionsCard status={status} />
       <TrancheSettingsCard rules={status?.rules} onSaved={load} />
       <ClosedHistoryCard status={status} />
+    </div>
+  );
+}
+
+function SchedulerStatusBadge({ schedulerStatus }) {
+  // Sadece "Şimdi Çalıştır" butonuna güvenmek yerine, zamanlayıcının
+  // ARKA PLANDA gerçekten periyodik çalışıp çalışmadığını `/scheduler/status`
+  // üzerinden gösterir — kullanıcı sayfayı her açtığında "çalışıyor mu,
+  // durdu mu?" diye merak edip terminalden loglara bakmak zorunda kalmasın.
+  if (!schedulerStatus) return null;
+
+  const job = schedulerStatus.jobs?.find((j) => j.job_id === "engine_cycle");
+  if (!schedulerStatus.enabled || !schedulerStatus.running) {
+    return (
+      <div className="pill neg" style={{ marginTop: 8 }}>
+        ⚠ Zamanlayıcı devre dışı — paper trading otomatik ilerlemiyor.
+      </div>
+    );
+  }
+  if (!job || job.run_count === 0) {
+    return (
+      <div className="muted" style={{ marginTop: 8 }}>
+        ⏳ Zamanlayıcı aktif, ilk karar döngüsü henüz çalışmadı — yakında beklenıyor.
+      </div>
+    );
+  }
+
+  const lastRunMs = job.last_run_at ? Date.now() - new Date(job.last_run_at).getTime() : null;
+  const staleThresholdMs = job.interval_seconds * 3 * 1000;
+  const isStale = lastRunMs !== null && lastRunMs > staleThresholdMs;
+  const minutesAgo = lastRunMs !== null ? Math.max(0, Math.round(lastRunMs / 60000)) : null;
+
+  if (isStale || job.ok === false) {
+    return (
+      <div className="pill neg" style={{ marginTop: 8 }}>
+        ⚠ Zamanlayıcı beklenenden uzun süredir çalışmamış görünüyor (son çalışma: {minutesAgo} dk önce)
+        {job.detail ? ` — ${job.detail}` : ""}.
+      </div>
+    );
+  }
+
+  return (
+    <div className="pill pos" style={{ marginTop: 8 }}>
+      🟢 Paper trade devam ediyor — son karar {minutesAgo === 0 ? "az önce" : `${minutesAgo} dk önce`}
+      {job.detail ? `: ${job.detail}` : ""}.
     </div>
   );
 }
