@@ -87,7 +87,7 @@ def test_job_run_engine_cycle_records_unexpected_failure(monkeypatch):
 
 def test_job_auto_retrain_skips_when_no_symbols(monkeypatch):
     monkeypatch.setattr(jobs, "get_exchange", lambda *_a, **_k: object())
-    monkeypatch.setattr(jobs, "refresh_screener", lambda: [])
+    monkeypatch.setattr(jobs, "_auto_retrain_symbols", lambda exchange: None)
     jobs.job_auto_retrain()
 
     result = status.get_all()[jobs.AUTO_RETRAIN_JOB_ID]
@@ -103,9 +103,7 @@ def test_job_auto_retrain_trains_primary_and_records_success(monkeypatch):
             balanced_accuracy = 0.42
 
     monkeypatch.setattr(jobs, "get_exchange", lambda *_a, **_k: object())
-    monkeypatch.setattr(jobs, "refresh_screener", lambda: [object()])
-    monkeypatch.setattr(jobs, "top_long", lambda results, n: [type("R", (), {"symbol": "BTC/USDT:USDT"})()])
-    monkeypatch.setattr(jobs, "top_short", lambda results, n: [])
+    monkeypatch.setattr(jobs, "_auto_retrain_symbols", lambda exchange: ["BTC/USDT:USDT"])
     monkeypatch.setattr(jobs, "train_signal_model_validated", lambda *a, **k: _FakeResult())
     monkeypatch.setattr(jobs, "DEFAULT_META_MODEL_PATH", type("P", (), {"exists": staticmethod(lambda: False)})())
 
@@ -125,9 +123,7 @@ def test_job_auto_retrain_also_retrains_meta_when_it_already_exists(monkeypatch)
             balanced_accuracy = 0.42
 
     monkeypatch.setattr(jobs, "get_exchange", lambda *_a, **_k: object())
-    monkeypatch.setattr(jobs, "refresh_screener", lambda: [object()])
-    monkeypatch.setattr(jobs, "top_long", lambda results, n: [type("R", (), {"symbol": "BTC/USDT:USDT"})()])
-    monkeypatch.setattr(jobs, "top_short", lambda results, n: [])
+    monkeypatch.setattr(jobs, "_auto_retrain_symbols", lambda exchange: ["BTC/USDT:USDT"])
     monkeypatch.setattr(jobs, "train_signal_model_validated", lambda *a, **k: _FakeResult())
     monkeypatch.setattr(jobs, "DEFAULT_META_MODEL_PATH", type("P", (), {"exists": staticmethod(lambda: True)})())
     monkeypatch.setattr(jobs.SignalModel, "load_from", classmethod(lambda cls, path=None: object()))
@@ -216,9 +212,7 @@ def test_job_auto_retrain_lstm_trains_when_already_used(monkeypatch):
 
     monkeypatch.setattr(jobs, "DEFAULT_LSTM_MODEL_PATH", type("P", (), {"exists": staticmethod(lambda: True)})())
     monkeypatch.setattr(jobs, "get_exchange", lambda *_a, **_k: object())
-    monkeypatch.setattr(jobs, "refresh_screener", lambda: [object()])
-    monkeypatch.setattr(jobs, "top_long", lambda results, n: [type("R", (), {"symbol": "BTC/USDT:USDT"})()])
-    monkeypatch.setattr(jobs, "top_short", lambda results, n: [])
+    monkeypatch.setattr(jobs, "_auto_retrain_symbols", lambda exchange: ["BTC/USDT:USDT"])
     monkeypatch.setattr(jobs, "train_lstm_signal_model", lambda *a, **k: _FakeResult())
 
     jobs.job_auto_retrain_lstm()

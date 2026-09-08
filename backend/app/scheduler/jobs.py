@@ -15,6 +15,7 @@ from app.ml.model_status import is_model_enabled
 from app.ml.online_model import DEFAULT_ONLINE_MODEL_PATH, OnlineSignalModel
 from app.ml.regime import DEFAULT_REGIME_MODEL_PATH
 from app.ml.train import (
+    _ENSEMBLE_LABELING,
     train_lstm_signal_model,
     train_meta_label_model,
     train_online_signal_model,
@@ -24,7 +25,6 @@ from app.ml.train import (
 from app.openinterest.service import refresh_all_configured_symbols as refresh_open_interest_symbols
 from app.orderbook.service import refresh_all_configured_symbols
 from app.portfolio.shared import get_portfolio
-from app.screener.scanner import top_long, top_short
 from app.screener.service import refresh as refresh_screener
 from app.security.kill_switch import KillSwitchActive
 
@@ -141,20 +141,32 @@ def job_refresh_open_interest() -> None:
 
 def job_auto_retrain() -> None:
     """Periyodik iş (bkz. `FOURKEYS_ML_AUTO_RETRAIN_ENABLED`, varsayılan AÇIK):
-    XGBoost'u (ve varsa meta-label modelini) screener'ın top long/short
-    listesiyle otomatik olarak yeniden eğitir. Aralık `compute_auto_retrain_interval_seconds()`
-    ile hesaplanır (bkz. `app.core.config.Settings.ml_auto_retrain_seconds`
-    docstring'i — veri hacmine dayalı gerekçe)."""
+    XGBoost'u (ve varsa meta-label modelini) `_resolve_symbols` (BTC-öncelikli
+    seçim, bkz. `app.api.routes.ml._resolve_symbols`/`_auto_retrain_symbols`
+    docstring'i) ile otomatik olarak yeniden eğitir. Aralık
+    `compute_auto_retrain_interval_seconds()` ile hesaplanır (bkz.
+    `app.core.config.Settings.ml_auto_retrain_seconds` docstring'i — veri
+    hacmine dayalı gerekçe).
+
+    GÜNCELLEME (kritik düzeltme, bkz. README "karlılık" — "bu şekilde
+    düzeltilmesi gereken şeyler var mı?" kontrolü sırasında bulundu):
+    ÖNCEDEN bu job screener'ın ham Top Long/Short çıktısını (likidite/
+    korelasyon filtresi YOK) doğrudan eğitim evreni olarak kullanıyor VE
+    `_ENSEMBLE_LABELING`i GEÇMİYORDU (yani `train_signal_model_validated`'ın
+    KENDİ eski varsayılanlarıyla, horizon=5/1.5xATR, eğitiyordu) — bu,
+    `train-all.sh` ile elle doğrulanan BTC-only + horizon=8 üretim
+    konfigürasyonunu, en geç `ml_auto_retrain_max_seconds` (varsayılan 7
+    gün) içinde SESSİZCE ÜZERİNE YAZARDI. Artık `_resolve_symbols` (BTC-only
+    hızlı yol dahil) ve `_ENSEMBLE_LABELING` kullanılıyor — manuel
+    `train-all` ile TUTARLI."""
     try:
         exchange = get_exchange(settings.exchange_id)
-        results = refresh_screener()
-        picks = top_long(results, settings.screener_top_n) + top_short(results, settings.screener_top_n)
-        symbols = [r.symbol for r in picks]
+        symbols = _auto_retrain_symbols(exchange)
         if not symbols:
-            status.record(AUTO_RETRAIN_JOB_ID, ok=True, detail="atlandı: screener'dan sembol gelmedi")
+            status.record(AUTO_RETRAIN_JOB_ID, ok=True, detail="atlandı: sembol bulunamadı")
             return
 
-        train_result = train_signal_model_validated(exchange, symbols)
+        train_result = train_signal_model_validated(exchange, symbols, **_ENSEMBLE_LABELING)
         detail = (
             f"XGBoost: {train_result.rows_used} satır, "
             f"oos_balanced_acc={train_result.out_of_sample.balanced_accuracy:.3f}"
@@ -164,10 +176,13 @@ def job_auto_retrain() -> None:
         # kullanıyor demektir), birincil modelle senkron kalması için o da
         # yenilenir; hiç eğitilmemişse otomatik olarak BAŞLATILMAZ (bu,
         # kullanıcının bilinçli bir tercihi olmalı, bkz. `/ml/train-meta`).
+        # KRİTİK: burada da `_ENSEMBLE_LABELING` geçilir — aksi halde
+        # meta-label, birincilin ÖĞRENMEDİĞİ bir soruya göre "doğru/yanlış"
+        # damgası vurur (bkz. `_ENSEMBLE_LABELING` "KRİTİK" notu).
         if DEFAULT_META_MODEL_PATH.exists():
             try:
                 primary_model = SignalModel.load_from()
-                _, meta_rows = train_meta_label_model(exchange, symbols, primary_model)
+                _, meta_rows = train_meta_label_model(exchange, symbols, primary_model, **_ENSEMBLE_LABELING)
                 detail += f"; meta-label: {meta_rows} satır"
             except ValueError as exc:
                 detail += f"; meta-label atlandı: {exc}"
@@ -178,13 +193,20 @@ def job_auto_retrain() -> None:
         status.record(AUTO_RETRAIN_JOB_ID, ok=False, detail=str(exc))
 
 
-def _auto_retrain_symbols() -> list[str] | None:
-    """`job_auto_retrain` ile AYNI sembol seçimi (screener top long/short) —
-    LSTM/online/regime otomatik yenileme job'ları da bunu paylaşır, böylece
-    tüm modeller AYNI evrenle senkron kalır."""
-    results = refresh_screener()
-    picks = top_long(results, settings.screener_top_n) + top_short(results, settings.screener_top_n)
-    return [r.symbol for r in picks] or None
+def _auto_retrain_symbols(exchange) -> list[str] | None:
+    """`job_auto_retrain` ile AYNI sembol seçimi — LSTM/online/regime
+    otomatik yenileme job'ları da bunu paylaşır, böylece tüm modeller AYNI
+    evrenle senkron kalır.
+
+    GÜNCELLEME (kritik düzeltme — bkz. `job_auto_retrain` docstring'i):
+    ÖNCEDEN screener'ın ham Top Long/Short çıktısını (likidite/korelasyon
+    filtresi YOK, `ml_train_max_symbols` ayarını HİÇ dikkate almıyordu)
+    kullanıyordu. Artık `_resolve_symbols` (manuel `train-all`/`POST
+    /ml/train-all` ile AYNI fonksiyon — BTC-only hızlı yol dahil, likidite/
+    korelasyon filtreli `select_training_symbols`) kullanılıyor."""
+    from app.api.routes.ml import _resolve_symbols
+
+    return _resolve_symbols(exchange, None) or None
 
 
 def job_auto_retrain_lstm() -> None:
@@ -207,12 +229,12 @@ def job_auto_retrain_lstm() -> None:
         return
     try:
         exchange = get_exchange(settings.exchange_id)
-        symbols = _auto_retrain_symbols()
+        symbols = _auto_retrain_symbols(exchange)
         if symbols is None:
-            status.record(AUTO_RETRAIN_LSTM_JOB_ID, ok=True, detail="atlandı: screener'dan sembol gelmedi")
+            status.record(AUTO_RETRAIN_LSTM_JOB_ID, ok=True, detail="atlandı: sembol bulunamadı")
             return
 
-        result = train_lstm_signal_model(exchange, symbols)
+        result = train_lstm_signal_model(exchange, symbols, **_ENSEMBLE_LABELING)
         status.record(
             AUTO_RETRAIN_LSTM_JOB_ID,
             ok=True,
@@ -235,12 +257,12 @@ def job_auto_retrain_online() -> None:
         return
     try:
         exchange = get_exchange(settings.exchange_id)
-        symbols = _auto_retrain_symbols()
+        symbols = _auto_retrain_symbols(exchange)
         if symbols is None:
-            status.record(AUTO_RETRAIN_ONLINE_JOB_ID, ok=True, detail="atlandı: screener'dan sembol gelmedi")
+            status.record(AUTO_RETRAIN_ONLINE_JOB_ID, ok=True, detail="atlandı: sembol bulunamadı")
             return
 
-        _, report = train_online_signal_model(exchange, symbols)
+        _, report = train_online_signal_model(exchange, symbols, **_ENSEMBLE_LABELING)
         status.record(
             AUTO_RETRAIN_ONLINE_JOB_ID,
             ok=True,
@@ -262,12 +284,12 @@ def job_auto_retrain_regime() -> None:
         return
     try:
         exchange = get_exchange(settings.exchange_id)
-        symbols = _auto_retrain_symbols()
+        symbols = _auto_retrain_symbols(exchange)
         if symbols is None:
-            status.record(AUTO_RETRAIN_REGIME_JOB_ID, ok=True, detail="atlandı: screener'dan sembol gelmedi")
+            status.record(AUTO_RETRAIN_REGIME_JOB_ID, ok=True, detail="atlandı: sembol bulunamadı")
             return
 
-        _, results = train_signal_models_by_regime(exchange, symbols)
+        _, results = train_signal_models_by_regime(exchange, symbols, **_ENSEMBLE_LABELING)
         summary = "; ".join(
             f"rejim {r.regime}: {r.rows_used} satır" + (f" (hata: {r.error})" if r.error else "") for r in results
         )
