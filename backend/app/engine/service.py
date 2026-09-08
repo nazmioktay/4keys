@@ -6,8 +6,6 @@ from app.ml.model_paths import DEFAULT_LSTM_MODEL_PATH
 from app.ml.model_status import is_model_enabled
 from app.ml.online_model import DEFAULT_ONLINE_MODEL_PATH, OnlineSignalModel
 from app.portfolio.shared import get_portfolio
-from app.screener.scanner import top_long, top_short
-from app.screener.service import get_scan_results
 from app.security import kill_switch
 
 from .decision import Action, DecisionEngine
@@ -22,13 +20,20 @@ class ModelNotTrained(Exception):
 
 
 def run_cycle_once() -> list[Action]:
-    """Screener'ın (önbelleğe alınmış) Top Long/Short listesi üzerinde tek bir
-    ML karar döngüsü çalıştırır.
+    """`settings.ml_primary_symbol` (BTC-only) üzerinde tek bir ML karar
+    döngüsü çalıştırır.
 
     Hem `POST /engine/run-cycle` API'si hem de periyodik zamanlayıcı
     (`app.scheduler`) bu fonksiyonu çağırır — mantık tek bir yerde, iki
-    tetikleyici arasında tutarlı davranış garanti eder. Screener taramasını
-    tekrarlamaz; `app.screener.service` önbelleğini paylaşır.
+    tetikleyici arasında tutarlı davranış garanti eder.
+
+    GÜNCELLEME (bkz. README "karlılık"): ÖNCEDEN screener'ın Top Long/Short
+    listesi (piyasadaki HERHANGİ bir sembol) doğrudan buraya besleniyordu —
+    ama model yalnızca `ml_primary_symbol` ile eğitiliyor, yani model hiç
+    görmediği bir dağılımdan ("out-of-distribution") tahmin üretmeye
+    zorlanıyordu. Artık yalnızca eğitildiği sembolde çalışıyor; screener
+    hâlâ ayrı bir bilgi kaynağı (`/screener` API'si) olarak kullanılabilir
+    ama ML karar motorunu artık YÖNLENDİRMİYOR.
     """
     if kill_switch.is_active():
         raise kill_switch.KillSwitchActive(f"Kill switch aktif: {kill_switch.status().reason}")
@@ -55,9 +60,18 @@ def run_cycle_once() -> list[Action]:
         OnlineSignalModel.load_from() if is_model_enabled(DEFAULT_ONLINE_MODEL_PATH) else None
     )
 
-    results = get_scan_results()
-    picks = top_long(results, settings.screener_top_n) + top_short(results, settings.screener_top_n)
-    symbols = [r.symbol for r in picks]
+    # GÜNCELLEME (bkz. README "karlılık" — kullanıcı sorusu: "paper trade'de
+    # gelen ticker'lar nasıl seçiliyor, güvenli mi?"): ÖNCEDEN screener'ın
+    # Top Long/Short'u (piyasadaki HERHANGİ bir semboldü) doğrudan karar
+    # motoruna gönderiliyordu — ama model yalnızca `ml_primary_symbol`
+    # (BTC-only) ile eğitiliyor (bkz. README madde 9, çok-sembollü eğitim
+    # denenip geriletildi). Yani model, hiç görmediği bir dağılımdan
+    # (başka bir coin'in fiyat/hacim davranışı) tahmin üretmeye
+    # zorlanıyordu — "out-of-distribution" riski. Artık canlı karar
+    # döngüsü de SADECE `ml_primary_symbol` üzerinde çalışıyor; screener
+    # taraması hâlâ /screener API'sinde ayrı bir bilgi kaynağı olarak
+    # görüntülenebilir, ama artık ML karar motorunu YÖNLENDİRMİYOR.
+    symbols = [settings.ml_primary_symbol]
 
     engine = DecisionEngine(
         exchange=exchange,
