@@ -885,7 +885,7 @@ def test_run_periodic_optimization_skips_unreliable_points_and_never_persists(mo
 
     monkeypatch.setattr(system_runner, "run_system_backtest", fake_run_system_backtest)
 
-    base_request = SystemBacktestRequest()  # varsayılan: open=0.5, kelly_multiplier=0.75, kelly_min_trades=40
+    base_request = SystemBacktestRequest()  # varsayılan: open=0.5, kelly_multiplier=1.0, kelly_min_trades=40
     result = system_runner.run_periodic_optimization(
         exchange=None,
         model=None,
@@ -907,7 +907,10 @@ def test_run_periodic_optimization_skips_unreliable_points_and_never_persists(mo
     assert result.current_open_confidence == base_request.open_confidence
     assert result.current_kelly_multiplier == base_request.kelly_multiplier
     assert result.current_kelly_min_trades == base_request.kelly_min_trades
-    assert result.current_total_pnl_pct == pytest.approx(1.0)
+    # kelly_multiplier varsayılanı artık 1.0 (bkz. README "karlılık" —
+    # tam Kelly'ye geçildi) -> fake_run_system_backtest'in kelly_bonus'u
+    # (kelly_multiplier==1.0 iken +2.0) mevcut kombinasyona da uygulanıyor.
+    assert result.current_total_pnl_pct == pytest.approx(1.0 + 2.0)
 
 
 # --- XGBoost hiperparametre taraması (sweep_xgboost_hyperparameters) ---

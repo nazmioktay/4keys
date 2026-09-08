@@ -180,9 +180,15 @@ class SystemBacktestRequest(BaseModel):
     # geçilmedi — küçük örneklemde (149 işlem) tahmin hatasına karşı bir
     # güvenlik payı bırakmak için 0.75x seçildi). Düşüş payı bu aralıkta
     # hep küçük kaldı (%0.76 -> %1.14).
+    #
+    # GÜNCELLEME 2 (yeni hiperparametre/horizon=8 modeliyle, BTC-only
+    # üretim verisi, 523 işlem — eski 149'un ~3.5 katı örneklem): 0.75x'te
+    # +%13.34, 1.0x'te (tam Kelly) +%16.38 PnL, düşüş payı hâlâ küçük
+    # (%0.65 -> %0.85). Örneklem artık daha büyük olduğu için tahmin
+    # hatası endişesi azaldı — kullanıcı onayıyla tam Kelly'ye (1.0x) geçildi.
     kelly_multiplier: float = Field(
-        default=0.75, gt=0, le=1.5,
-        description="Full Kelly'nin uygulanacak kesri — 0.25 çeyrek, 0.5 yarım, 0.75 (varsayılan, bkz. yukarıdaki ölçüm), 1.0 tam Kelly.",
+        default=1.0, gt=0, le=1.5,
+        description="Full Kelly'nin uygulanacak kesri — 0.25 çeyrek, 0.5 yarım, 0.75, 1.0 (varsayılan, bkz. yukarıdaki ölçüm) tam Kelly.",
     )
     kelly_min_trades: int = Field(
         default=40, ge=5,

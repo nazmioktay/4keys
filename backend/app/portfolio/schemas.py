@@ -24,13 +24,17 @@ class RiskRules(BaseModel):
     # `POST /backtest/system/sweep-position-sizing` ile ölçülen iyileşme
     # (bkz. `app.backtest.schemas.SystemBacktestRequest.kelly_multiplier`
     # docstring'i — aynı gerekçe/ölçüm) gerçek paper-trading sermayesine
-    # HİÇ yansımıyordu. Artık ikisi SENKRON: `kelly`/`0.75`/`40`.
+    # HİÇ yansımıyordu. Artık ikisi SENKRON: `kelly`/`1.0`/`40` (bkz.
+    # `app.backtest.schemas.SystemBacktestRequest.kelly_multiplier`
+    # "GÜNCELLEME 2" notu — büyümüş örneklemle (523 işlem) tam Kelly'nin
+    # düşük risk/yüksek getiri sunduğu doğrulandı, kullanıcı onayıyla
+    # 0.75'ten 1.0'a geçildi).
     position_sizing_method: Literal["fixed_risk", "kelly"] = Field(
         "kelly", description="'fixed_risk': SL mesafesine göre sabit risk yüzdesi. 'kelly' (varsayılan): Kelly kriteri."
     )
     kelly_multiplier: float = Field(
-        0.75, gt=0, le=1.5,
-        description="Full Kelly'nin uygulanacak kesri. Çeyrek Kelly=0.25, yarım Kelly=0.5, 0.75 (varsayılan, bkz. yukarıdaki ölçüm), tam Kelly=1.0",
+        1.0, gt=0, le=1.5,
+        description="Full Kelly'nin uygulanacak kesri. Çeyrek Kelly=0.25, yarım Kelly=0.5, 0.75, tam Kelly=1.0 (varsayılan, bkz. yukarıdaki ölçüm)",
     )
     kelly_min_trades: int = Field(
         40, ge=5,
