@@ -984,7 +984,14 @@ _ENSEMBLE_LABELING = {
     # "84.7% nötr" felaketine — o da FARKLI bir etiketleme yöntemindeydi —
     # BENZEMİYOR). Hedef artık "3 mumda 1 ATR kazanım mı 1 ATR zarar mı
     # önce gelir" — daha kısa vadeli, daha sık sinyal üreten bir soru.
-    "horizon": 3,  # ATR bariyerlerinde ZAMAN bariyeri (bar) — bkz. train_all_models
+    #
+    # GÜNCELLEME 2 (BTC-only üretim verisiyle `sweep_xgboost_labeling_targets`
+    # taraması, bkz. README "Karlılık"): 3 -> 8 bar. 20 kombinasyonluk tam
+    # sistem backtest taramasında horizon=3/ATR=1.0 (o zamanki varsayılan)
+    # 65 işlem/%55,38 kazanma/+%1,27 PnL veriyordu — tablonun alt sıralarında.
+    # horizon=8/ATR=1.0 en yüksek PnL'i verdi (145 işlem, %55,17 kazanma,
+    # +%5,12 PnL, %1,46 düşüş) — hem büyük örneklem hem güçlü PnL artışı.
+    "horizon": 8,  # ATR bariyerlerinde ZAMAN bariyeri (bar) — bkz. train_all_models
     "threshold_pct": 1.0,  # atr_triple_barrier'da kullanılmaz, imza uyumu için
     "take_profit_pct": 1.0,  # ATR ÇARPANI
     "stop_loss_pct": 1.0,  # ATR ÇARPANI
