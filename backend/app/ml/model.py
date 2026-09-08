@@ -55,13 +55,27 @@ class _XGBClassifierWrapper(ClassifierMixin, BaseEstimator):
     tahminlerde geri çevrilir. `reg_alpha`/`reg_lambda` (L1/L2) ve
     `subsample`/`colsample_bytree`, rehberin "2.4 Overfitting ->
     Regularization" maddesindeki XGBoost önerisinin karşılığıdır.
+
+    `n_estimators`/`max_depth`/`learning_rate` varsayılanları (150/3/0.1),
+    BTC-only üretim verisiyle `sweep_xgboost_hyperparameters` (bkz. README
+    "Karlılık") ile 27 kombinasyon üzerinde tam-sistem backtest'iyle
+    ölçülüp seçildi — eski değerler (300/4/0.05) 57 işlem/%59,65 kazanma/
+    +%3,22 PnL veriyordu, 150/3/0.1 67 işlem/%56,72 kazanma/+%5,46 PnL
+    verdi (benzer/daha büyük örneklem, daha yüksek PnL). En yüksek PnL'li
+    tek nokta (500/6/0.03, 48 işlem) BİLEREK seçilmedi: `max_depth=6`
+    `test_calibration_does_not_collapse_direction_to_majority_class`
+    regresyon testinde (zayıf sinyal + ağır sınıf dengesizliği senaryosu,
+    geçmişte üretimde modelin tek sınıfa çökmesine yol açan asıl kombinasyon)
+    azınlık recall'ını 0.35 eşiğinin altına düşürdü — daha derin ağaçların
+    küçük gerçek-veri örnekleminde aşırı uyum riskini artırdığının somut
+    kanıtı. `max_depth=3` (eskisinden bile SIĞ) bu testi geçiyor.
     """
 
     def __init__(
         self,
-        n_estimators: int = 300,
-        max_depth: int = 4,
-        learning_rate: float = 0.05,
+        n_estimators: int = 150,
+        max_depth: int = 3,
+        learning_rate: float = 0.1,
         reg_alpha: float = 0.1,
         reg_lambda: float = 1.0,
         subsample: float = 0.8,
