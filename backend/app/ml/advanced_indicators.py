@@ -402,16 +402,6 @@ def money_flow_index(ohlcv: pd.DataFrame, length: int = 14) -> pd.Series:
     return (100 - (100 / (1 + mfr))).fillna(50)
 
 
-def williams_r(ohlcv: pd.DataFrame, length: int = 14) -> pd.Series:
-    """Williams %R — Stochastic'in tersine çevrilmiş hali: -100 (dip) ile
-    0 (tepe) arasında, son `length` barın en yüksek/en düşük noktasına göre
-    fiyatın konumu."""
-    highest = ohlcv["high"].rolling(length).max()
-    lowest = ohlcv["low"].rolling(length).min()
-    span = (highest - lowest).replace(0, float("nan"))
-    return (((highest - ohlcv["close"]) / span) * -100).fillna(-50)
-
-
 def elder_force_index(ohlcv: pd.DataFrame, length: int = 13) -> pd.Series:
     """Elder's Force Index — fiyat değişimi × hacim, EMA ile yumuşatılır.
     Fiyat hareketinin hacim tarafından ne kadar "desteklendiğini" ölçer
@@ -420,49 +410,19 @@ def elder_force_index(ohlcv: pd.DataFrame, length: int = 13) -> pd.Series:
     return raw.ewm(span=length, adjust=False).mean()
 
 
-def keltner_channel(ohlcv: pd.DataFrame, length: int = 20, atr_mult: float = 2.0) -> pd.DataFrame:
-    """Keltner Channel — Bollinger'a benzer ama bant genişliği standart
-    sapma yerine ATR'ye dayanır (aşırı fiyat sıçramalarına daha az
-    duyarlıdır)."""
-    mid = ohlcv["close"].ewm(span=length, adjust=False).mean()
-    atr = average_true_range(ohlcv, length)
-    upper = mid + atr_mult * atr
-    lower = mid - atr_mult * atr
-    return pd.DataFrame({"keltner_upper": upper, "keltner_mid": mid, "keltner_lower": lower})
-
-
-def donchian_channel_position(ohlcv: pd.DataFrame, length: int = 20) -> pd.Series:
-    """Donchian Channel pozisyonu — fiyatın son `length` barın en yüksek/
-    en düşük noktasına göre 0..1 arası konumu (`features.price_position`
-    ile AYNI mantık, ama Donchian'ın standart 20 barlık penceresiyle)."""
-    highest = ohlcv["high"].rolling(length).max()
-    lowest = ohlcv["low"].rolling(length).min()
-    span = (highest - lowest).replace(0, float("nan"))
-    return ((ohlcv["close"] - lowest) / span).clip(0, 1)
-
-
 def choppiness_index(ohlcv: pd.DataFrame, length: int = 14) -> pd.Series:
     """Choppiness Index — 0..100 arası, piyasanın TRENDDE mi (düşük değer)
     yoksa YATAY/ÇALKANTILI mı (yüksek değer, 100'e yakın) olduğunu ölçer.
     `hurst_exponent`e benzer bir soruyu (trend-devamlılığı mı, ortalamaya-
-    dönüş mü) farklı/daha basit bir formülle cevaplar — ikisi arasındaki
-    korelasyon yüksek çıkabilir, korelasyon eleme adımında değerlendirilecek."""
+    dönüş mü) farklı/daha basit bir formülle cevaplar — korelasyon eleme
+    turunda ölçüldü, `hurst_exponent`le >=0.90 korelasyon ÇIKMADI (ikisi
+    de tutuldu, bkz. `deploy/check-feature-correlations.sh` çıktısı)."""
     tr_sum = _true_range(ohlcv).rolling(length).sum()
     highest = ohlcv["high"].rolling(length).max()
     lowest = ohlcv["low"].rolling(length).min()
     span = (highest - lowest).replace(0, float("nan"))
     ratio = (tr_sum / span).clip(lower=1e-9)
     return (100 * np.log10(ratio) / np.log10(length)).clip(0, 100)
-
-
-def parkinson_volatility(ohlcv: pd.DataFrame, length: int = 20) -> pd.Series:
-    """Parkinson volatilite tahmincisi — yalnızca kapanış fiyatı yerine
-    bar içi (high/low) aralığını kullanır, bu yüzden aynı örneklem
-    boyutunda kapanış-tabanlı gerçekleşen volatiliteden istatistiksel
-    olarak daha verimlidir (daha az gürültülü)."""
-    log_hl = np.log((ohlcv["high"] / ohlcv["low"]).clip(lower=1e-9))
-    variance = (log_hl**2).rolling(length).mean() / (4 * np.log(2))
-    return np.sqrt(variance)
 
 
 def realized_volatility_spread(close: pd.Series, short: int = 5, long: int = 20) -> pd.Series:
