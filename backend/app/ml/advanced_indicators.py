@@ -207,6 +207,15 @@ def adx(ohlcv: pd.DataFrame, length: int = 14) -> pd.DataFrame:
     return pd.DataFrame({"adx": adx_line, "plus_di": plus_di, "minus_di": minus_di})
 
 
+def rolling_vwap(ohlcv: pd.DataFrame, length: int = 20) -> pd.Series:
+    """Hacim ağırlıklı ortalama fiyat (VWAP), kayan pencerede — kripto
+    perpetual'larda gün içi seans sıfırlaması olmadığından rolling
+    pencere kullanılır (causal, geleceğe bakmaz)."""
+    typical = (ohlcv["high"] + ohlcv["low"] + ohlcv["close"]) / 3
+    pv = typical * ohlcv["volume"]
+    return pv.rolling(length).sum() / ohlcv["volume"].rolling(length).sum().replace(0, float("nan"))
+
+
 def on_balance_volume(ohlcv: pd.DataFrame) -> pd.Series:
     """OBV (On-Balance Volume): fiyat yükselirken hacmi ekler, düşerken
     çıkarır — hacim akışının fiyat yönüyle uyumlu olup olmadığını gösterir."""

@@ -22,6 +22,7 @@ from .advanced_indicators import (
     realized_volatility_spread,
     rolling_hurst_exponent,
     rolling_price_volume_correlation,
+    rolling_vwap,
     stoch_rsi_log,
     supertrend,
     wavetrend,
@@ -41,6 +42,7 @@ FEATURE_COLUMNS = [
     "return_5",
     # --- Kullanıcının manuel işlemde kullandığı ek göstergeler ---
     "ha_trend",
+    "ha_body_pct",
     "stoch_rsi_k",
     "stoch_rsi_d",
     "mavilim_gap",
@@ -55,13 +57,17 @@ FEATURE_COLUMNS = [
     "sr_dist_resistance_pct",
     "sr_level_count_norm",
     # --- OHLC mum yapısı (ölçeklenmiş, ham fiyat değil) ---
+    "candle_body_pct",
     "candle_upper_wick_pct",
     "candle_lower_wick_pct",
     "true_range_pct",
     # --- Ek TradingView göstergeleri ---
     "atr_pct",
+    "bb_percent_b",
     "bb_bandwidth_norm",
     "adx_norm",
+    "di_diff_norm",
+    "vwap_gap_pct",
     "obv_slope_norm",
     "supertrend_trend",
     "supertrend_dist_pct",
@@ -80,18 +86,7 @@ FEATURE_COLUMNS = [
     # `htf_1d_vwap_gap_pct` ÇIKARILDI — gerçek BTC verisiyle ölçülen ikili
     # korelasyonları zaten var olan özelliklerle >=0.90 çıktı (bkz.
     # `deploy/check-feature-correlations.sh` çıktısı, README "Karlılık"),
-    # yani modele yeni bilgi katmıyorlardı, yalnızca gürültü/boyut ekliyorlardı.
-    #
-    # GÜNCELLEME 2 (aynı analiz, ÖNCEDEN VAR OLAN özellikler arasında):
-    # `candle_body_pct`(~`return_1`, 1.0)/`bb_percent_b`(~`price_position`,
-    # 0.908)/`di_diff_norm`(~`rsi_norm`, 0.923)/`vwap_gap_pct`(~`mavilim_gap`,
-    # 0.945)/`ha_body_pct`(~`return_3`, 0.923) ÇIKARILDI — kullanıcı onayıyla
-    # ("eski özellikler arasında da gürültü varsa temizleyelim"). Her çiftte
-    # `return_3`/NOT NULL DB kolonu olmasa (bkz. `app.db.models.FeatureSnapshot`
-    # — `_add_missing_columns` kolon silme/nullable yapma DESTEKLEMİYOR)
-    # daha basit/köklü tarafı TUTULDU. `stoch_rsi_k`/`stoch_rsi_d` (0.941)
-    # BİLEREK tutuldu — bu ikisi TASARIM olarak korelasyonlu (D, K'nın
-    # yumuşatılmışı), kesişim (crossover) sinyali için BİRLİKTE gerekiyor. ---
+    # yani modele yeni bilgi katmıyorlardı, yalnızca gürültü/boyut ekliyorlardı. ---
     "mfi_norm",
     "elder_force_index_norm",
     "choppiness_index",
@@ -209,6 +204,7 @@ def build_features(ohlcv: pd.DataFrame) -> pd.DataFrame:
     # --- Heikin Ashi ---
     ha = heikin_ashi(ohlcv)
     features["ha_trend"] = np.where(ha["ha_close"] > ha["ha_open"], 1.0, -1.0)
+    features["ha_body_pct"] = ((ha["ha_close"] - ha["ha_open"]) / ohlcv["close"]).clip(-0.05, 0.05) * 20
 
     # --- Stochastic RSI (log-getiri) ---
     sr = stoch_rsi_log(ohlcv["close"])
@@ -248,6 +244,7 @@ def build_features(ohlcv: pd.DataFrame) -> pd.DataFrame:
 
     # --- OHLC mum yapısı (ham fiyat yerine ölçeklenmiş oranlar) ---
     candle_range = (ohlcv["high"] - ohlcv["low"]).replace(0, float("nan"))
+    features["candle_body_pct"] = ((ohlcv["close"] - ohlcv["open"]) / ohlcv["close"]).clip(-0.05, 0.05) * 20
     features["candle_upper_wick_pct"] = ((ohlcv["high"] - ohlcv[["open", "close"]].max(axis=1)) / candle_range).clip(0, 1)
     features["candle_lower_wick_pct"] = ((ohlcv[["open", "close"]].min(axis=1) - ohlcv["low"]) / candle_range).clip(0, 1)
 
@@ -258,11 +255,18 @@ def build_features(ohlcv: pd.DataFrame) -> pd.DataFrame:
 
     # --- Bollinger Bands (volatilite) ---
     bb = bollinger_bands(ohlcv["close"])
+    features["bb_percent_b"] = bb["bb_percent_b"]
     features["bb_bandwidth_norm"] = bb["bb_bandwidth"].clip(0, 0.5) * 4
 
     # --- ADX (trend gücü) ---
     adx_df = adx(ohlcv)
     features["adx_norm"] = (adx_df["adx"] / 50).clip(0, 2)
+    di_span = (adx_df["plus_di"] + adx_df["minus_di"]).replace(0, float("nan"))
+    features["di_diff_norm"] = ((adx_df["plus_di"] - adx_df["minus_di"]) / di_span).clip(-1, 1)
+
+    # --- VWAP (hacim ağırlıklı ortalama fiyat) ---
+    vwap = rolling_vwap(ohlcv)
+    features["vwap_gap_pct"] = ((ohlcv["close"] - vwap) / ohlcv["close"]).clip(-0.1, 0.1) * 10
 
     # --- OBV (hacim akışı) ---
     obv = on_balance_volume(ohlcv)
