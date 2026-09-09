@@ -84,8 +84,14 @@ class FeatureSnapshot(Base):
     # nullable=True: bu kolonlar tabloya SONRADAN eklendi (bkz.
     # app.db.session._add_missing_columns); önceden kaydedilmiş satırlar
     # bu kolonlar için NULL içerir.
+    #
+    # GÜNCELLEME (korelasyon eleme turu, bkz. `app.ml.features.FEATURE_COLUMNS`
+    # "GÜNCELLEME 2" notu): `ha_body_pct`/`candle_body_pct`/`bb_percent_b`/
+    # `di_diff_norm`/`vwap_gap_pct` ÇIKARILDI (zaten var olan özelliklerle
+    # >=0.90 korele çıktılar). Bu kolonlar üretim tablosunda ÖNCEDEN
+    # eklenmişse yetim (unused) kalabilir — zararsızdır (`_add_missing_columns`
+    # kolon silme desteklemiyor).
     ha_trend: Mapped[float | None] = mapped_column(Float, nullable=True)
-    ha_body_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
     stoch_rsi_k: Mapped[float | None] = mapped_column(Float, nullable=True)
     stoch_rsi_d: Mapped[float | None] = mapped_column(Float, nullable=True)
     mavilim_gap: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -101,16 +107,12 @@ class FeatureSnapshot(Base):
     sr_level_count_norm: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     # --- OHLC mum yapısı + ek TradingView göstergeleri (2. tur) ---
-    candle_body_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
     candle_upper_wick_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
     candle_lower_wick_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
     true_range_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
     atr_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
-    bb_percent_b: Mapped[float | None] = mapped_column(Float, nullable=True)
     bb_bandwidth_norm: Mapped[float | None] = mapped_column(Float, nullable=True)
     adx_norm: Mapped[float | None] = mapped_column(Float, nullable=True)
-    di_diff_norm: Mapped[float | None] = mapped_column(Float, nullable=True)
-    vwap_gap_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
     obv_slope_norm: Mapped[float | None] = mapped_column(Float, nullable=True)
     supertrend_trend: Mapped[float | None] = mapped_column(Float, nullable=True)
     supertrend_dist_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
