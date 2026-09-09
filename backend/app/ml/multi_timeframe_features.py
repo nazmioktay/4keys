@@ -26,18 +26,7 @@ MULTI_TIMEFRAME_RULES = {"4h": "4h", "1d": "1D"}
 # en trend-temsilci ikisi: EMA hızlı/yavaş farkı + RSI).
 _HTF_SOURCE_COLUMNS = ["ema_gap", "rsi_norm"]
 
-# GÜNCELLEME (kullanıcı isteği: "kolay olanları ekleyip performansa
-# bakalım" — bkz. README "Karlılık"): her üst-TF için TEK bir ek gösterge
-# ("derinleştirme") — 4h için SuperTrend yönü, 1d için VWAP mesafesi.
-# `_HTF_SOURCE_COLUMNS`e (TÜM üst-TF'lerde AYNI kolonlar) eklenmiyor,
-# çünkü bu ikisi yalnızca BELİRLİ bir üst-TF için isteniyor.
-_EXTRA_HTF_COLUMNS = {"4h": ["htf_4h_supertrend_trend"], "1d": ["htf_1d_vwap_gap_pct"]}
-
-MULTI_TIMEFRAME_FEATURE_COLUMNS = (
-    [f"htf_{label}_{col}" for label in MULTI_TIMEFRAME_RULES for col in _HTF_SOURCE_COLUMNS]
-    + [col for cols in _EXTRA_HTF_COLUMNS.values() for col in cols]
-    + ["htf_weekly_pivot_dist"]
-)
+MULTI_TIMEFRAME_FEATURE_COLUMNS = [f"htf_{label}_{col}" for label in MULTI_TIMEFRAME_RULES for col in _HTF_SOURCE_COLUMNS]
 
 # Üst-TF göstergelerinin (rolling pencereler) makul şekilde ısınması için
 # gereken minimum üst-TF bar sayısı — bundan azsa o zaman dilimi atlanır
@@ -82,14 +71,6 @@ def compute_multi_timeframe_features(ohlcv: pd.DataFrame) -> pd.DataFrame:
     # BİREBİR aynı tutulur (bkz. aşağıdaki yorumlar).
     from app.screener.indicators import compute_indicators
 
-    # GÜNCELLEME (bkz. `_EXTRA_HTF_COLUMNS` tanımı): SuperTrend/VWAP,
-    # `compute_indicators` (ucuz screener versiyonu) İÇİNDE yok — ama
-    # `average_true_range`/`supertrend`/`rolling_vwap` de (Hurst/Ichimoku/
-    # Nadaraya-Watson gibi PAHALI göstergelerin aksine) TEK BAŞINA ucuz
-    # fonksiyonlar, `build_features`'ın TAMAMINI çağırmadan buradan da
-    # kullanılabilirler — aynı performans gerekçesi geçerliliğini korur.
-    from .advanced_indicators import average_true_range, rolling_vwap, supertrend
-
     result = pd.DataFrame(index=ohlcv.index)
     for col in MULTI_TIMEFRAME_FEATURE_COLUMNS:
         result[col] = float("nan")
@@ -115,39 +96,9 @@ def compute_multi_timeframe_features(ohlcv: pd.DataFrame) -> pd.DataFrame:
         for col in _HTF_SOURCE_COLUMNS:
             right[col] = htf_values[col].to_numpy()
 
-        # `_EXTRA_HTF_COLUMNS`: yalnızca BELİRLİ üst-TF'ler için tek bir
-        # ek gösterge (bkz. tanım) — `features.py`'daki `supertrend_trend`/
-        # `vwap_gap_pct` ile BİREBİR AYNI dönüşüm.
-        for extra_col in _EXTRA_HTF_COLUMNS.get(label, []):
-            if extra_col.endswith("supertrend_trend"):
-                right[extra_col] = supertrend(htf_ohlcv)["supertrend_trend"].to_numpy()
-            elif extra_col.endswith("vwap_gap_pct"):
-                vwap = rolling_vwap(htf_ohlcv)
-                right[extra_col] = (((htf_ohlcv["close"] - vwap) / htf_ohlcv["close"]).clip(-0.1, 0.1) * 10).to_numpy()
-
         merged = pd.merge_asof(left_sorted, right, on="timestamp", direction="backward")
         merged = merged.sort_values("_order").reset_index(drop=True)
         for col in _HTF_SOURCE_COLUMNS:
             result[f"htf_{label}_{col}"] = merged[col].to_numpy()
-        for extra_col in _EXTRA_HTF_COLUMNS.get(label, []):
-            result[extra_col] = merged[extra_col].to_numpy()
-
-        # `label == "1d"` iken üst-TF OHLCV zaten günlük — haftalık pivot
-        # için AYNI günlük veriyi yeniden kullanıp haftaya resample ederiz
-        # (borsadan tekrar veri çekmeye gerek yok).
-        if label == "1d":
-            weekly = _resample_ohlcv(ohlcv, "1W")
-            if len(weekly) >= 3:
-                # Klasik pivot: bu haftanın pivotu ÖNCEKİ HAFTANIN
-                # (H+L+C)/3'üdür — `shift(1)` ile bir önceki tamamlanmış
-                # haftaya kayarız, bu haftanın barları henüz kapanmadan
-                # pivot değeri BİLİNMEZ (look-ahead YOK).
-                prev_pivot = ((weekly["high"] + weekly["low"] + weekly["close"]) / 3).shift(1)
-                weekly_right = pd.DataFrame({"timestamp": pd.to_datetime(weekly["timestamp"]), "pivot": prev_pivot.to_numpy()})
-                weekly_merged = pd.merge_asof(left_sorted, weekly_right, on="timestamp", direction="backward")
-                weekly_merged = weekly_merged.sort_values("_order").reset_index(drop=True)
-                close_now = ohlcv["close"].reset_index(drop=True)
-                dist = ((close_now - weekly_merged["pivot"]) / close_now).clip(-0.1, 0.1) * 10
-                result["htf_weekly_pivot_dist"] = dist.fillna(0.0).to_numpy()
 
     return result

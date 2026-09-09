@@ -7,29 +7,20 @@ from .advanced_indicators import (
     adx,
     average_true_range,
     bollinger_bands,
-    choppiness_index,
-    donchian_channel_position,
     dynamic_support_resistance,
-    elder_force_index,
     fibonacci_retracement_position,
     heikin_ashi,
     ichimoku_cloud,
-    keltner_channel,
     linear_regression_channel,
     mavilim_w,
-    money_flow_index,
     nadaraya_watson_envelope,
     on_balance_volume,
-    parkinson_volatility,
     pmax,
-    realized_volatility_spread,
     rolling_hurst_exponent,
-    rolling_price_volume_correlation,
     rolling_vwap,
     stoch_rsi_log,
     supertrend,
     wavetrend,
-    williams_r,
 )
 from .multi_timeframe_features import MULTI_TIMEFRAME_FEATURE_COLUMNS
 from .orderflow_features import TAKER_FLOW_FEATURE_COLUMNS
@@ -83,27 +74,6 @@ FEATURE_COLUMNS = [
     # --- Fraktal analiz: piyasanın "hafızası" (trend-devamlılığı mı,
     # ortalamaya-dönüş mü) — bkz. rolling_hurst_exponent docstring'i ---
     "hurst_exponent",
-    # --- Eksik klasik göstergeler (kullanıcı isteği: "kolay olanları
-    # ekleyip performansa bakalım" — bkz. README "Karlılık") ---
-    "mfi_norm",
-    "williams_r_norm",
-    "elder_force_index_norm",
-    "keltner_dist_pct",
-    "donchian_position",
-    "choppiness_index",
-    # --- Volatilite yapısı ---
-    "parkinson_volatility",
-    "volatility_spread",
-    # --- Zaman/takvim döngüsü (döngüsel kodlama — ham saat/gün sayısı
-    # DEĞİL, sin/cos çifti: modelin 23:00 ile 00:00'ın "bitişik" olduğunu
-    # öğrenmesi için, doğrusal bir sayı bu bitişikliği kıramaz) ---
-    "hour_sin",
-    "hour_cos",
-    "day_of_week_sin",
-    "day_of_week_cos",
-    # --- Etkileşim/türetilmiş özellikler ---
-    "price_volume_correlation",
-    "bb_lower_upper_ratio",
 ]
 
 # Makro/piyasa bağlamı özellikleri (app.macro.service ile toplanan
@@ -294,48 +264,6 @@ def build_features(ohlcv: pd.DataFrame) -> pd.DataFrame:
 
     # --- Fraktal analiz (Hurst üsteli) — bkz. rolling_hurst_exponent ---
     features["hurst_exponent"] = rolling_hurst_exponent(ohlcv["close"]).fillna(0.5)
-
-    # --- MFI (RSI'nin hacim ağırlıklı karşılığı) ---
-    features["mfi_norm"] = (money_flow_index(ohlcv) - 50) / 50  # -1..1
-
-    # --- Williams %R ---
-    features["williams_r_norm"] = (williams_r(ohlcv) + 50) / 50  # -1..1
-
-    # --- Elder's Force Index (fiyat × hacim, ölçekten bağımsız z-skor) ---
-    efi = elder_force_index(ohlcv)
-    efi_std = efi.rolling(50, min_periods=10).std().replace(0, float("nan"))
-    features["elder_force_index_norm"] = (efi / efi_std).clip(-5, 5).fillna(0.0)
-
-    # --- Keltner Channel (ATR tabanlı bant, Bollinger'a alternatif) ---
-    keltner = keltner_channel(ohlcv)
-    keltner_span = (keltner["keltner_upper"] - keltner["keltner_lower"]).replace(0, float("nan"))
-    features["keltner_dist_pct"] = (((ohlcv["close"] - keltner["keltner_mid"]) / keltner_span) * 2).clip(-3, 3)
-
-    # --- Donchian Channel pozisyonu ---
-    features["donchian_position"] = donchian_channel_position(ohlcv)
-
-    # --- Choppiness Index (trend mi, yatay/çalkantılı mı) ---
-    features["choppiness_index"] = (choppiness_index(ohlcv) - 50) / 50  # -1..1
-
-    # --- Parkinson volatilite tahmincisi ---
-    features["parkinson_volatility"] = parkinson_volatility(ohlcv).clip(0, 0.2).fillna(0.0) * 10
-
-    # --- Volatilite yapısı: kısa vade - uzun vade gerçekleşen volatilite ---
-    features["volatility_spread"] = realized_volatility_spread(ohlcv["close"]).clip(-0.05, 0.05).fillna(0.0) * 20
-
-    # --- Zaman/takvim döngüsü (döngüsel sin/cos kodlama) ---
-    ts_dt = pd.to_datetime(ohlcv["timestamp"])
-    hour_angle = 2 * np.pi * (ts_dt.dt.hour / 24)
-    dow_angle = 2 * np.pi * (ts_dt.dt.dayofweek / 7)
-    features["hour_sin"] = np.sin(hour_angle)
-    features["hour_cos"] = np.cos(hour_angle)
-    features["day_of_week_sin"] = np.sin(dow_angle)
-    features["day_of_week_cos"] = np.cos(dow_angle)
-
-    # --- Etkileşim/türetilmiş özellikler ---
-    features["price_volume_correlation"] = rolling_price_volume_correlation(ohlcv)
-    bb_lower_safe = bb["bb_lower"].replace(0, float("nan"))
-    features["bb_lower_upper_ratio"] = (bb["bb_upper"] / bb_lower_safe).clip(0.5, 2.0).fillna(1.0)
 
     features["close"] = ind["close"]
     # int64 (HER ZAMAN nanosaniye epoch, çözünürlükten bağımsız) olarak

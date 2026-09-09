@@ -122,24 +122,6 @@ class FeatureSnapshot(Base):
     # --- Fraktal analiz (3. tur) ---
     hurst_exponent: Mapped[float | None] = mapped_column(Float, nullable=True)
 
-    # --- Eksik klasik göstergeler + volatilite yapısı + zaman/takvim +
-    # etkileşim özellikleri (4. tur — bkz. README "Karlılık", kullanıcı
-    # isteği: "kolay olanları ekleyip performansa bakalım") ---
-    mfi_norm: Mapped[float | None] = mapped_column(Float, nullable=True)
-    williams_r_norm: Mapped[float | None] = mapped_column(Float, nullable=True)
-    elder_force_index_norm: Mapped[float | None] = mapped_column(Float, nullable=True)
-    keltner_dist_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
-    donchian_position: Mapped[float | None] = mapped_column(Float, nullable=True)
-    choppiness_index: Mapped[float | None] = mapped_column(Float, nullable=True)
-    parkinson_volatility: Mapped[float | None] = mapped_column(Float, nullable=True)
-    volatility_spread: Mapped[float | None] = mapped_column(Float, nullable=True)
-    hour_sin: Mapped[float | None] = mapped_column(Float, nullable=True)
-    hour_cos: Mapped[float | None] = mapped_column(Float, nullable=True)
-    day_of_week_sin: Mapped[float | None] = mapped_column(Float, nullable=True)
-    day_of_week_cos: Mapped[float | None] = mapped_column(Float, nullable=True)
-    price_volume_correlation: Mapped[float | None] = mapped_column(Float, nullable=True)
-    bb_lower_upper_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
-
 
 class MacroSnapshot(Base):
     """Ücretsiz makro/piyasa bağlamı verilerinin periyodik anlık görüntüsü
