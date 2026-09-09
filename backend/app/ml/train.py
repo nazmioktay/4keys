@@ -991,10 +991,19 @@ _ENSEMBLE_LABELING = {
     # 65 işlem/%55,38 kazanma/+%1,27 PnL veriyordu — tablonun alt sıralarında.
     # horizon=8/ATR=1.0 en yüksek PnL'i verdi (145 işlem, %55,17 kazanma,
     # +%5,12 PnL, %1,46 düşüş) — hem büyük örneklem hem güçlü PnL artışı.
-    "horizon": 8,  # ATR bariyerlerinde ZAMAN bariyeri (bar) — bkz. train_all_models
+    #
+    # GÜNCELLEME 3 (korelasyon eleme turu SONRASI özellik setiyle -
+    # ALL_FEATURE_COLUMNS 63->69 - yeniden tarandı, bkz. README "Karlılık"):
+    # 8 bar bu YENİ özellik setiyle artık ÇOK ZAYIF (816 işlem/%50,12
+    # kazanma/+%0,63 PnL) — özellik seti değişince etiketleme hedefinin
+    # de yeniden kalibre edilmesi gerektiği ortaya çıktı (güven eşiği/Kelly
+    # taraması TEK BAŞINA bu düşüşü telafi edemedi, en iyisi +%3,68 kaldı).
+    # horizon=2/ATR=0.75 tam sistem backtest'inde en yüksek PnL'i verdi
+    # (335 işlem, %60,30 kazanma, +%9,13 PnL, %1,29 düşüş).
+    "horizon": 2,  # ATR bariyerlerinde ZAMAN bariyeri (bar) — bkz. train_all_models
     "threshold_pct": 1.0,  # atr_triple_barrier'da kullanılmaz, imza uyumu için
-    "take_profit_pct": 1.0,  # ATR ÇARPANI
-    "stop_loss_pct": 1.0,  # ATR ÇARPANI
+    "take_profit_pct": 0.75,  # ATR ÇARPANI
+    "stop_loss_pct": 0.75,  # ATR ÇARPANI
 }
 
 
