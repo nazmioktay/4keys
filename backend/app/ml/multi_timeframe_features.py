@@ -27,14 +27,11 @@ MULTI_TIMEFRAME_RULES = {"4h": "4h", "1d": "1D"}
 _HTF_SOURCE_COLUMNS = ["ema_gap", "rsi_norm"]
 
 # GÜNCELLEME (kullanıcı isteği: "kolay olanları ekleyip performansa
-# bakalım" — bkz. README "Karlılık"): üst-TF için TEK bir ek gösterge
-# ("derinleştirme") — 4h için SuperTrend yönü. `_HTF_SOURCE_COLUMNS`e
-# (TÜM üst-TF'lerde AYNI kolonlar) eklenmiyor, çünkü yalnızca BELİRLİ bir
-# üst-TF için isteniyor. GÜNCELLEME 2 (korelasyon eleme turu): `1d` için
-# `htf_1d_vwap_gap_pct` ÇIKARILDI — gerçek BTC verisiyle `htf_4h_ema_gap`
-# (0.926) ve `htf_1d_rsi_norm` (0.926) ile >=0.90 korele çıktı, yeni bilgi
-# katmıyordu (bkz. `deploy/check-feature-correlations.sh` çıktısı).
-_EXTRA_HTF_COLUMNS = {"4h": ["htf_4h_supertrend_trend"]}
+# bakalım" — bkz. README "Karlılık"): her üst-TF için TEK bir ek gösterge
+# ("derinleştirme") — 4h için SuperTrend yönü, 1d için VWAP mesafesi.
+# `_HTF_SOURCE_COLUMNS`e (TÜM üst-TF'lerde AYNI kolonlar) eklenmiyor,
+# çünkü bu ikisi yalnızca BELİRLİ bir üst-TF için isteniyor.
+_EXTRA_HTF_COLUMNS = {"4h": ["htf_4h_supertrend_trend"], "1d": ["htf_1d_vwap_gap_pct"]}
 
 MULTI_TIMEFRAME_FEATURE_COLUMNS = (
     [f"htf_{label}_{col}" for label in MULTI_TIMEFRAME_RULES for col in _HTF_SOURCE_COLUMNS]
@@ -85,13 +82,13 @@ def compute_multi_timeframe_features(ohlcv: pd.DataFrame) -> pd.DataFrame:
     # BİREBİR aynı tutulur (bkz. aşağıdaki yorumlar).
     from app.screener.indicators import compute_indicators
 
-    # GÜNCELLEME (bkz. `_EXTRA_HTF_COLUMNS` tanımı): SuperTrend,
+    # GÜNCELLEME (bkz. `_EXTRA_HTF_COLUMNS` tanımı): SuperTrend/VWAP,
     # `compute_indicators` (ucuz screener versiyonu) İÇİNDE yok — ama
-    # `average_true_range`/`supertrend` de (Hurst/Ichimoku/Nadaraya-Watson
-    # gibi PAHALI göstergelerin aksine) TEK BAŞINA ucuz fonksiyonlar,
-    # `build_features`'ın TAMAMINI çağırmadan buradan da kullanılabilirler
-    # — aynı performans gerekçesi geçerliliğini korur.
-    from .advanced_indicators import supertrend
+    # `average_true_range`/`supertrend`/`rolling_vwap` de (Hurst/Ichimoku/
+    # Nadaraya-Watson gibi PAHALI göstergelerin aksine) TEK BAŞINA ucuz
+    # fonksiyonlar, `build_features`'ın TAMAMINI çağırmadan buradan da
+    # kullanılabilirler — aynı performans gerekçesi geçerliliğini korur.
+    from .advanced_indicators import average_true_range, rolling_vwap, supertrend
 
     result = pd.DataFrame(index=ohlcv.index)
     for col in MULTI_TIMEFRAME_FEATURE_COLUMNS:
@@ -119,11 +116,14 @@ def compute_multi_timeframe_features(ohlcv: pd.DataFrame) -> pd.DataFrame:
             right[col] = htf_values[col].to_numpy()
 
         # `_EXTRA_HTF_COLUMNS`: yalnızca BELİRLİ üst-TF'ler için tek bir
-        # ek gösterge (bkz. tanım) — `features.py`'daki `supertrend_trend`
-        # ile BİREBİR AYNI dönüşüm.
+        # ek gösterge (bkz. tanım) — `features.py`'daki `supertrend_trend`/
+        # `vwap_gap_pct` ile BİREBİR AYNI dönüşüm.
         for extra_col in _EXTRA_HTF_COLUMNS.get(label, []):
             if extra_col.endswith("supertrend_trend"):
                 right[extra_col] = supertrend(htf_ohlcv)["supertrend_trend"].to_numpy()
+            elif extra_col.endswith("vwap_gap_pct"):
+                vwap = rolling_vwap(htf_ohlcv)
+                right[extra_col] = (((htf_ohlcv["close"] - vwap) / htf_ohlcv["close"]).clip(-0.1, 0.1) * 10).to_numpy()
 
         merged = pd.merge_asof(left_sorted, right, on="timestamp", direction="backward")
         merged = merged.sort_values("_order").reset_index(drop=True)

@@ -124,22 +124,21 @@ class FeatureSnapshot(Base):
 
     # --- Eksik klasik göstergeler + volatilite yapısı + zaman/takvim +
     # etkileşim özellikleri (4. tur — bkz. README "Karlılık", kullanıcı
-    # isteği: "kolay olanları ekleyip performansa bakalım"). GÜNCELLEME
-    # (korelasyon eleme turu): `williams_r_norm`/`keltner_dist_pct`/
-    # `donchian_position`/`parkinson_volatility`/`bb_lower_upper_ratio`
-    # ÇIKARILDI (bkz. `app.ml.features.FEATURE_COLUMNS` gerekçesi) —
-    # ÖNCEDEN sunucuya deploy edilmişse üretim tablosunda bu kolonlar
-    # ORTADA (yetim) kalabilir, bu ZARARSIZDIR (`_add_missing_columns`
-    # zaten kolon silme desteklemiyor, bkz. docstring'i). ---
+    # isteği: "kolay olanları ekleyip performansa bakalım") ---
     mfi_norm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    williams_r_norm: Mapped[float | None] = mapped_column(Float, nullable=True)
     elder_force_index_norm: Mapped[float | None] = mapped_column(Float, nullable=True)
+    keltner_dist_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    donchian_position: Mapped[float | None] = mapped_column(Float, nullable=True)
     choppiness_index: Mapped[float | None] = mapped_column(Float, nullable=True)
+    parkinson_volatility: Mapped[float | None] = mapped_column(Float, nullable=True)
     volatility_spread: Mapped[float | None] = mapped_column(Float, nullable=True)
     hour_sin: Mapped[float | None] = mapped_column(Float, nullable=True)
     hour_cos: Mapped[float | None] = mapped_column(Float, nullable=True)
     day_of_week_sin: Mapped[float | None] = mapped_column(Float, nullable=True)
     day_of_week_cos: Mapped[float | None] = mapped_column(Float, nullable=True)
     price_volume_correlation: Mapped[float | None] = mapped_column(Float, nullable=True)
+    bb_lower_upper_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
 
 
 class MacroSnapshot(Base):
