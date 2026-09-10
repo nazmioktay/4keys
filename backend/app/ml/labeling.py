@@ -97,3 +97,38 @@ def triple_barrier_labels(
             labels[i] = label
 
     return pd.Series(labels, index=ohlcv.index)
+
+
+def label_future_peak_trough(ohlcv: pd.DataFrame, horizon: int = 25) -> pd.DataFrame:
+    """Sabit bir yön/eşik etiketi ÜRETMEZ — bunun yerine, girişten sonraki
+    `horizon` bar içinde fiyatın ulaştığı EN YÜKSEK ve EN DÜŞÜK noktayı
+    (girişe göre % olarak) döner. Bu ikisi, sabit bir ATR çarpanı yerine
+    "bu giriş için gerçekçi bir kâr-al/zarar-durdur hedefi ne olurdu?"
+    sorusuna REGRESYON etiketi olarak kullanılmak üzere tasarlandı (bkz.
+    `app.ml.dynamic_exit` — kullanıcı önerisi: "Seviye 1: Süpervizeli
+    Öğrenme (Regresyon)").
+
+    - `future_peak_pct`: (max(high[t+1..t+horizon]) - close[t]) / close[t] * 100
+      — pozitif bir sayı, potansiyel LONG kâr-al hedefi.
+    - `future_trough_pct`: (min(low[t+1..t+horizon]) - close[t]) / close[t] * 100
+      — negatif bir sayı, potansiyel LONG zarar-durdur hedefi (SHORT
+      pozisyonlar için bu iki değerin rolü/işareti ters çevrilerek
+      yorumlanır, hesaplama simetriktir).
+
+    `triple_barrier_labels` gibi mum İÇİ (high/low) hareketi kullanır,
+    yalnızca kapanışa bakmaz. Serinin son `horizon` satırı NaN'dır
+    (gelecek bilinmediği için) — `triple_barrier_labels`/`label_future_direction`
+    ile AYNI causal-safety ilkesi: bu değerler yalnızca EĞİTİM ETİKETİ
+    olarak kullanılabilir, asla canlı/backtest ANINDAKİ bir özellik olarak
+    kullanılamaz (geleceğe bakar).
+
+    Formül notu: `rolling(horizon).max()` GERİYE bakan bir pencere üretir
+    (`sonuç[t] = max(high[t-horizon+1..t])`); `.shift(-horizon)` ile bu
+    pencere `horizon` adım İLERİ taşınır (`sonuç[t] = max(high[t+1..t+horizon])`)
+    — yani gelecek, yalnızca ETİKET olarak, doğru hizalamayla okunur."""
+    high, low, close = ohlcv["high"], ohlcv["low"], ohlcv["close"]
+    future_high = high.rolling(horizon).max().shift(-horizon)
+    future_low = low.rolling(horizon).min().shift(-horizon)
+    future_peak_pct = (future_high - close) / close * 100
+    future_trough_pct = (future_low - close) / close * 100
+    return pd.DataFrame({"future_peak_pct": future_peak_pct, "future_trough_pct": future_trough_pct})
