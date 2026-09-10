@@ -224,6 +224,59 @@ def test_take_profit_closes_position_at_target():
             assert t.exit_price < t.entry_price
 
 
+class _FakeDynamicExitModel:
+    """`DynamicExitModel`in `predict()` arayüzünü taklit eder — sabit bir
+    peak/trough yüzdesi döner, gerçek XGBRegressor eğitimi olmadan
+    backtest'in dinamik-çıkış KABLOLAMASINI (entegrasyonunu) test eder."""
+
+    def __init__(self, peak_pct: float, trough_pct: float) -> None:
+        self.peak_pct = peak_pct
+        self.trough_pct = trough_pct
+
+    def predict(self, X):
+        n = len(X)
+        return np.full(n, self.peak_pct), np.full(n, self.trough_pct)
+
+
+def test_dynamic_exit_stop_loss_closes_long_position_at_predicted_trough():
+    exchange = FakeOscillatingExchange(total_candles=600)
+    train_ohlcv = exchange.full_df.iloc[:400].reset_index(drop=True)
+    model = _trained_model(train_ohlcv)
+    dynamic_exit_model = _FakeDynamicExitModel(peak_pct=50.0, trough_pct=-1.0)  # dar zarar-durdur, geniş kâr-al
+
+    request = SystemBacktestRequest(
+        symbol="BTC/USDT:USDT",
+        timeframe="1h",
+        candles=600,
+        initial_balance=1000.0,
+        use_dynamic_exit=True,
+        open_confidence=0.5,
+        close_confidence=0.9,  # kapanış yalnızca stop-loss/kâr-al'dan gelsin, sinyalden değil
+        restrict_to_holdout=False,
+    )
+    report = run_system_backtest(exchange, model, None, request, dynamic_exit_model=dynamic_exit_model)
+
+    exit_reasons = {t.exit_reason for t in report.trades}
+    assert exit_reasons <= {"stop_loss", "trailing_stop", "take_profit", "signal"}
+    stop_trades = [t for t in report.trades if t.exit_reason == "stop_loss"]
+    for t in stop_trades:
+        if t.direction == "long":
+            assert t.exit_price < t.entry_price
+        else:
+            assert t.exit_price > t.entry_price
+
+
+def test_use_dynamic_exit_without_model_raises_value_error():
+    exchange = FakeOscillatingExchange(total_candles=600)
+    train_ohlcv = exchange.full_df.iloc[:400].reset_index(drop=True)
+    model = _trained_model(train_ohlcv)
+
+    request = SystemBacktestRequest(symbol="BTC/USDT:USDT", timeframe="1h", candles=600, use_dynamic_exit=True)
+
+    with pytest.raises(ValueError, match="dynamic_exit_model"):
+        run_system_backtest(exchange, model, None, request, dynamic_exit_model=None)
+
+
 def test_trades_record_position_size_and_decision_breakdown():
     exchange = FakeOscillatingExchange(total_candles=600)
     train_ohlcv = exchange.full_df.iloc[:400].reset_index(drop=True)

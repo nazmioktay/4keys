@@ -10,6 +10,7 @@ from app.db import repository as db
 from app.engine.decision import DecisionEngine
 from app.exchanges.base import Exchange
 from app.ml.advanced_indicators import average_true_range
+from app.ml.dynamic_exit import DynamicExitModel
 from app.ml.features import FEATURE_COLUMNS, build_features
 from app.ml.meta_label import MetaLabelModel
 from app.ml.multi_timeframe_features import MULTI_TIMEFRAME_FEATURE_COLUMNS, compute_multi_timeframe_features
@@ -200,6 +201,7 @@ def run_system_backtest(
     request: SystemBacktestRequest,
     lstm_model: LSTMSignalModel | None = None,
     online_model: OnlineSignalModel | None = None,
+    dynamic_exit_model: DynamicExitModel | None = None,
     persist: bool = True,
 ) -> SystemBacktestReport:
     """Canlı karar motorunun kullandığı AYNI modelleri (XGBoost birincil +
@@ -224,12 +226,17 @@ def run_system_backtest(
       her işlemin `size_explanation` alanı).
     - Risk yönetimi: sabit yüzdelik YERİNE ATR (Average True Range)
       tabanlı stop-loss/kâr-alma/trailing-stop (kullanıcı isteği) —
-      bkz. `SystemBacktestRequest.atr_*` alanları.
+      bkz. `SystemBacktestRequest.atr_*` alanları. `use_dynamic_exit=true`
+      ise ATR çarpanı YERİNE `DynamicExitModel`in (bkz. `app.ml.dynamic_exit`)
+      girişteki 63 özelliğe bakarak ürettiği regresyon tahmini kullanılır.
 
     `persist=False` verilirse sonuç `backtest_runs` tablosuna YAZILMAZ (id=None
     döner) — ör. `sweep_confidence_thresholds` gibi arka arkaya çok sayıda
     deneme yapan çağrılarda geçmişi/Grafana panellerini kirletmemek için.
     """
+    if request.use_dynamic_exit and dynamic_exit_model is None:
+        raise ValueError("use_dynamic_exit=True ama dynamic_exit_model verilmedi (model henüz eğitilmemiş olabilir).")
+
     timeframe = request.timeframe or "1h"
     # `fetch_full_history` (DCA/JSON-strateji backtest'inde kullanılan)
     # BİLEREK 2017'den İLERİYE doğru sayfalar (o motorların amacı piyasa
@@ -391,15 +398,20 @@ def run_system_backtest(
                 if request.atr_trailing_mult is not None:
                     candidate = position["best_price"] - request.atr_trailing_mult * atr_now
                     position["trailing_stop_price"] = max(position["trailing_stop_price"], candidate)
-                stop_hit = request.atr_stop_loss_mult is not None and price <= position["trailing_stop_price"]
-                take_profit_hit = request.atr_take_profit_mult is not None and price >= position["take_profit_price"]
+                # NOT: `request.atr_stop_loss_mult`/`atr_take_profit_mult` YERİNE
+                # pozisyonun KENDİ `initial_stop_loss_price`/`take_profit_price`
+                # alanlarına bakılır — bu iki alan hem ATR-çarpanı hem de
+                # dinamik-çıkış modundan (bkz. pozisyon açma bloğu) AYNI şekilde
+                # None/dolu olur, kaynağı burada bilmeye gerek yok.
+                stop_hit = position["initial_stop_loss_price"] is not None and price <= position["trailing_stop_price"]
+                take_profit_hit = position["take_profit_price"] is not None and price >= position["take_profit_price"]
             else:
                 position["best_price"] = min(position["best_price"], price)
                 if request.atr_trailing_mult is not None:
                     candidate = position["best_price"] + request.atr_trailing_mult * atr_now
                     position["trailing_stop_price"] = min(position["trailing_stop_price"], candidate)
-                stop_hit = request.atr_stop_loss_mult is not None and price >= position["trailing_stop_price"]
-                take_profit_hit = request.atr_take_profit_mult is not None and price <= position["take_profit_price"]
+                stop_hit = position["initial_stop_loss_price"] is not None and price >= position["trailing_stop_price"]
+                take_profit_hit = position["take_profit_price"] is not None and price <= position["take_profit_price"]
 
             opposing = (position["direction"] == "long" and direction == "short") or (
                 position["direction"] == "short" and direction == "long"
@@ -458,18 +470,41 @@ def run_system_backtest(
                     continue
             initial_stop_loss_price = None
             take_profit_price = None
-            if request.atr_stop_loss_mult is not None:
-                initial_stop_loss_price = (
-                    price - request.atr_stop_loss_mult * atr_now
-                    if direction == "long"
-                    else price + request.atr_stop_loss_mult * atr_now
-                )
-            if request.atr_take_profit_mult is not None:
-                take_profit_price = (
-                    price + request.atr_take_profit_mult * atr_now
-                    if direction == "long"
-                    else price - request.atr_take_profit_mult * atr_now
-                )
+            if request.use_dynamic_exit:
+                # `DynamicExitModel.predict` (peak_pct, trough_pct) döner —
+                # LONG için kâr-al=peak (yukarı), zarar-durdur=trough (aşağı);
+                # SHORT için ters (yukarı hareket SHORT'un zararı, aşağı
+                # hareket kârı) — bkz. `app.ml.dynamic_exit` docstring'i.
+                sample = row[FEATURE_COLUMNS].to_frame().T
+                peak_pct, trough_pct = dynamic_exit_model.predict(sample)
+                # Ters işaret koruması: peak_pct her zaman >=0 (yukarı),
+                # trough_pct her zaman <=0 (aşağı) beklenir — model nadiren
+                # tersini tahmin ederse, o taraf devre dışı bırakılır
+                # (None) yerine ATR gibi ters/anlamsız bir seviye AÇILMAZ.
+                peak_pct = max(float(peak_pct[0]), 0.0)
+                trough_pct = min(float(trough_pct[0]), 0.0)
+                if direction == "long":
+                    take_profit_price = price * (1 + peak_pct / 100) if peak_pct > 0 else None
+                    initial_stop_loss_price = price * (1 + trough_pct / 100) if trough_pct < 0 else None
+                else:
+                    # SHORT: kâr, fiyat AŞAĞI giderse (trough_pct kullan, halihazırda
+                    # negatif -> otomatik entry'nin ALTINDA); zarar, fiyat YUKARI
+                    # giderse (peak_pct kullan, pozitif -> otomatik entry'nin ÜSTÜNDE).
+                    take_profit_price = price * (1 + trough_pct / 100) if trough_pct < 0 else None
+                    initial_stop_loss_price = price * (1 + peak_pct / 100) if peak_pct > 0 else None
+            else:
+                if request.atr_stop_loss_mult is not None:
+                    initial_stop_loss_price = (
+                        price - request.atr_stop_loss_mult * atr_now
+                        if direction == "long"
+                        else price + request.atr_stop_loss_mult * atr_now
+                    )
+                if request.atr_take_profit_mult is not None:
+                    take_profit_price = (
+                        price + request.atr_take_profit_mult * atr_now
+                        if direction == "long"
+                        else price - request.atr_take_profit_mult * atr_now
+                    )
             size_quote, size_explanation = _compute_position_size(
                 equity, price, initial_stop_loss_price, atr_now, direction, confidence, closed_trade_pnls, request
             )
@@ -538,10 +573,16 @@ def run_system_backtest(
         ),
         _SIZE_METHOD_WARNING,
         (
-            f"Risk yönetimi: ATR({request.atr_period}) tabanlı — "
-            f"stop-loss={_fmt_mult(request.atr_stop_loss_mult)}, kâr-alma={_fmt_mult(request.atr_take_profit_mult)}, "
-            f"trailing={_fmt_mult(request.atr_trailing_mult)}. Kâr-alma/trailing varsayılan olarak KAPALI — çıkış "
-            "birincil olarak dinamik model sinyaline (close_confidence) bağlı kalır, sabit bir mesafede kesilmez."
+            "Risk yönetimi: DynamicExitModel (izole R²≈0.11, horizon=5) tahminiyle — her girişte stop-loss/kâr-al "
+            "fiyatı, o barın 63 özelliğine bakılarak REGRESYON ile ayrı hesaplanır (sabit ATR çarpanı YOK). "
+            "Bu izole ölçümde zayıf bir sinyal, gerçek etkisi yalnızca use_dynamic_exit=true/false karşılaştırmasıyla bilinir."
+            if request.use_dynamic_exit
+            else (
+                f"Risk yönetimi: ATR({request.atr_period}) tabanlı — "
+                f"stop-loss={_fmt_mult(request.atr_stop_loss_mult)}, kâr-alma={_fmt_mult(request.atr_take_profit_mult)}, "
+                f"trailing={_fmt_mult(request.atr_trailing_mult)}. Kâr-alma/trailing varsayılan olarak KAPALI — çıkış "
+                "birincil olarak dinamik model sinyaline (close_confidence) bağlı kalır, sabit bir mesafede kesilmez."
+            )
         ),
     ]
     if trades_closed < 10:

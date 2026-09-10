@@ -22,6 +22,7 @@ from app.backtest.system_runner import (
 from app.core.config import settings
 from app.db import repository as db
 from app.exchanges import get_exchange
+from app.ml.dynamic_exit import DEFAULT_DYNAMIC_EXIT_MODEL_PATH, DynamicExitModel
 from app.ml.meta_label import DEFAULT_META_MODEL_PATH, MetaLabelModel
 from app.ml.model import DEFAULT_MODEL_PATH, SignalModel
 from app.ml.model_paths import DEFAULT_LSTM_MODEL_PATH
@@ -84,8 +85,24 @@ def run_system(payload: SystemBacktestRequest) -> SystemBacktestReport:
     buradan okur)."""
     exchange = get_exchange(settings.exchange_id)
     model, meta_model, lstm_model, online_model = _load_ensemble_models()
+    dynamic_exit_model: DynamicExitModel | None = None
+    if payload.use_dynamic_exit:
+        if not DEFAULT_DYNAMIC_EXIT_MODEL_PATH.exists():
+            raise HTTPException(
+                status_code=422,
+                detail="use_dynamic_exit=true ama henüz eğitilmiş bir DynamicExitModel yok (deploy/train-dynamic-exit-model.sh persist=True ile çalıştırılmalı).",
+            )
+        dynamic_exit_model = DynamicExitModel.load_from()
     try:
-        return run_system_backtest(exchange, model, meta_model, payload, lstm_model=lstm_model, online_model=online_model)
+        return run_system_backtest(
+            exchange,
+            model,
+            meta_model,
+            payload,
+            lstm_model=lstm_model,
+            online_model=online_model,
+            dynamic_exit_model=dynamic_exit_model,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

@@ -153,6 +153,26 @@ class SystemBacktestRequest(BaseModel):
         description="En iyi fiyattan bu kadar ATR geride trailing stop; null (varsayılan) ise trailing yok",
     )
 
+    # --- Dinamik çıkış (izole regresyon modeli, opsiyonel) ---
+    # Kullanıcı önerisi "Seviye 1": sabit bir ATR çarpanı YERİNE, giriş
+    # anındaki 63 özelliğe bakıp "bu girişte fiyat ne kadar yükselip/
+    # düşecek" sorusunu REGRESYON ile tahmin eden ayrı bir model (bkz.
+    # `app.ml.dynamic_exit.DynamicExitModel`, izole ölçüm: R²≈0.11-0.12,
+    # horizon=5). Bu, `atr_stop_loss_mult`/`atr_take_profit_mult`'ın
+    # YERİNİ alır (ikisi birden aynı anda kullanılmaz) — stop-loss/kâr-al
+    # fiyatları modelin tahmin ettiği future_trough_pct/future_peak_pct'ten
+    # hesaplanır. VARSAYILAN OLARAK KAPALI: izole R² zayıf (~0.11), gerçek
+    # sistem etkisi yalnızca bu bayrak açılarak yapılan bir backtest
+    # karşılaştırmasıyla (ON vs OFF) ölçülebilir — bkz. README.
+    use_dynamic_exit: bool = Field(
+        default=False,
+        description=(
+            "True ise stop-loss/kâr-al fiyatları sabit ATR çarpanı yerine "
+            "DynamicExitModel'in (izole R²≈0.11) tahminiyle hesaplanır. "
+            "Model dosyası yoksa backtest 422 ile hata verir."
+        ),
+    )
+
     # --- Pozisyon boyutlandırma (kullanıcı isteği) ---
     # Önceden HER işlemde equity'nin TAMAMI kullanılıyordu (bilerek basit
     # tutulmuştu). Artık gerçek canlı/paper motorunun (`app.portfolio.manager`
