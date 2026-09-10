@@ -58,6 +58,21 @@ def test_train_dynamic_exit_model_returns_isolated_metrics_without_persisting(mo
     assert save_calls == []  # persist=False -> save() ASLA çağrılmamalı
 
 
+def test_sweep_dynamic_exit_horizons_covers_full_grid_without_persisting(monkeypatch):
+    from app.ml import dynamic_exit as dynamic_exit_module
+
+    save_calls = []
+    monkeypatch.setattr(dynamic_exit_module.DynamicExitModel, "save", lambda self, path=None: save_calls.append(path))
+
+    exchange = TrendExchange(seed=8)
+    points = dynamic_exit_module.sweep_dynamic_exit_horizons(exchange, ["UPUSDT", "DOWNUSDT"], [5, 10, 15], timeframe="4h", lookback=400)
+
+    assert [p.horizon for p in points] == [5, 10, 15]
+    assert all(p.error is None for p in points)
+    assert all(p.rows_used > 0 for p in points)
+    assert save_calls == []
+
+
 def test_dynamic_exit_model_predict_returns_peak_and_trough_arrays():
     from app.ml.dynamic_exit import train_dynamic_exit_model
     from app.ml.features import FEATURE_COLUMNS

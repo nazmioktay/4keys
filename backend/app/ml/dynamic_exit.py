@@ -167,3 +167,50 @@ def train_dynamic_exit_model(
         model.save()
 
     return DynamicExitTrainingResult(model=model, rows_used=len(data), out_of_sample=report)
+
+
+@dataclass
+class DynamicExitHorizonSweepPoint:
+    horizon: int
+    rows_used: int = 0
+    peak_mae: float = 0.0
+    peak_r2: float = 0.0
+    trough_mae: float = 0.0
+    trough_r2: float = 0.0
+    error: str | None = None
+
+
+def sweep_dynamic_exit_horizons(
+    exchange: Exchange,
+    symbols: list[str],
+    horizon_values: list[int],
+    timeframe: str | None = None,
+    lookback: int | None = None,
+) -> list[DynamicExitHorizonSweepPoint]:
+    """`horizon` (girişten sonra kaç bar ileriye bakılacağı) ızgarasında
+    ard arda `train_dynamic_exit_model` çalıştırır — `app.backtest.system_runner`'daki
+    diğer sweep fonksiyonlarıyla AYNI desen: hiçbir model KAYDEDİLMEZ
+    (`persist=False`), otomatik "en iyi" SEÇİLMEZ, karar operatöre kalır.
+
+    NOT: `future_peak_pct=25 bar` `atr_triple_barrier`'ın `horizon`'uyla
+    (üretim modelinin ZAMAN bariyeri) AYNI KAVRAM DEĞİLDİR — burası
+    tamamen ayrı, izole bir regresyon deneyi; sonuçları üretim modelinin
+    `_ENSEMBLE_LABELING["horizon"]`'unu DEĞİŞTİRMEZ."""
+    points: list[DynamicExitHorizonSweepPoint] = []
+    for horizon in horizon_values:
+        try:
+            result = train_dynamic_exit_model(exchange, symbols, timeframe=timeframe, lookback=lookback, horizon=horizon, persist=False)
+            r = result.out_of_sample
+            points.append(
+                DynamicExitHorizonSweepPoint(
+                    horizon=horizon,
+                    rows_used=result.rows_used,
+                    peak_mae=r.peak_mae,
+                    peak_r2=r.peak_r2,
+                    trough_mae=r.trough_mae,
+                    trough_r2=r.trough_r2,
+                )
+            )
+        except ValueError as exc:
+            points.append(DynamicExitHorizonSweepPoint(horizon=horizon, error=str(exc)))
+    return points
