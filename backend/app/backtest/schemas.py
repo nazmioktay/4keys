@@ -153,6 +153,38 @@ class SystemBacktestRequest(BaseModel):
         description="En iyi fiyattan bu kadar ATR geride trailing stop; null (varsayılan) ise trailing yok",
     )
 
+    # --- Kademeli kâr alma (opsiyonel, VARSAYILAN KAPALI) ---
+    # Yukarıdaki "ilk denemede kâr-alma=1.5xATR + trailing=0.5xATR" dersinden
+    # (PnL %88->%32) FARKLI bir mekanizma: pozisyonun TAMAMINI sabit bir
+    # mesafede kesmek yerine, yalnızca `partial_take_profit_fraction` kadarını
+    # bu ilk hedefte realize eder — KALAN kısım yine dinamik sinyale
+    # (`close_confidence`) bağlı kalıp "koşmaya" devam edebilir. Yine de AYNI
+    # temel riski (mekanik çıkışın canlı sinyeli geçersiz kılması) kısmen
+    # taşıdığı için varsayılan olarak KAPALI — yalnızca `persist=False` bir
+    # backtest karşılaştırmasıyla (ON vs OFF) ölçülüp KARAR VERİLMELİ, otomatik
+    # uygulanmaz (bkz. README "Karlılık").
+    partial_take_profit_atr_mult: float | None = Field(
+        default=None,
+        gt=0,
+        description="Girişten bu kadar ATR uzakta kısmi kâr alınır; null (varsayılan) ise kademeli kâr alma yok",
+    )
+    partial_take_profit_fraction: float = Field(
+        default=0.5,
+        gt=0,
+        lt=1,
+        description="Kısmi hedefte kapatılacak pozisyon oranı (0-1 arası); kalan kısım dinamik sinyale bağlı kalır",
+    )
+    # DENENDİ, ÖNERİLMEDİ (bkz. README "Karlılık"): üretim modeliyle (özellik
+    # budama + multi-timeframe SONRASI, taban 535 işlem/%66,17/+%30,12 PnL)
+    # gerçek backtest'te ölçüldü — 1.0xATR/%50: 738 işlem/%74,8/+%25,64 (kötü);
+    # 2.0xATR/%25: 630 işlem/%71,75/+%29,49 (hâlâ tabanın altında); 3.0xATR/%25:
+    # 580/%69,14/+%29,56 (yine altında). Mekanizma NE KADAR "yumuşatılırsa"
+    # (daha uzak hedef, daha küçük oran) o kadar tabana yaklaşıyor ama HİÇBİR
+    # ayar geçemedi — yukarıdaki "sabit kâr-alma+trailing" dersinin (PnL
+    # %88->%32) kademeli versiyonda da geçerli olduğunu doğruluyor: kazanma
+    # oranı yükselse bile (küçük kısmi kazançlar istatistiği şişiriyor) kalan
+    # pozisyonun "koşma" potansiyeli kesiliyor. VARSAYILAN KAPALI kalmalı.
+
     # --- Dinamik çıkış (izole regresyon modeli, opsiyonel) ---
     # Kullanıcı önerisi "Seviye 1": sabit bir ATR çarpanı YERİNE, giriş
     # anındaki 63 özelliğe bakıp "bu girişte fiyat ne kadar yükselip/
@@ -238,7 +270,7 @@ class SystemTradeRecord(BaseModel):
     pnl_pct: float
     pnl_quote: float
     equity_after: float
-    exit_reason: str  # "signal" | "stop_loss" | "take_profit" | "trailing_stop"
+    exit_reason: str  # "signal" | "stop_loss" | "take_profit" | "trailing_stop" | "partial_take_profit"
     duration_candles: int
     size_quote: float
     size_explanation: str

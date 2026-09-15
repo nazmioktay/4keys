@@ -224,6 +224,76 @@ def test_take_profit_closes_position_at_target():
             assert t.exit_price < t.entry_price
 
 
+def test_partial_take_profit_closes_only_a_fraction_and_keeps_position_open():
+    """Kademeli kâr alma (bkz. `SystemBacktestRequest.partial_take_profit_atr_mult`):
+    pozisyonun TAMAMI değil yalnızca `partial_take_profit_fraction`'ı ilk
+    hedefte kapanmalı — kalan kısım AYNI entry_time/entry_price ile daha
+    sonra (stop/take-profit/sinyal) AYRI bir trade olarak kapanmalı."""
+    exchange = FakeOscillatingExchange(total_candles=600)
+    train_ohlcv = exchange.full_df.iloc[:400].reset_index(drop=True)
+    model = _trained_model(train_ohlcv)
+
+    request = SystemBacktestRequest(
+        symbol="BTC/USDT:USDT",
+        timeframe="1h",
+        candles=600,
+        initial_balance=1000.0,
+        atr_stop_loss_mult=None,
+        atr_take_profit_mult=None,
+        atr_trailing_mult=None,
+        partial_take_profit_atr_mult=0.3,
+        partial_take_profit_fraction=0.4,
+        open_confidence=0.5,
+        close_confidence=0.9,
+        restrict_to_holdout=False,
+    )
+    report = run_system_backtest(exchange, model, None, request)
+
+    partial_trades = [t for t in report.trades if t.exit_reason == "partial_take_profit"]
+    assert partial_trades, "en az bir kademeli kâr alma beklenirdi (dar 0.3xATR hedefi, osilasyonlu fiyat)"
+
+    for partial in partial_trades:
+        if partial.direction == "long":
+            assert partial.exit_price > partial.entry_price
+        else:
+            assert partial.exit_price < partial.entry_price
+
+        # Kalanı kapatan, AYNI girişe ait, DAHA SONRAKİ bir trade var mı? (Backtest
+        # penceresi biterken pozisyon açık kalmışsa hiç görünmeyebilir — NORMAL.)
+        remainder = [
+            t
+            for t in report.trades
+            if t.entry_time == partial.entry_time
+            and t.entry_price == partial.entry_price
+            and t.exit_reason != "partial_take_profit"
+        ]
+        original_size = partial.size_quote / request.partial_take_profit_fraction
+        expected_remaining = original_size * (1 - request.partial_take_profit_fraction)
+        for r in remainder:
+            assert r.size_quote == pytest.approx(expected_remaining, rel=1e-3)
+
+
+def test_partial_take_profit_disabled_by_default():
+    """Varsayılan (`partial_take_profit_atr_mult=None`) davranış DEĞİŞMEMELİ —
+    hiçbir trade `partial_take_profit` nedeniyle kapanmamalı."""
+    exchange = FakeOscillatingExchange(total_candles=600)
+    train_ohlcv = exchange.full_df.iloc[:400].reset_index(drop=True)
+    model = _trained_model(train_ohlcv)
+
+    request = SystemBacktestRequest(
+        symbol="BTC/USDT:USDT",
+        timeframe="1h",
+        candles=600,
+        initial_balance=1000.0,
+        open_confidence=0.5,
+        close_confidence=0.9,
+        restrict_to_holdout=False,
+    )
+    report = run_system_backtest(exchange, model, None, request)
+
+    assert all(t.exit_reason != "partial_take_profit" for t in report.trades)
+
+
 class _FakeDynamicExitModel:
     """`DynamicExitModel`in `predict()` arayüzünü taklit eder — sabit bir
     peak/trough yüzdesi döner, gerçek XGBRegressor eğitimi olmadan

@@ -991,6 +991,24 @@ _ENSEMBLE_LABELING = {
     # 65 işlem/%55,38 kazanma/+%1,27 PnL veriyordu — tablonun alt sıralarında.
     # horizon=8/ATR=1.0 en yüksek PnL'i verdi (145 işlem, %55,17 kazanma,
     # +%5,12 PnL, %1,46 düşüş) — hem büyük örneklem hem güçlü PnL artışı.
+    #
+    # GÜNCELLEME 3 (DENENDİ, GERİ ALINDI — bkz. README "Karlılık"): sweep
+    # (`deploy/sweep-labeling-targets.sh`, horizon=8 sabit, yalnızca ATR
+    # çarpanı taranarak) 1.25'i açık farkla en iyi nokta gösterdi (448
+    # işlem, +%17,24 PnL, %60,04 kazanma). Ama bu sweep YALNIZCA birincil
+    # XGBoost adayını yeniden eğitiyor — `meta_model`/`online_model`
+    # diskteki ESKİ (atr=1.0 hedefiyle eğitilmiş) modellerden olduğu gibi
+    # yükleniyor (bkz. `sweep_xgboost_labeling_targets` çağrısındaki
+    # `_load_ensemble_models()`) — yani sweep sonucu YENİ birincil + ESKİ
+    # meta/online karışımıyla ölçülmüş, tutarlı bir ensemble DEĞİL. `bash
+    # deploy/train-all.sh` ile TÜM üyeler (xgboost+meta+online) atr=1.25
+    # ile TUTARLI şekilde yeniden eğitilip gerçek `POST /backtest/system/run`
+    # ile doğrulanınca sonuç NET biçimde KÖTÜLEŞTİ: 394 işlem, %55,33
+    # kazanma, PnL +%1,724 (önceki zirve +%13,34'ten ÇOK düşük), drawdown
+    # %1,621 (önceki %0,65'ten kötü). 1.0'a GERİ ALINDI. Ders: bu sweep
+    # türü (yalnızca birincil modeli değiştiren), LSTM/çok-sembol
+    # vakalarındaki AYNI tuzağa düşüyor — tek başına güvenilir değil, karar
+    # HER ZAMAN train-all.sh + gerçek tam sistem backtest'iyle doğrulanmalı.
     "horizon": 8,  # ATR bariyerlerinde ZAMAN bariyeri (bar) — bkz. train_all_models
     "threshold_pct": 1.0,  # atr_triple_barrier'da kullanılmaz, imza uyumu için
     "take_profit_pct": 1.0,  # ATR ÇARPANI

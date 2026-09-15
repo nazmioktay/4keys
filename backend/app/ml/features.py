@@ -82,6 +82,7 @@ FEATURE_COLUMNS = [
 # olarak tutulur çünkü DB geçmişi kısaysa (henüz yeni toplanmaya
 # başlandıysa) bu kolonlar geriye dönük olarak yalnızca yaklaşık
 # (en-eski-bilinen-değerle doldurulmuş) değerler taşıyabilir.
+#
 MACRO_FEATURE_COLUMNS = [
     "macro_total_market_cap_norm",
     "macro_btc_dominance_norm",
@@ -122,16 +123,37 @@ OPEN_INTEREST_FEATURE_COLUMNS = [
     "oi_price_divergence",
 ]
 
+# BUDAMA (SHAP tabanlı, bkz. README "Karlılık"): üretim modelinde
+# `mean_abs_shap=0.0` (tam sıfır, "düşük" değil, ölçülen 29621 satırlık
+# eğitim setinde) çıkan 11 özellik modelin GİRDİSİNDEN çıkarıldı — kaynak
+# listeler (`MACRO_FEATURE_COLUMNS` vb.) yukarıda OLDUĞU GİBİ bırakıldı
+# (fetch/merge fonksiyonları ve testleri bunlara bağımlı), yalnızca
+# `ALL_FEATURE_COLUMNS`'a dahil edilmiyorlar. Sıfır çıkma nedeni: 6 makro
+# kolon (uluslararası endeksler + merkez bankası oranları, muhtemelen FRED
+# API anahtarı boş/nadiren güncelleniyor) pratikte hep nötr (0.0) kalıyor;
+# orderbook (3) ve open-interest (2) kolonlarının kaynak tabloları (164/34
+# satır) eğitim setine göre çok küçük, neredeyse tüm satırlarda nötr.
+# `htf_*` (üst zaman dilimi) BİLEREK budanmadı — `ml_enable_multi_timeframe_features`
+# şu an kapalı olduğu için sıfır çıkıyor, bu ayrı bir deneyin (bayrağı
+# açıp gerçek katkısını ölçmek) konusu.
+_ZERO_SHAP_MACRO = {
+    "macro_sp500_norm",
+    "macro_nasdaq_norm",
+    "macro_nikkei_norm",
+    "macro_dax_norm",
+    "macro_fed_funds_rate_norm",
+    "macro_ecb_deposit_rate_norm",
+}
+_PRUNED_MACRO_FEATURE_COLUMNS = [c for c in MACRO_FEATURE_COLUMNS if c not in _ZERO_SHAP_MACRO]
+
 # Modelin gerçekten gördüğü tüm girdi kolonları (teknik + makro + order book + order flow + open interest + üst-TF).
 # Üst zaman dilimi (4h/1d, `MULTI_TIMEFRAME_FEATURE_COLUMNS`) ORDERBOOK/OPEN_INTEREST'ten
 # FARKLI olarak harici bir veri kaynağına bağlı DEĞİLDİR (kaynak OHLCV'den
 # resample edilir) — backtest'te de GERÇEK değerlerle hesaplanabilir.
 ALL_FEATURE_COLUMNS = (
     FEATURE_COLUMNS
-    + MACRO_FEATURE_COLUMNS
-    + ORDERBOOK_FEATURE_COLUMNS
+    + _PRUNED_MACRO_FEATURE_COLUMNS
     + TAKER_FLOW_FEATURE_COLUMNS
-    + OPEN_INTEREST_FEATURE_COLUMNS
     + MULTI_TIMEFRAME_FEATURE_COLUMNS
 )
 

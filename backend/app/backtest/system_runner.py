@@ -413,6 +413,55 @@ def run_system_backtest(
                 stop_hit = position["initial_stop_loss_price"] is not None and price >= position["trailing_stop_price"]
                 take_profit_hit = position["take_profit_price"] is not None and price <= position["take_profit_price"]
 
+            # Kademeli kâr alma: pozisyonun TAMAMI değil, yalnızca
+            # `partial_take_profit_fraction` kadarı bu ilk (daha yakın) hedefte
+            # realize edilir — kalan `remaining_size_quote`, aşağıdaki tam
+            # kapanış mantığına (stop/take-profit/sinyal) AYNEN tabi kalır, bir
+            # pozisyon başına EN FAZLA bir kez tetiklenir (`partial_tp_taken`).
+            partial_tp_hit = (
+                not position["partial_tp_taken"]
+                and position["partial_take_profit_price"] is not None
+                and (
+                    (position["direction"] == "long" and price >= position["partial_take_profit_price"])
+                    or (position["direction"] == "short" and price <= position["partial_take_profit_price"])
+                )
+            )
+            if partial_tp_hit:
+                partial_size = position["remaining_size_quote"] * request.partial_take_profit_fraction
+                change_pct = (price / position["entry_price"] - 1) * 100
+                gross_pct = change_pct if position["direction"] == "long" else -change_pct
+                net_pct = gross_pct - cost_pct_roundtrip
+                pnl_quote = partial_size * net_pct / 100
+                equity += pnl_quote
+                closed_trade_pnls.append(net_pct)
+                trades.append(
+                    {
+                        "direction": position["direction"],
+                        "entry_time": position["entry_time"],
+                        "exit_time": ts,
+                        "entry_price": position["entry_price"],
+                        "exit_price": price,
+                        "pnl_pct": round(net_pct, 3),
+                        "pnl_quote": round(pnl_quote, 4),
+                        "equity_after": round(equity, 4),
+                        "exit_reason": "partial_take_profit",
+                        "duration_candles": i - position["entry_index"],
+                        "size_quote": round(partial_size, 4),
+                        "size_explanation": position["size_explanation"],
+                        "xgboost_direction": position["decision"]["xgboost_direction"],
+                        "xgboost_confidence": position["decision"]["xgboost_confidence"],
+                        "lstm_direction": position["decision"]["lstm_direction"],
+                        "lstm_confidence": position["decision"]["lstm_confidence"],
+                        "online_direction": position["decision"]["online_direction"],
+                        "online_confidence": position["decision"]["online_confidence"],
+                        "decision_reason": position["decision"]["decision_reason"],
+                    }
+                )
+                equity_curve.append(equity)
+                position["remaining_size_quote"] -= partial_size
+                position["partial_tp_taken"] = True
+                continue  # kalan pozisyon acik kalir, ayni barda tam kapanis kontrolu bir sonraki bara birakilir
+
             opposing = (position["direction"] == "long" and direction == "short") or (
                 position["direction"] == "short" and direction == "long"
             )
@@ -432,7 +481,10 @@ def run_system_backtest(
                 change_pct = (price / position["entry_price"] - 1) * 100
                 gross_pct = change_pct if position["direction"] == "long" else -change_pct
                 net_pct = gross_pct - cost_pct_roundtrip
-                pnl_quote = position["size_quote"] * net_pct / 100
+                # `remaining_size_quote`: kademeli kâr alma tetiklenmediyse
+                # `size_quote` ile aynıdır; tetiklendiyse yalnızca KALAN kısım
+                # (bkz. yukarıdaki `partial_tp_hit` bloğu).
+                pnl_quote = position["remaining_size_quote"] * net_pct / 100
                 equity += pnl_quote
                 closed_trade_pnls.append(net_pct)
                 trades.append(
@@ -447,7 +499,7 @@ def run_system_backtest(
                         "equity_after": round(equity, 4),
                         "exit_reason": exit_reason,
                         "duration_candles": i - position["entry_index"],
-                        "size_quote": position["size_quote"],
+                        "size_quote": round(position["remaining_size_quote"], 4),
                         "size_explanation": position["size_explanation"],
                         "xgboost_direction": position["decision"]["xgboost_direction"],
                         "xgboost_confidence": position["decision"]["xgboost_confidence"],
@@ -508,6 +560,13 @@ def run_system_backtest(
             size_quote, size_explanation = _compute_position_size(
                 equity, price, initial_stop_loss_price, atr_now, direction, confidence, closed_trade_pnls, request
             )
+            partial_take_profit_price = None
+            if request.partial_take_profit_atr_mult is not None:
+                partial_take_profit_price = (
+                    price + request.partial_take_profit_atr_mult * atr_now
+                    if direction == "long"
+                    else price - request.partial_take_profit_atr_mult * atr_now
+                )
             position = {
                 "direction": direction,
                 "entry_price": price,
@@ -516,8 +575,11 @@ def run_system_backtest(
                 "initial_stop_loss_price": initial_stop_loss_price,
                 "trailing_stop_price": initial_stop_loss_price,
                 "take_profit_price": take_profit_price,
+                "partial_take_profit_price": partial_take_profit_price,
+                "partial_tp_taken": False,
                 "best_price": price,
                 "size_quote": size_quote,
+                "remaining_size_quote": size_quote,
                 "size_explanation": size_explanation,
                 "decision": {
                     "xgboost_direction": xgb_pred.direction,

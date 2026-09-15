@@ -61,14 +61,18 @@ class Settings(BaseSettings):
     ml_min_correlation_with_primary: float = 0.4
     ml_min_quote_volume_24h: float = 5_000_000.0
 
-    # --- Çok zamanlı dilim (4h/1d) trend bağlamı özellikleri: GEÇİCİ KAPALI ---
+    # --- Çok zamanlı dilim (4h/1d) trend bağlamı özellikleri ---
     # Kullanıcı isteğiyle (bkz. README "temel sadeleşme") geçici olarak
-    # durduruldu — `compute_multi_timeframe_features` bu bayrak False'ken
-    # hesaplama YAPMAZ, tüm `MULTI_TIMEFRAME_FEATURE_COLUMNS`'u nötr (0.0)
-    # doldurur (makro/order-book'ta ZATEN kullanılan "veri yoksa nötr"
-    # deseniyle AYNI). Geri açmak için burayı True yapmak yeterli — kod
-    # SİLİNMEDİ, yalnızca devre dışı.
-    ml_enable_multi_timeframe_features: bool = False
+    # durdurulmuştu — o zamanki gerekçe bellek baskısıydı (OOM), KARLILIK
+    # değil. Asıl OOM kök nedeni (online model sınırsız büyümesi, bkz.
+    # README "OOM üretim olayı") sonradan bulunup düzeltildiği için bu
+    # bayrağın kapalı kalması artık geçersiz bir önlem — hiç karlılık
+    # açısından test edilmemişti. Yeniden açılıp (bkz. README "Karlılık")
+    # tam sistem backtest'iyle ölçüldü. `compute_multi_timeframe_features`
+    # bu bayrak False'ken hesaplama YAPMAZ, tüm `MULTI_TIMEFRAME_FEATURE_COLUMNS`'u
+    # nötr (0.0) doldurur (makro/order-book'ta ZATEN kullanılan "veri yoksa
+    # nötr" deseniyle AYNI).
+    ml_enable_multi_timeframe_features: bool = True
 
     # --- XGBoost + LSTM + online ensemble ---
     # LSTM ve online (river ARF) modellerinin canlı karar motoruna katılıp
