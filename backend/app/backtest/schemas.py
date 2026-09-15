@@ -95,7 +95,11 @@ class SystemBacktestRequest(BaseModel):
 
     symbol: str = Field(default="BTC/USDT:USDT", description="Varsayılan: futures perpetual BTC/USDT (ml_primary_symbol)")
     timeframe: str | None = Field(default=None, description="Boş bırakılırsa ml_train_timeframe (1h) kullanılır")
-    candles: int = Field(default=10000, ge=300, le=20000)
+    # Üst sınır `ml_train_lookback` (30.000) ile AYNI — modelin hiç görmediği
+    # kadar geçmişle backtest yapmanın bir anlamı yok (bkz. README "Karlılık",
+    # daha uzun/çoklu pencerede sağlamlık kontrolü isteğiyle 20.000->30.000
+    # yükseltildi).
+    candles: int = Field(default=10000, ge=300, le=30000)
     initial_balance: float = Field(default=1000.0, gt=0)
     # Bkz. `app.engine.decision.DecisionEngine.__init__` — AYNI gerekçe VE
     # AYNI varsayılan (ikisi senkron kalmalı, bkz. testler): bu eşikler
@@ -109,6 +113,18 @@ class SystemBacktestRequest(BaseModel):
     close_confidence: float = Field(default=0.45, ge=0.34, le=1.0)
     commission_pct: float = Field(default=0.04, ge=0)
     slippage_pct: float = Field(default=0.02, ge=0)
+    # Kaldıraç: pozisyon boyutlandırma (Kelly/fixed_risk, max_position_exposure_pct)
+    # DEĞİŞMEZ — o hesap her zaman TEMİNAT (equity'nin yüzdesi) anlamına gelir.
+    # Kaldıraç yalnızca o teminatın kontrol ettiği NOMİNAL pozisyonu büyütür:
+    # gerçekleşen $ PnL (kâr VE zarar), fiyat hareketiyle AYNI ORANDA değil,
+    # kaldıraç KADAR büyür (komisyon/kayma da nominal üzerinden alındığı için
+    # aynı şekilde büyür — ekonomik olarak doğru). Üst sınır `MAX_LEVERAGE`
+    # (bkz. `app.security.safety`) ile AYNI (3) — canlıda hiç ulaşılamayacak
+    # bir senaryoyu backtest'te test etmenin anlamı yok.
+    leverage: int = Field(
+        default=1, ge=1, le=3,
+        description="Teminatın kontrol ettiği nominal pozisyonun çarpanı — sizing'i DEĞİL, gerçekleşen PnL'in büyüklüğünü etkiler.",
+    )
     use_meta_label: bool = Field(default=True, description="Eğitilmiş bir meta-label modeli varsa sinyal filtresi olarak kullanılır")
     # `MetaLabelModel.decide`'ın ESKİ (argmax) davranışı 0.5'e denk gelir
     # (bkz. o fonksiyonun docstring'i). Gerçek üretim modeliyle (özellik

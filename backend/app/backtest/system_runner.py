@@ -431,9 +431,14 @@ def run_system_backtest(
                 change_pct = (price / position["entry_price"] - 1) * 100
                 gross_pct = change_pct if position["direction"] == "long" else -change_pct
                 net_pct = gross_pct - cost_pct_roundtrip
-                pnl_quote = partial_size * net_pct / 100
+                # `net_pct`: HAM fiyat hareketi (kaldıraçsız). `leveraged_net_pct`:
+                # bu hareketin TEMİNAT üzerindeki gerçek etkisi (bkz.
+                # `SystemBacktestRequest.leverage` yorumu) — Kelly istatistikleri
+                # ve raporlanan pnl_pct BUNU kullanmalı, ham fiyat hareketini değil.
+                leveraged_net_pct = net_pct * request.leverage
+                pnl_quote = partial_size * leveraged_net_pct / 100
                 equity += pnl_quote
-                closed_trade_pnls.append(net_pct)
+                closed_trade_pnls.append(leveraged_net_pct)
                 trades.append(
                     {
                         "direction": position["direction"],
@@ -441,7 +446,7 @@ def run_system_backtest(
                         "exit_time": ts,
                         "entry_price": position["entry_price"],
                         "exit_price": price,
-                        "pnl_pct": round(net_pct, 3),
+                        "pnl_pct": round(leveraged_net_pct, 3),
                         "pnl_quote": round(pnl_quote, 4),
                         "equity_after": round(equity, 4),
                         "exit_reason": "partial_take_profit",
@@ -481,12 +486,15 @@ def run_system_backtest(
                 change_pct = (price / position["entry_price"] - 1) * 100
                 gross_pct = change_pct if position["direction"] == "long" else -change_pct
                 net_pct = gross_pct - cost_pct_roundtrip
+                # bkz. yukarıdaki `partial_tp_hit` bloğundaki AYNI yorum —
+                # `leveraged_net_pct`, `net_pct`'in TEMİNAT üzerindeki gerçek etkisi.
+                leveraged_net_pct = net_pct * request.leverage
                 # `remaining_size_quote`: kademeli kâr alma tetiklenmediyse
                 # `size_quote` ile aynıdır; tetiklendiyse yalnızca KALAN kısım
                 # (bkz. yukarıdaki `partial_tp_hit` bloğu).
-                pnl_quote = position["remaining_size_quote"] * net_pct / 100
+                pnl_quote = position["remaining_size_quote"] * leveraged_net_pct / 100
                 equity += pnl_quote
-                closed_trade_pnls.append(net_pct)
+                closed_trade_pnls.append(leveraged_net_pct)
                 trades.append(
                     {
                         "direction": position["direction"],
@@ -494,7 +502,7 @@ def run_system_backtest(
                         "exit_time": ts,
                         "entry_price": position["entry_price"],
                         "exit_price": price,
-                        "pnl_pct": round(net_pct, 3),
+                        "pnl_pct": round(leveraged_net_pct, 3),
                         "pnl_quote": round(pnl_quote, 4),
                         "equity_after": round(equity, 4),
                         "exit_reason": exit_reason,
@@ -647,6 +655,12 @@ def run_system_backtest(
             )
         ),
     ]
+    if request.leverage > 1:
+        warnings.append(
+            f"Kaldıraç: {request.leverage}x — pozisyon boyutlandırma (Kelly/fixed_risk) DEĞİŞMEDİ, hâlâ equity'nin "
+            f"yüzdesi (TEMİNAT) olarak hesaplanıyor; kaldıraç yalnızca gerçekleşen PnL'i (kâr VE zarar) bu teminat "
+            "üzerinden büyütüyor — 'size_quote' alanı hâlâ teminatı gösterir, nominal pozisyon değil."
+        )
     if trades_closed < 10:
         warnings.append(f"Yalnızca {trades_closed} işlem kapandı — istatistiksel güvenilirlik düşük.")
         # AZ işlem de en az "0 işlem" kadar açıklama ister: sinyal ne sıklıkta

@@ -197,6 +197,43 @@ def test_stop_loss_closes_long_position_on_crash():
             assert t.exit_price > t.entry_price
 
 
+def test_leverage_scales_pnl_pct_and_quote_without_changing_trade_timing():
+    """`SystemBacktestRequest.leverage` (bkz. o alanın yorumu): pozisyon
+    boyutlandırma (dolayısıyla giriş/çıkış ZAMANLAMASI) DEĞİŞMEMELİ — yalnızca
+    gerçekleşen pnl_pct/pnl_quote kaldıraç kadar büyümeli. leverage=1
+    ESKİ (kaldıraçsız) davranışla birebir aynı olmalı (regresyon güvenliği)."""
+    exchange = FakeOscillatingExchange(total_candles=600)
+    train_ohlcv = exchange.full_df.iloc[:400].reset_index(drop=True)
+    model = _trained_model(train_ohlcv)
+
+    base_kwargs = dict(
+        symbol="BTC/USDT:USDT",
+        timeframe="1h",
+        candles=600,
+        initial_balance=1000.0,
+        open_confidence=0.5,
+        close_confidence=0.9,
+        restrict_to_holdout=False,
+    )
+    report_1x = run_system_backtest(exchange, model, None, SystemBacktestRequest(leverage=1, **base_kwargs))
+    report_3x = run_system_backtest(exchange, model, None, SystemBacktestRequest(leverage=3, **base_kwargs))
+
+    assert len(report_1x.trades) == len(report_3x.trades) and len(report_1x.trades) > 0
+    for t1, t3 in zip(report_1x.trades, report_3x.trades):
+        # Giriş/çıkış ZAMANLAMASI aynı kalmalı — kaldıraç sinyal/karar üretimini
+        # ETKİLEMEZ. `size_quote` (dolar) KASITLI OLARAK karşılaştırılmıyor:
+        # kaldıraçlı koşuda $PnL büyüdüğü için equity daha erken ıraksıyor,
+        # dolayısıyla SONRAKİ işlemlerin dolar boyutu da (aynı equity YÜZDESİ
+        # olsa bile) doğal olarak farklılaşır — bu bir hata değil, bileşik
+        # büyümenin beklenen sonucu.
+        assert t1.entry_time == t3.entry_time
+        assert t1.exit_time == t3.exit_time
+        # `pnl_pct` trade kaydında 3 ondalığa yuvarlanır (bkz. system_runner) —
+        # yuvarlanmış t1.pnl_pct'i 3'le çarpıp karşılaştırmak küçük bir yuvarlama
+        # sapması biriktirir, bu yüzden abs tolerans (rel değil) kullanılıyor.
+        assert t3.pnl_pct == pytest.approx(t1.pnl_pct * 3, abs=0.003)
+
+
 def test_meta_label_act_threshold_synced_between_decision_engine_and_backtest_request():
     """`DecisionEngine.__init__`'in `meta_label_act_threshold` varsayılanı ile
     `SystemBacktestRequest`'inki AYNI olmalı (bkz. her ikisinin de yorumu) —
