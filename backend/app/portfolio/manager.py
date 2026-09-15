@@ -246,7 +246,15 @@ class PortfolioManager:
         # çevirebilir (bkz. RiskRules.commission_pct/slippage_pct).
         cost_pct = (self.rules.commission_pct + self.rules.slippage_pct) * 2
         pnl_pct = position.pnl_pct(exit_price, cost_pct=cost_pct)
-        pnl_quote = close_size * pnl_pct / 100
+        # `RiskRules.leverage` (bkz. o alanın yorumu): `close_size` hâlâ
+        # TEMİNAT (equity yüzdesi) — kaldıraç yalnızca bu teminat üzerindeki
+        # gerçekleşen % etkiyi büyütür (backtest'teki AYNI semantik, bkz.
+        # `app.backtest.system_runner`'daki `leveraged_net_pct`). `pnl_pct`
+        # (trade_stats/Kelly istatistiklerinin OKUDUĞU alan) da kaldıraçlı
+        # değeri taşımalı — aksi halde Kelly, teminat üzerindeki gerçek
+        # getiriden FARKLI (daha küçük) bir sayıyla hesap yapar.
+        leveraged_pnl_pct = pnl_pct * self.rules.leverage
+        pnl_quote = close_size * leveraged_pnl_pct / 100
         self.equity += pnl_quote
         self.realized_pnl_session += pnl_quote
         position.size_quote -= close_size
@@ -259,7 +267,7 @@ class PortfolioManager:
             "entry_price": position.entry_price,
             "exit_price": exit_price,
             "size_quote": round(close_size, 6),
-            "pnl_pct": round(pnl_pct, 3),
+            "pnl_pct": round(leveraged_pnl_pct, 3),
             "pnl_quote": round(pnl_quote, 6),
             "partial": not fully_closed,
             "tranche": position.exit_fill_index,
@@ -268,7 +276,7 @@ class PortfolioManager:
         }
         self.closed_history.append(record)
         db.record_trade({k: v for k, v in record.items() if k not in ("partial", "tranche")})
-        record_trade_closed(position.direction, pnl_pct)
+        record_trade_closed(position.direction, leveraged_pnl_pct)
 
         if fully_closed:
             self.positions.pop(symbol, None)

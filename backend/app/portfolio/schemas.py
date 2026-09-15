@@ -57,6 +57,22 @@ class RiskRules(BaseModel):
         60.0, gt=0,
         description="Kelly formülü ne derse desin, bir işleme ayrılacak sermayenin üst güvenlik sınırı (%) — bkz. yukarıdaki max_symbol_exposure_pct notu, ikisi SENKRON tutulmalı",
     )
+    # Bkz. `app.backtest.schemas.SystemBacktestRequest.leverage` (AYNI
+    # semantik/gerekçe, gerçek üretim modeliyle ölçüldü: 1x -> +%63,50 PnL/
+    # %1,83 drawdown, 3x -> +%331,59 PnL/%5,43 drawdown). Pozisyon
+    # boyutlandırma (Kelly/fixed_risk) DEĞİŞMEZ, hep TEMİNAT (equity yüzdesi)
+    # anlamına gelir — kaldıraç yalnızca gerçekleşen PnL'i (kâr VE zarar) bu
+    # teminat üzerinden büyütür. Üst sınır `MAX_LEVERAGE` (bkz.
+    # `app.security.safety`) ile AYNI (3) — GERÇEK borsaya asla bundan fazla
+    # kaldıraç gönderilemeyeceği için (`enforce_leverage_cap`), paper'da da
+    # test edilemez bir senaryonun bir anlamı yok. VARSAYILAN 3 (kod içi
+    # tavanın tamamı, kullanıcı isteğiyle) — likidasyon riski ayrıca
+    # değerlendirildi: gerçek stop mesafeleri (ort. %0,77, en dar %0,33)
+    # 3x'teki ~%33 likidasyon eşiğinin çok altında.
+    leverage: int = Field(
+        3, ge=1, le=3,
+        description="Teminatın kontrol ettiği nominal pozisyonun çarpanı — sizing'i DEĞİL, gerçekleşen PnL'in büyüklüğünü etkiler.",
+    )
 
     # --- Kademeli (aşamalı) alım/satım ---
     # Bir pozisyon TEK seferde değil, birden çok "tranche" (dilim) halinde

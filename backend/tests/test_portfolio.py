@@ -69,7 +69,7 @@ def test_evaluate_risk_blocks_new_symbol_over_concurrent_limit():
 def test_portfolio_manager_open_close_updates_equity():
     # commission_pct/slippage_pct=0: bu test saf fiyat farkı PnL'ini
     # ölçüyor, işlem maliyetlerini değil (bkz. test_close_applies_transaction_costs).
-    portfolio = PortfolioManager(starting_equity=1000, rules=RiskRules(commission_pct=0, slippage_pct=0))
+    portfolio = PortfolioManager(starting_equity=1000, rules=RiskRules(commission_pct=0, slippage_pct=0, leverage=1))
     decision = portfolio.propose_open("BTC/USDT", "long", entry_price=100, stop_loss_price=97)
     assert decision.allowed is True
     portfolio.open("BTC/USDT", "long", 100, decision.size_quote)
@@ -217,7 +217,9 @@ def test_propose_open_vix_regime_filter_disabled_by_default():
 
 def test_pnl_summary_totals_match_closed_history():
     # commission_pct/slippage_pct=0: bu test saf fiyat farkı PnL'ini ölçüyor.
-    portfolio = PortfolioManager(starting_equity=1000, rules=RiskRules(entry_tranche_weights=[1.0], commission_pct=0, slippage_pct=0))
+    portfolio = PortfolioManager(
+        starting_equity=1000, rules=RiskRules(entry_tranche_weights=[1.0], commission_pct=0, slippage_pct=0, leverage=1)
+    )
     portfolio.open("BTC/USDT", "long", entry_price=100, size_quote=1000)
     portfolio.close("BTC/USDT", exit_price=110)  # +%10 -> +100 quote
 
@@ -227,6 +229,27 @@ def test_pnl_summary_totals_match_closed_history():
     assert summary.daily.pnl_quote == pytest.approx(100.0)  # az önce kapandı -> son 24s içinde
     assert summary.weekly.pnl_quote == pytest.approx(100.0)
     assert summary.monthly.pnl_quote == pytest.approx(100.0)
+
+
+def test_leverage_scales_realized_pnl_without_changing_size_quote():
+    """`RiskRules.leverage` (bkz. o alanın yorumu): `size_quote` (teminat)
+    DEĞİŞMEMELİ, yalnızca gerçekleşen pnl_pct/pnl_quote kaldıraç kadar
+    büyümeli. leverage=1 (varsayılan) ESKİ davranışla birebir aynı olmalı."""
+    p1 = PortfolioManager(starting_equity=1000, rules=RiskRules(entry_tranche_weights=[1.0], commission_pct=0, slippage_pct=0, leverage=1))
+    p1.open("BTC/USDT", "long", entry_price=100, size_quote=1000)
+    r1 = p1.close("BTC/USDT", exit_price=110)  # +%10 fiyat hareketi
+
+    p3 = PortfolioManager(
+        starting_equity=1000, rules=RiskRules(entry_tranche_weights=[1.0], commission_pct=0, slippage_pct=0, leverage=3)
+    )
+    p3.open("BTC/USDT", "long", entry_price=100, size_quote=1000)
+    r3 = p3.close("BTC/USDT", exit_price=110)
+
+    assert r1["size_quote"] == pytest.approx(r3["size_quote"])  # teminat AYNI
+    assert r1["pnl_pct"] == pytest.approx(10.0)
+    assert r3["pnl_pct"] == pytest.approx(30.0)  # 3x kaldıraç
+    assert r3["pnl_quote"] == pytest.approx(r1["pnl_quote"] * 3)
+    assert p3.equity == pytest.approx(1000 + 300.0)
 
 
 class _StaticOhlcvExchange(Exchange):
@@ -385,7 +408,7 @@ def test_close_applies_transaction_costs():
     # commission_pct=0.05, slippage_pct=0.03 -> round-trip maliyet = (0.05+0.03)*2 = %0.16
     portfolio = PortfolioManager(
         starting_equity=1000,
-        rules=RiskRules(entry_tranche_weights=[1.0], commission_pct=0.05, slippage_pct=0.03),
+        rules=RiskRules(entry_tranche_weights=[1.0], commission_pct=0.05, slippage_pct=0.03, leverage=1),
     )
     portfolio.open("BTC/USDT", "long", entry_price=100, size_quote=1000)
     record = portfolio.close("BTC/USDT", exit_price=110)  # brüt +%10
@@ -395,7 +418,7 @@ def test_close_applies_transaction_costs():
 
 def test_close_zero_cost_matches_gross_pnl():
     portfolio = PortfolioManager(
-        starting_equity=1000, rules=RiskRules(entry_tranche_weights=[1.0], commission_pct=0, slippage_pct=0)
+        starting_equity=1000, rules=RiskRules(entry_tranche_weights=[1.0], commission_pct=0, slippage_pct=0, leverage=1)
     )
     portfolio.open("BTC/USDT", "long", entry_price=100, size_quote=1000)
     record = portfolio.close("BTC/USDT", exit_price=110)
