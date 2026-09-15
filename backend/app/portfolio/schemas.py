@@ -12,8 +12,21 @@ class RiskRules(BaseModel):
     """
 
     max_risk_per_trade_pct: float = Field(1.0, gt=0, description="Bir işlemde riske edilecek sermaye yüzdesi (SL mesafesine göre boyutlandırma için) — position_sizing_method='fixed_risk' iken kullanılır")
-    max_total_exposure_pct: float = Field(50.0, gt=0, description="Tüm açık pozisyonların toplamının sermayeye oranı üst sınırı")
-    max_symbol_exposure_pct: float = Field(15.0, gt=0, description="Tek bir sembole ayrılabilecek maksimum sermaye yüzdesi")
+    # GÜNCELLEME (bkz. README "Karlılık", kullanıcı isteği: "portföyün en
+    # yüksek kullanımı olacak şekilde"): sistem TEK sembolle (BTC-only)
+    # çalıştığı için `max_symbol_exposure_pct` fiilen TÜM portföyün tavanı
+    # oluyordu — eski %15 sermayenin %85'ini sürekli atıl bırakıyordu (gerçek
+    # backtest'te ölçüldü: ort. pozisyon equity'nin yalnızca %13,49'u).
+    # Gerçek üretim modeliyle taranıp ölçüldü: %15/%25 -> +%30,50 PnL; %40/%40
+    # -> +%49,16; %60/%60 -> +%50,29 (TEPE); %100/%100 -> +%48,65 (DÜŞÜYOR,
+    # drawdown ise artmaya devam ediyor: %0,978 -> %1,625 -> %2,155 -> %2,785)
+    # — %60 sonrası saf kaldıraç riski, karşılığında getiri YOK (aşırı
+    # kaldıraçın klasik imzası). %60 seçildi: PnL'i FEDA ETMEDEN maksimum
+    # sermaye kullanımı. NOT: bu ölçüm backtest'te yapıldı, backtest kademeli
+    # (tranche) girişi SİMÜLE ETMEZ — canlı/paper motor `entry_tranche_weights`
+    # ile 2 dilimde açtığından gerçek risk muhtemelen biraz daha yumuşaktır.
+    max_total_exposure_pct: float = Field(60.0, gt=0, description="Tüm açık pozisyonların toplamının sermayeye oranı üst sınırı")
+    max_symbol_exposure_pct: float = Field(60.0, gt=0, description="Tek bir sembole ayrılabilecek maksimum sermaye yüzdesi")
     max_concurrent_positions: int = Field(5, ge=1, description="Aynı anda açık olabilecek maksimum farklı sembol sayısı")
     daily_loss_limit_pct: float = Field(5.0, gt=0, description="Bu yüzdeye ulaşan günlük/oturum zararında yeni işlem açılmaz")
 
@@ -41,8 +54,8 @@ class RiskRules(BaseModel):
         description="Kelly istatistiklerinin (kazanma oranı, ort. kazanç/kayıp) güvenilir sayılması için gereken minimum kapanmış işlem sayısı. Yeterli geçmiş yoksa fixed_risk'e düşülür.",
     )
     max_kelly_fraction_pct: float = Field(
-        25.0, gt=0,
-        description="Kelly formülü ne derse desin, bir işleme ayrılacak sermayenin üst güvenlik sınırı (%)",
+        60.0, gt=0,
+        description="Kelly formülü ne derse desin, bir işleme ayrılacak sermayenin üst güvenlik sınırı (%) — bkz. yukarıdaki max_symbol_exposure_pct notu, ikisi SENKRON tutulmalı",
     )
 
     # --- Kademeli (aşamalı) alım/satım ---

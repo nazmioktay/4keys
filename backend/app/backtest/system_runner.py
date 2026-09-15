@@ -516,7 +516,7 @@ def run_system_backtest(
 
         if position is None and direction in ("long", "short") and confidence >= request.open_confidence:
             if meta_model is not None and request.use_meta_label:
-                decision = meta_model.decide(row, confidence)
+                decision = meta_model.decide(row, confidence, act_threshold=request.meta_label_act_threshold)
                 if not decision.act:
                     meta_label_vetoes += 1
                     continue

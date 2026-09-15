@@ -197,6 +197,19 @@ def test_stop_loss_closes_long_position_on_crash():
             assert t.exit_price > t.entry_price
 
 
+def test_meta_label_act_threshold_synced_between_decision_engine_and_backtest_request():
+    """`DecisionEngine.__init__`'in `meta_label_act_threshold` varsayılanı ile
+    `SystemBacktestRequest`'inki AYNI olmalı (bkz. her ikisinin de yorumu) —
+    canlı motor ile backtest'in FARKLI eşiklerle sessizce sürüklenmesini
+    önler."""
+    import inspect
+
+    from app.engine.decision import DecisionEngine
+
+    engine_default = inspect.signature(DecisionEngine.__init__).parameters["meta_label_act_threshold"].default
+    assert engine_default == SystemBacktestRequest().meta_label_act_threshold
+
+
 def test_take_profit_closes_position_at_target():
     exchange = FakeOscillatingExchange(total_candles=600)
     train_ohlcv = exchange.full_df.iloc[:400].reset_index(drop=True)

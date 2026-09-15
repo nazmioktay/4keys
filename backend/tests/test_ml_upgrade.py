@@ -191,7 +191,7 @@ def test_decision_engine_respects_meta_label_veto():
         def __init__(self):
             self._is_fitted = True
 
-        def decide(self, feature_row, primary_confidence):
+        def decide(self, feature_row, primary_confidence, act_threshold=0.5):
             from app.ml.meta_label import MetaDecision
             return MetaDecision(act=False, confidence=0.9)
 

@@ -110,6 +110,18 @@ class SystemBacktestRequest(BaseModel):
     commission_pct: float = Field(default=0.04, ge=0)
     slippage_pct: float = Field(default=0.02, ge=0)
     use_meta_label: bool = Field(default=True, description="Eğitilmiş bir meta-label modeli varsa sinyal filtresi olarak kullanılır")
+    # `MetaLabelModel.decide`'ın ESKİ (argmax) davranışı 0.5'e denk gelir
+    # (bkz. o fonksiyonun docstring'i). Gerçek üretim modeliyle (özellik
+    # budama + multi-timeframe SONRASI) taranıp ölçüldü (bkz. README
+    # "Karlılık"): 0.4'ten 0.6'ya kadar PnL DÜZENLİ arttı (536 işlem/+%30,50
+    # -> 511 işlem/+%32,37), 0.6 SONRASI (0.65/0.7) örneklem küçüldükçe
+    # (424/299 işlem) geriledi (+%30,04/+%20,67). 0.6 seçildi — hem en
+    # yüksek PnL hem de tabana yakın (511 vs 536) sağlam bir örneklem.
+    # `DecisionEngine.__init__`'in `meta_label_act_threshold` varsayılanıyla
+    # SENKRON tutulmalı.
+    meta_label_act_threshold: float = Field(
+        default=0.6, ge=0.0, le=1.0, description="Meta-label 'gir' kararı için P(act=1) alt sınırı"
+    )
     use_ensemble: bool = Field(
         default=True, description="Kullanılabilirse (bkz. app.ml.model_status) LSTM/online modeli de canlıdaki gibi ensemble'a katar"
     )
@@ -246,13 +258,20 @@ class SystemBacktestRequest(BaseModel):
         default=40, ge=5,
         description="Kelly istatistiklerinin (kazanma oranı, ort. kazanç/kayıp) güvenilir sayılması için gereken minimum kapanmış işlem sayısı.",
     )
+    # GÜNCELLEME (bkz. README "Karlılık", kullanıcı isteği: "portföyün en
+    # yüksek kullanımı olacak şekilde"): gerçek üretim modeliyle taranıp
+    # ölçüldü — %15/%25 -> +%30,50 PnL; %40/%40 -> +%49,16; %60/%60 ->
+    # +%50,29 (TEPE); %100/%100 -> +%48,65 (DÜŞÜYOR, drawdown artmaya devam
+    # ediyor: %0,978->%1,625->%2,155->%2,785) — %60 sonrası saf kaldıraç
+    # riski, karşılığında getiri YOK. %60 seçildi: PnL'i FEDA ETMEDEN
+    # maksimum kullanım. `RiskRules` ile SENKRON tutulmalı.
     max_kelly_fraction_pct: float = Field(
-        default=25.0, gt=0,
+        default=60.0, gt=0,
         description="Kelly formülü ne derse desin, bir işleme ayrılacak sermayenin üst güvenlik sınırı (%).",
     )
     max_position_exposure_pct: float = Field(
-        default=15.0, gt=0,
-        description="Boyutlandırma yöntemi ne olursa olsun, tek bir pozisyonun equity'ye oranının üst güvenlik sınırı (`RiskRules.max_symbol_exposure_pct` ile AYNI varsayılan) — ör. dar bir ATR'de fixed_risk formülünün aşırı kaldıraca sıçramasına karşı.",
+        default=60.0, gt=0,
+        description="Boyutlandırma yöntemi ne olursa olsun, tek bir pozisyonun equity'ye oranının üst güvenlik sınırı (`RiskRules.max_symbol_exposure_pct` ile AYNI varsayılan).",
     )
     confidence_scaling_enabled: bool = Field(
         default=True,

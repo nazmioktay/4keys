@@ -132,6 +132,13 @@ class DecisionEngine:
         meta_model: MetaLabelModel | None = None,
         lstm_model: LSTMSignalModel | None = None,
         online_model: OnlineSignalModel | None = None,
+        # `bash deploy/sweep-meta-label-threshold.sh`'a KARŞILIK GELEN backtest
+        # taramasıyla (bkz. README "Karlılık") ölçüldü: 0.4..0.7 arasında PnL
+        # 0.6'da (511 işlem, %66,93 kazanma, +%32,37 PnL — tabandaki 0.5'in
+        # +%30,50'sinden iyi) TEPE yapıp sonrasında (0.65: +%30,04, 0.7:
+        # +%20,67 — örneklem küçüldükçe) geriliyor. `SystemBacktestRequest`
+        # ile SENKRON tutulmalı (bkz. o alanın kendi yorumu).
+        meta_label_act_threshold: float = 0.6,
     ) -> None:
         self.exchange = exchange
         self.model = model
@@ -142,6 +149,7 @@ class DecisionEngine:
         self.close_confidence = close_confidence
         self.portfolio = portfolio
         self.assumed_stop_loss_pct = assumed_stop_loss_pct
+        self.meta_label_act_threshold = meta_label_act_threshold
         self.meta_model = meta_model
         self.lstm_model = lstm_model
         self.online_model = online_model
@@ -287,7 +295,9 @@ class DecisionEngine:
         if position is None:
             if prediction.direction in ("long", "short") and prediction.confidence >= self.open_confidence:
                 if self.meta_model is not None:
-                    meta_decision = self.meta_model.decide(feature_row, prediction.confidence)
+                    meta_decision = self.meta_model.decide(
+                        feature_row, prediction.confidence, act_threshold=self.meta_label_act_threshold
+                    )
                     if not meta_decision.act:
                         return Action(
                             symbol,

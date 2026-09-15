@@ -70,7 +70,15 @@ class MetaLabelModel:
         self._pipeline.fit(meta_X[META_FEATURE_COLUMNS], meta_y)
         self._is_fitted = True
 
-    def decide(self, feature_row: pd.Series, primary_confidence: float) -> MetaDecision:
+    def decide(self, feature_row: pd.Series, primary_confidence: float, act_threshold: float = 0.5) -> MetaDecision:
+        """`act_threshold`: "gir" (act=True) kararı için P(act=1)'in geçmesi
+        gereken alt sınır. Varsayılan 0.5, ESKİ argmax davranışıyla MATEMATİKSEL
+        olarak birebir aynıdır (2 sınıflı bir problemde P(1)>=0.5 <=> argmax
+        sınıf 1'i seçer) — bu yüzden var olan tüm çağrı yerleri (canlı motor,
+        `/ml/predict` vb.) parametre vermeden ÖNCEKİYLE AYNI şekilde çalışmaya
+        devam eder. Daha yüksek bir eşik meta-label'ı daha SEÇİCİ (daha az
+        işlem, teorik olarak daha güvenilir) yapar — bkz. README "Karlılık",
+        `deploy/sweep-meta-label-threshold.sh` ile taranır."""
         if not self._is_fitted:
             raise RuntimeError("Meta-label modeli henüz eğitilmedi.")
 
@@ -80,9 +88,16 @@ class MetaLabelModel:
 
         proba = self._pipeline.predict_proba(x)[0]
         classes = self._pipeline.classes_
-        best_idx = int(np.argmax(proba))
-        act = bool(classes[best_idx] == 1)
-        confidence = float(proba[best_idx])
+        act_class_idx = int(np.where(classes == 1)[0][0]) if 1 in classes else None
+        if act_class_idx is not None:
+            act = bool(proba[act_class_idx] >= act_threshold)
+            confidence = float(proba[act_class_idx]) if act else float(1.0 - proba[act_class_idx])
+        else:
+            # Eğitim setinde hiç "act=1" örneği görülmediyse (aşırı uç,
+            # normalde olmaz) sınıf hiç yoktur — eski argmax davranışına düş.
+            best_idx = int(np.argmax(proba))
+            act = bool(classes[best_idx] == 1)
+            confidence = float(proba[best_idx])
         return MetaDecision(act=act, confidence=confidence)
 
     def save(self, path: Path = DEFAULT_META_MODEL_PATH) -> None:
