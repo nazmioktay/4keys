@@ -334,6 +334,7 @@ def test_job_periodic_optimization_records_result_without_changing_live_settings
         recommended_close_confidence=0.55,
         recommended_kelly_min_trades=20,
         recommended_kelly_multiplier=1.0,
+        recommended_meta_label_act_threshold=0.65,
         recommended_trades_closed=50,
         recommended_win_rate_pct=60.0,
         recommended_total_pnl_pct=5.5,
@@ -342,6 +343,7 @@ def test_job_periodic_optimization_records_result_without_changing_live_settings
         current_close_confidence=0.45,
         current_kelly_min_trades=40,
         current_kelly_multiplier=0.75,
+        current_meta_label_act_threshold=0.6,
         current_trades_closed=50,
         current_win_rate_pct=55.0,
         current_total_pnl_pct=1.0,
@@ -377,6 +379,7 @@ def test_job_periodic_optimization_auto_apply_takes_a_dampened_step_not_a_full_j
     monkeypatch.setattr(settings, "ml_periodic_optimization_min_improvement_pct", 0.1)
     monkeypatch.setattr(settings, "live_open_confidence", 0.5)
     monkeypatch.setattr(settings, "live_close_confidence", 0.45)
+    monkeypatch.setattr(settings, "live_meta_label_act_threshold", 0.5)
     fake_portfolio = _fake_portfolio_with_rules(kelly_min_trades=40, kelly_multiplier=0.75)
     _setup_common_optimization_mocks(monkeypatch, fake_portfolio)
 
@@ -386,6 +389,7 @@ def test_job_periodic_optimization_auto_apply_takes_a_dampened_step_not_a_full_j
         recommended_close_confidence=0.55,
         recommended_kelly_min_trades=20,  # mevcuttan -20 uzakta
         recommended_kelly_multiplier=1.0,  # mevcuttan 0.25 uzakta
+        recommended_meta_label_act_threshold=0.7,  # mevcuttan 0.2 uzakta
         recommended_trades_closed=50,
         recommended_win_rate_pct=60.0,
         recommended_total_pnl_pct=5.5,  # mevcuttan (1.0) belirgin iyi
@@ -394,6 +398,7 @@ def test_job_periodic_optimization_auto_apply_takes_a_dampened_step_not_a_full_j
         current_close_confidence=0.45,
         current_kelly_min_trades=40,
         current_kelly_multiplier=0.75,
+        current_meta_label_act_threshold=0.5,
         current_trades_closed=50,
         current_win_rate_pct=55.0,
         current_total_pnl_pct=1.0,
@@ -416,6 +421,7 @@ def test_job_periodic_optimization_auto_apply_takes_a_dampened_step_not_a_full_j
     assert settings.live_close_confidence == pytest.approx(0.5)
     assert fake_portfolio.rules.kelly_multiplier == pytest.approx(0.875)
     assert fake_portfolio.rules.kelly_min_trades == 30  # round(40 + 0.5*(20-40))
+    assert settings.live_meta_label_act_threshold == pytest.approx(0.6)  # 0.5 + 0.5*(0.7-0.5)
 
 
 def test_job_periodic_optimization_does_not_apply_when_improvement_too_small(monkeypatch):
@@ -435,6 +441,7 @@ def test_job_periodic_optimization_does_not_apply_when_improvement_too_small(mon
         recommended_close_confidence=0.5,
         recommended_kelly_min_trades=40,
         recommended_kelly_multiplier=0.8,
+        recommended_meta_label_act_threshold=0.6,
         recommended_trades_closed=50,
         recommended_win_rate_pct=60.0,
         recommended_total_pnl_pct=1.02,  # mevcuttan yalnızca %0.02 iyi (< 0.1 eşiği)
@@ -443,6 +450,7 @@ def test_job_periodic_optimization_does_not_apply_when_improvement_too_small(mon
         current_close_confidence=0.45,
         current_kelly_min_trades=40,
         current_kelly_multiplier=0.75,
+        current_meta_label_act_threshold=0.6,
         current_trades_closed=50,
         current_win_rate_pct=55.0,
         current_total_pnl_pct=1.0,

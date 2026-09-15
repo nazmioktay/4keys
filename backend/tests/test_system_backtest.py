@@ -1085,6 +1085,58 @@ def test_run_periodic_optimization_skips_unreliable_points_and_never_persists(mo
     # (kelly_multiplier==1.0 iken +2.0) mevcut kombinasyona da uygulanıyor.
     assert result.current_total_pnl_pct == pytest.approx(1.0 + 2.0)
 
+    # meta_model=None -> meta-label eşiği taranmaz (sweep_meta_label_threshold
+    # ÇAĞRILMAZ), önerilen/mevcut alanları base_request'in KENDİ değerine düşer.
+    assert result.recommended_meta_label_act_threshold == base_request.meta_label_act_threshold
+    assert result.current_meta_label_act_threshold == base_request.meta_label_act_threshold
+
+
+def test_run_periodic_optimization_also_sweeps_meta_label_threshold_when_meta_model_present(monkeypatch):
+    """`meta_model` verildiğinde `run_periodic_optimization`, güven eşiği +
+    boyutlandırmanın ÜSTÜNE meta-label eşiğini de tarayıp en yüksek
+    `total_pnl_pct`'i (güvenilir örneklemde) önermeli — bkz.
+    `sweep_meta_label_threshold` docstring'i, YENİDEN EĞİTİM gerektirmez."""
+    from app.backtest import system_runner
+
+    def fake_run_system_backtest(exchange, model, meta_model, request, lstm_model=None, online_model=None, persist=True):
+        meta_bonus = 4.0 if request.meta_label_act_threshold == 0.65 else 0.0
+        return SystemBacktestReport(
+            symbol=request.symbol,
+            timeframe="1h",
+            candles_used=100,
+            period_start="2024-01-01T00:00:00",
+            period_end="2024-01-05T00:00:00",
+            initial_balance=1000.0,
+            final_equity=1000.0,
+            trades_closed=50,
+            win_rate_pct=60.0,
+            total_pnl_quote=0.0,
+            total_pnl_pct=1.0 + meta_bonus,
+            daily_pnl_quote=0.0,
+            daily_pnl_pct=0.0,
+            monthly_pnl_quote=0.0,
+            monthly_pnl_pct=0.0,
+            max_drawdown_pct=1.0,
+            trades=[],
+        )
+
+    monkeypatch.setattr(system_runner, "run_system_backtest", fake_run_system_backtest)
+
+    result = system_runner.run_periodic_optimization(
+        exchange=None,
+        model=None,
+        meta_model=object(),  # None DEĞİL -> meta-label taraması TETİKLENMELİ
+        base_request=SystemBacktestRequest(),
+        open_confidence_values=[0.5],
+        kelly_min_trades_values=[40],
+        kelly_multiplier_values=[1.0],
+        meta_label_threshold_values=[0.5, 0.6, 0.65, 0.7],
+    )
+
+    assert result.recommended_meta_label_act_threshold == 0.65
+    assert result.recommended_total_pnl_pct == pytest.approx(5.0)
+    assert result.current_meta_label_act_threshold == SystemBacktestRequest().meta_label_act_threshold
+
 
 # --- XGBoost hiperparametre taraması (sweep_xgboost_hyperparameters) ---
 

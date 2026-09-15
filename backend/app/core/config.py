@@ -212,6 +212,11 @@ class Settings(BaseSettings):
     # üzerinde doğrudan (ve aynı şekilde çalışma zamanında) güncellenir.
     live_open_confidence: float = 0.5
     live_close_confidence: float = 0.45
+    # AYNI desen (bkz. yukarıdaki yorum) — `DecisionEngine.__init__`'in
+    # kendi varsayılanıyla (0.6, bkz. README "Karlılık" ölçümü) AYNI
+    # başlangıç değeri, ama `job_periodic_optimization` bunu da (kademeli,
+    # bkz. `sweep_meta_label_threshold`) çalışma zamanında güncelleyebilir.
+    live_meta_label_act_threshold: float = 0.6
 
     # --- Eğitim kalite kapısı ---
     # Bir modelin out-of-sample (veya online modelde prequential) dengeli

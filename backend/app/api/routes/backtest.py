@@ -14,9 +14,11 @@ from app.backtest.schemas import (
 )
 from app.backtest.system_runner import (
     ConfidenceSweepPoint,
+    MetaLabelThresholdSweepPoint,
     PositionSizingSweepPoint,
     run_system_backtest,
     sweep_confidence_thresholds,
+    sweep_meta_label_threshold,
     sweep_position_sizing,
 )
 from app.core.config import settings
@@ -218,6 +220,50 @@ def sweep_position_sizing_route(payload: SweepPositionSizingRequest) -> SweepPos
     return SweepPositionSizingResponse(points=[SweepPositionSizingPoint(**p.__dict__) for p in points])
 
 
+class SweepMetaLabelThresholdRequest(BaseModel):
+    base_request: SystemBacktestRequest = Field(default_factory=SystemBacktestRequest)
+    threshold_values: list[float] = [0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7]
+
+
+class SweepMetaLabelThresholdPoint(BaseModel):
+    meta_label_act_threshold: float
+    trades_closed: int
+    win_rate_pct: float
+    total_pnl_pct: float
+    daily_pnl_pct: float
+    max_drawdown_pct: float
+    error: str | None = None
+
+
+class SweepMetaLabelThresholdResponse(BaseModel):
+    points: list[SweepMetaLabelThresholdPoint]
+
+
+@router.post("/system/sweep-meta-label-threshold", response_model=SweepMetaLabelThresholdResponse)
+def sweep_meta_label_threshold_route(payload: SweepMetaLabelThresholdRequest) -> SweepMetaLabelThresholdResponse:
+    """`meta_label_act_threshold` (meta-label'ın "gir" kararı için P(act=1)
+    alt sınırı) ızgarasında art arda sistem backtest'i çalıştırıp her
+    değer için işlem sayısı/kazanma oranı/PnL/max drawdown döner — bkz.
+    `app.backtest.system_runner.sweep_meta_label_threshold` docstring'i.
+    Diğer sweep'lerden FARKLI olarak YENİ bir model EĞİTMEZ (yalnızca
+    çıkarım zamanı eşik), bu yüzden çok daha hızlıdır. Otomatik "en iyi"yi
+    seçmez, karar operatöre kalır — ama bu sweep aynı zamanda
+    `run_periodic_optimization`'ın (haftalık, bkz. `app.scheduler.jobs.job_periodic_optimization`)
+    otomatik/kademeli döngüsüne de dahildir."""
+    exchange = get_exchange(settings.exchange_id)
+    model, meta_model, lstm_model, online_model = _load_ensemble_models()
+    points: list[MetaLabelThresholdSweepPoint] = sweep_meta_label_threshold(
+        exchange,
+        model,
+        meta_model,
+        payload.base_request,
+        payload.threshold_values,
+        lstm_model=lstm_model,
+        online_model=online_model,
+    )
+    return SweepMetaLabelThresholdResponse(points=[SweepMetaLabelThresholdPoint(**p.__dict__) for p in points])
+
+
 class OptimizationRunSummary(BaseModel):
     id: int
     created_at: str
@@ -226,6 +272,10 @@ class OptimizationRunSummary(BaseModel):
     recommended_close_confidence: float
     recommended_kelly_min_trades: int
     recommended_kelly_multiplier: float
+    # `None`: bu satır, meta-label eşiği taramaya eklenmeden ÖNCE kaydedildi
+    # (eski satırlar, bkz. `app.db.session._add_missing_columns`) - geriye
+    # dönük uyumluluk için opsiyonel.
+    recommended_meta_label_act_threshold: float | None = None
     recommended_trades_closed: int
     recommended_win_rate_pct: float
     recommended_total_pnl_pct: float
@@ -234,6 +284,7 @@ class OptimizationRunSummary(BaseModel):
     current_close_confidence: float
     current_kelly_min_trades: int
     current_kelly_multiplier: float
+    current_meta_label_act_threshold: float | None = None
     current_trades_closed: int
     current_win_rate_pct: float
     current_total_pnl_pct: float

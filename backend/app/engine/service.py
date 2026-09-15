@@ -91,6 +91,7 @@ def run_cycle_once() -> list[Action]:
         # ZAMANINDA güncelleyebilir, `docker build` gerekmeden.
         open_confidence=settings.live_open_confidence,
         close_confidence=settings.live_close_confidence,
+        meta_label_act_threshold=settings.live_meta_label_act_threshold,
         portfolio=get_portfolio(),
         meta_model=meta_model,
         lstm_model=lstm_model,

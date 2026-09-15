@@ -350,6 +350,7 @@ def job_periodic_optimization() -> None:
             close_confidence=settings.live_close_confidence,
             kelly_min_trades=portfolio_rules.kelly_min_trades,
             kelly_multiplier=portfolio_rules.kelly_multiplier,
+            meta_label_act_threshold=settings.live_meta_label_act_threshold,
         )
         result = run_periodic_optimization(
             exchange, model, meta_model, base_request, lstm_model=lstm_model, online_model=online_model
@@ -365,6 +366,9 @@ def job_periodic_optimization() -> None:
             settings.live_close_confidence = _dampened_step(result.current_close_confidence, result.recommended_close_confidence, fraction)
             portfolio_rules.kelly_multiplier = _dampened_step(result.current_kelly_multiplier, result.recommended_kelly_multiplier, fraction)
             portfolio_rules.kelly_min_trades = max(5, round(_dampened_step(result.current_kelly_min_trades, result.recommended_kelly_min_trades, fraction)))
+            settings.live_meta_label_act_threshold = _dampened_step(
+                result.current_meta_label_act_threshold, result.recommended_meta_label_act_threshold, fraction
+            )
             applied = True
 
         db.record_optimization_run(
@@ -374,6 +378,7 @@ def job_periodic_optimization() -> None:
                 "recommended_close_confidence": result.recommended_close_confidence,
                 "recommended_kelly_min_trades": result.recommended_kelly_min_trades,
                 "recommended_kelly_multiplier": result.recommended_kelly_multiplier,
+                "recommended_meta_label_act_threshold": result.recommended_meta_label_act_threshold,
                 "recommended_trades_closed": result.recommended_trades_closed,
                 "recommended_win_rate_pct": result.recommended_win_rate_pct,
                 "recommended_total_pnl_pct": result.recommended_total_pnl_pct,
@@ -382,6 +387,7 @@ def job_periodic_optimization() -> None:
                 "current_close_confidence": result.current_close_confidence,
                 "current_kelly_min_trades": result.current_kelly_min_trades,
                 "current_kelly_multiplier": result.current_kelly_multiplier,
+                "current_meta_label_act_threshold": result.current_meta_label_act_threshold,
                 "current_trades_closed": result.current_trades_closed,
                 "current_win_rate_pct": result.current_win_rate_pct,
                 "current_total_pnl_pct": result.current_total_pnl_pct,
@@ -392,7 +398,8 @@ def job_periodic_optimization() -> None:
         applied_note = (
             f"UYGULANDI (kademeli, {settings.ml_periodic_optimization_max_step_fraction:.0%} adım) -> "
             f"yeni canlı: eşik={settings.live_open_confidence:.3f}/{settings.live_close_confidence:.3f}, "
-            f"kelly={portfolio_rules.kelly_min_trades}/{portfolio_rules.kelly_multiplier:.3f}"
+            f"kelly={portfolio_rules.kelly_min_trades}/{portfolio_rules.kelly_multiplier:.3f}, "
+            f"meta_esik={settings.live_meta_label_act_threshold:.3f}"
             if applied
             else "CANLI AYARLAR DEĞİŞTİRİLMEDİ (iyileşme eşiği geçilmedi veya auto-apply kapalı)"
         )
@@ -402,9 +409,11 @@ def job_periodic_optimization() -> None:
             detail=(
                 f"mevcut: eşik={result.current_open_confidence}/{result.current_close_confidence}, "
                 f"kelly={result.current_kelly_min_trades}/{result.current_kelly_multiplier}, "
+                f"meta_esik={result.current_meta_label_act_threshold}, "
                 f"PnL=%{result.current_total_pnl_pct:.2f} | önerilen: "
                 f"eşik={result.recommended_open_confidence}/{result.recommended_close_confidence}, "
                 f"kelly={result.recommended_kelly_min_trades}/{result.recommended_kelly_multiplier}, "
+                f"meta_esik={result.recommended_meta_label_act_threshold}, "
                 f"PnL=%{result.recommended_total_pnl_pct:.2f} ({result.recommended_trades_closed} işlem) "
                 f"— {applied_note}"
             ),

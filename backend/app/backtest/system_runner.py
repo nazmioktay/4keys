@@ -944,6 +944,67 @@ def sweep_position_sizing(
     return results
 
 
+@dataclass
+class MetaLabelThresholdSweepPoint:
+    meta_label_act_threshold: float
+    trades_closed: int
+    win_rate_pct: float
+    total_pnl_pct: float
+    daily_pnl_pct: float
+    max_drawdown_pct: float
+    error: str | None = None
+
+
+def sweep_meta_label_threshold(
+    exchange: Exchange,
+    model: SignalModel,
+    meta_model: MetaLabelModel | None,
+    base_request: SystemBacktestRequest,
+    threshold_values: list[float],
+    lstm_model: "LSTMSignalModel | None" = None,
+    online_model: OnlineSignalModel | None = None,
+) -> list[MetaLabelThresholdSweepPoint]:
+    """`sweep_confidence_thresholds`/`sweep_position_sizing` ile AYNI felsefe,
+    ama meta-label'ın "gir" kararı için P(act=1) alt sınırı (bkz.
+    `MetaLabelModel.decide` docstring'i) için. Diğer sweep'lerden FARKLI
+    olarak YENİ bir model EĞİTMEZ — `meta_label_act_threshold` yalnızca
+    ÇIKARIM (inference) zamanı bir eşik, mevcut eğitilmiş `meta_model`
+    olduğu gibi kullanılır. Bu yüzden çok daha UCUZDUR (retrain yok) ve
+    `run_periodic_optimization`'ın (bkz. o fonksiyon) periyodik/otomatik
+    döngüsüne dahil edilebilecek kadar hafiftir.
+    """
+    results: list[MetaLabelThresholdSweepPoint] = []
+    for threshold in threshold_values:
+        request = base_request.model_copy(update={"meta_label_act_threshold": threshold})
+        try:
+            report = run_system_backtest(
+                exchange, model, meta_model, request, lstm_model=lstm_model, online_model=online_model, persist=False
+            )
+            results.append(
+                MetaLabelThresholdSweepPoint(
+                    meta_label_act_threshold=threshold,
+                    trades_closed=report.trades_closed,
+                    win_rate_pct=report.win_rate_pct,
+                    total_pnl_pct=report.total_pnl_pct,
+                    daily_pnl_pct=report.daily_pnl_pct,
+                    max_drawdown_pct=report.max_drawdown_pct,
+                )
+            )
+        except ValueError as exc:
+            results.append(
+                MetaLabelThresholdSweepPoint(
+                    meta_label_act_threshold=threshold,
+                    trades_closed=0,
+                    win_rate_pct=0.0,
+                    total_pnl_pct=0.0,
+                    daily_pnl_pct=0.0,
+                    max_drawdown_pct=0.0,
+                    error=str(exc),
+                )
+            )
+    return results
+
+
 # En az bu kadar kapanmış işlemi olmayan bir güven eşiği adayı "güvenilir"
 # sayılmaz — bkz. README "karlılık": önceki turda 0.6+ eşiklerdeki 3/0/0
 # işlemlik noktalar yorumlanamaz seviyedeydi, öneri motoru bunları asla
@@ -958,6 +1019,7 @@ class OptimizationRunResult:
     recommended_close_confidence: float
     recommended_kelly_min_trades: int
     recommended_kelly_multiplier: float
+    recommended_meta_label_act_threshold: float
     recommended_trades_closed: int
     recommended_win_rate_pct: float
     recommended_total_pnl_pct: float
@@ -966,6 +1028,7 @@ class OptimizationRunResult:
     current_close_confidence: float
     current_kelly_min_trades: int
     current_kelly_multiplier: float
+    current_meta_label_act_threshold: float
     current_trades_closed: int
     current_win_rate_pct: float
     current_total_pnl_pct: float
@@ -981,16 +1044,17 @@ def run_periodic_optimization(
     close_confidence_gap: float = 0.05,
     kelly_min_trades_values: list[int] | None = None,
     kelly_multiplier_values: list[float] | None = None,
+    meta_label_threshold_values: list[float] | None = None,
     lstm_model: "LSTMSignalModel | None" = None,
     online_model: OnlineSignalModel | None = None,
 ) -> OptimizationRunResult:
     """Haftalık "walk-forward" parametre optimizasyonunun İLK, GÜVENLİ adımı
     (bkz. README "karlılık" — kullanıcı isteği: "tam otomatik... öğrenme
     algoritmalarıyla optimizasyon"): `sweep_confidence_thresholds` +
-    `sweep_position_sizing`'i ART ARDA çalıştırıp GÜVENİLİR (bkz.
-    `MIN_RELIABLE_TRADES_FOR_OPTIMIZATION`) en iyi kombinasyonu, O ANDA
-    `base_request`'te kullanılan (canlı/mevcut) değerlerle karşılaştırmalı
-    döner.
+    `sweep_position_sizing` + `sweep_meta_label_threshold`'ı ART ARDA
+    çalıştırıp GÜVENİLİR (bkz. `MIN_RELIABLE_TRADES_FOR_OPTIMIZATION`) en
+    iyi kombinasyonu, O ANDA `base_request`'te kullanılan (canlı/mevcut)
+    değerlerle karşılaştırmalı döner.
 
     BİLEREK CANLI AYARLARI DEĞİŞTİRMEZ — yalnızca ÖLÇER/RAPORLAR (bkz.
     `app.scheduler.jobs.job_periodic_optimization`, `OptimizationRun`
@@ -1005,12 +1069,15 @@ def run_periodic_optimization(
     1. `base_request`'in KENDİSİYLE (mevcut ayarlar) bir referans backtest'i.
     2. Güven eşiği taraması; güvenilir noktalar arasında en yüksek `total_pnl_pct`.
     3. En iyi güven eşiğiyle (bulunduysa) pozisyon boyutu taraması; en yüksek `total_pnl_pct`.
-    4. Önerilen TAM kombinasyonla (eşik + boyutlandırma BİRLİKTE) son bir
-       backtest — izole eksen taramalarının etkileşimini kaçırmamak için.
+    4. En iyi eşik+boyutlandırmayla meta-label eşiği taraması (bkz.
+       `sweep_meta_label_threshold` — YENİDEN EĞİTİM GEREKTİRMEZ, ucuz).
+    5. Önerilen TAM kombinasyonla (üçü BİRLİKTE) son bir backtest — izole
+       eksen taramalarının etkileşimini kaçırmamak için.
     """
     open_confidence_values = open_confidence_values or [0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7]
     kelly_min_trades_values = kelly_min_trades_values or [10, 20, 40, 60]
     kelly_multiplier_values = kelly_multiplier_values or [0.5, 0.75, 1.0]
+    meta_label_threshold_values = meta_label_threshold_values or [0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7]
 
     current_report = run_system_backtest(
         exchange, model, meta_model, base_request, lstm_model=lstm_model, online_model=online_model, persist=False
@@ -1038,10 +1105,32 @@ def run_periodic_optimization(
     reliable_sizing = [p for p in sizing_points if p.error is None]
     best_sizing = max(reliable_sizing, key=lambda p: p.total_pnl_pct) if reliable_sizing else None
 
+    meta_label_base_request = sizing_base_request
+    if best_sizing is not None:
+        meta_label_base_request = sizing_base_request.model_copy(
+            update={"kelly_min_trades": best_sizing.kelly_min_trades, "kelly_multiplier": best_sizing.kelly_multiplier}
+        )
+
+    meta_label_points = (
+        sweep_meta_label_threshold(
+            exchange, model, meta_model, meta_label_base_request, meta_label_threshold_values,
+            lstm_model=lstm_model, online_model=online_model,
+        )
+        if meta_model is not None
+        else []
+    )
+    reliable_meta_label = [
+        p for p in meta_label_points if p.error is None and p.trades_closed >= MIN_RELIABLE_TRADES_FOR_OPTIMIZATION
+    ]
+    best_meta_label = max(reliable_meta_label, key=lambda p: p.total_pnl_pct) if reliable_meta_label else None
+
     recommended_open = best_confidence.open_confidence if best_confidence else base_request.open_confidence
     recommended_close = best_confidence.close_confidence if best_confidence else base_request.close_confidence
     recommended_min_trades = best_sizing.kelly_min_trades if best_sizing else base_request.kelly_min_trades
     recommended_multiplier = best_sizing.kelly_multiplier if best_sizing else base_request.kelly_multiplier
+    recommended_meta_threshold = (
+        best_meta_label.meta_label_act_threshold if best_meta_label else base_request.meta_label_act_threshold
+    )
 
     final_request = base_request.model_copy(
         update={
@@ -1049,6 +1138,7 @@ def run_periodic_optimization(
             "close_confidence": recommended_close,
             "kelly_min_trades": recommended_min_trades,
             "kelly_multiplier": recommended_multiplier,
+            "meta_label_act_threshold": recommended_meta_threshold,
         }
     )
     try:
@@ -1064,6 +1154,7 @@ def run_periodic_optimization(
         recommended_close_confidence=recommended_close,
         recommended_kelly_min_trades=recommended_min_trades,
         recommended_kelly_multiplier=recommended_multiplier,
+        recommended_meta_label_act_threshold=recommended_meta_threshold,
         recommended_trades_closed=final_report.trades_closed,
         recommended_win_rate_pct=final_report.win_rate_pct,
         recommended_total_pnl_pct=final_report.total_pnl_pct,
@@ -1072,6 +1163,7 @@ def run_periodic_optimization(
         current_close_confidence=base_request.close_confidence,
         current_kelly_min_trades=base_request.kelly_min_trades,
         current_kelly_multiplier=base_request.kelly_multiplier,
+        current_meta_label_act_threshold=base_request.meta_label_act_threshold,
         current_trades_closed=current_report.trades_closed,
         current_win_rate_pct=current_report.win_rate_pct,
         current_total_pnl_pct=current_report.total_pnl_pct,
