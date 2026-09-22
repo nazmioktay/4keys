@@ -26,7 +26,7 @@ class BinanceExchange(Exchange):
         # taramanın kendi periyodundan çok uzun sürmesine yol açabiliyordu.
         # `enableRateLimit=True` ccxt'nin kendi trafiğini borsanın izin
         # verdiği hıza göre otomatik aralıklandırmasını sağlar.
-        auth = {**auth, "enableRateLimit": True, "timeout": 15000}
+        auth = {**auth, "enableRateLimit": True, "timeout": 30000}
         self._spot = ccxt.binance(auth)
         self._futures = ccxt.binance({**auth, "options": {"defaultType": "future"}})
         if testnet:
@@ -251,6 +251,17 @@ class BinanceExchange(Exchange):
             }
         except Exception:  # noqa: BLE001 - order book verisi opsiyoneldir, hata ana akışı bozmamalı
             return None
+
+    def fetch_ticker_price(self, symbol: str, market_type: str = "future") -> float:
+        """Bir sembolün ŞU ANKİ son işlem fiyatını döner — herkese açık
+        veridir, kimlik doğrulama gerektirmez. `fetch_tickers`in TÜM
+        semboller için toplu haliyle KARIŞTIRILMASIN: burada tek sembol
+        için tek, ucuz bir istektir (ör. canlı işlem ekranında anlık fiyat
+        göstermek için)."""
+        client = self._client(market_type)
+        ticker = client.fetch_ticker(symbol)
+        last = ticker.get("last") or ticker.get("close")
+        return float(last)
 
     # ---- Kimlik doğrulamalı hesap/emir işlemleri ----
 

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../api.js";
 import ErrorBanner from "../components/ErrorBanner.jsx";
 import Loading from "../components/Loading.jsx";
@@ -94,6 +95,10 @@ export default function Settings() {
         <button className={security?.kill_switch?.active ? "secondary" : "danger secondary"} onClick={toggleKillSwitch}>
           {security?.kill_switch?.active ? "Kill Switch'i Kapat" : "Kill Switch'i Aktive Et"}
         </button>
+        <div style={{ height: 10 }} />
+        <Link to="/live-trading">
+          <button className="secondary" style={{ width: "100%" }}>Canlı İşlem Paneli →</button>
+        </Link>
       </div>
 
       <div className="card">

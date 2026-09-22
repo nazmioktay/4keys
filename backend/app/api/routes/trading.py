@@ -1,9 +1,22 @@
 from fastapi import APIRouter, HTTPException
 
+from app.exchanges import get_exchange
+from app.security.safety import MAX_LEVERAGE
 from app.trading.executor import LiveTradingDisabled, get_trading_exchange, place_live_order, set_live_leverage
 from app.trading.schemas import LeverageRequest, LeverageResult, OrderRequest, OrderResult
 
 router = APIRouter(prefix="/trading", tags=["trading"])
+
+
+@router.get("/price")
+def price(symbol: str, market_type: str = "future") -> dict:
+    """Herkese açık, kimlik doğrulamasız anlık fiyat — `.env`'deki hesap
+    anahtarlarına dokunmaz, canlı işlem kapıları kapalıyken de çalışır."""
+    try:
+        last = get_exchange("binance").fetch_ticker_price(symbol, market_type)
+    except Exception as exc:  # noqa: BLE001 - borsa/ağ hatası doğrudan mesaj olarak dönsün
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    return {"symbol": symbol, "last": last, "max_leverage": MAX_LEVERAGE}
 
 
 @router.get("/balance")

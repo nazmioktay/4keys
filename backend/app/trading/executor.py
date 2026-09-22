@@ -18,23 +18,37 @@ def _credentials_present() -> bool:
     return bool(settings.binance_api_key.get_secret_value()) and bool(settings.binance_api_secret.get_secret_value())
 
 
-def get_trading_exchange() -> BinanceExchange:
-    """Ayarlardaki kimlik bilgileriyle kimlik doğrulamalı Binance istemcisi oluşturur.
+_cached_exchange: BinanceExchange | None = None
 
-    NOT: Bu fonksiyonun kendisi hiçbir güvenlik kontrolü yapmaz (bakiye/pozisyon
-    okumak için kullanılabilir olmalı). Gerçek emir gönderme kontrolleri
-    `place_live_order` içindedir.
+
+def get_trading_exchange() -> BinanceExchange:
+    """Ayarlardaki kimlik bilgileriyle kimlik doğrulamalı Binance istemcisini
+    döner — süreç ömrü boyunca TEK bir örnek olarak önbelleğe alınır.
+
+    ÖNEMLİ: Her çağrıda yeni bir `BinanceExchange` (ve dolayısıyla yeni bir
+    ccxt istemcisi) oluşturmak, ccxt'nin `create_order`/`set_leverage`
+    içinde otomatik çağırdığı `load_markets()`in HER SEFERİNDE ~1.1MB'lık
+    `/fapi/v1/exchangeInfo`i sıfırdan çekip ayrıştırmasına (bu container'da
+    6-16sn arası sürüyor) yol açıyordu — art arda emir+kaldıraç gönderiminde
+    bu, ccxt'nin timeout'unu (bkz. `BinanceExchange.__init__`) aşıp
+    `RequestTimeout`a çarpabiliyordu. Tek örneği önbelleğe almak, ccxt'nin
+    kendi iç piyasa önbelleğinin (`self.markets`) süreç boyunca kalıcı
+    olmasını sağlar — ilk çağrıdan sonraki emirler bu pahalı çekimi
+    tekrarlamaz.
     """
+    global _cached_exchange
     if not _credentials_present():
         raise LiveTradingDisabled(
             "Binance API anahtarı tanımlı değil. FOURKEYS_BINANCE_API_KEY ve "
             "FOURKEYS_BINANCE_API_SECRET ortam değişkenlerini (.env) ayarlayın."
         )
-    return BinanceExchange(
-        api_key=settings.binance_api_key.get_secret_value(),
-        api_secret=settings.binance_api_secret.get_secret_value(),
-        testnet=settings.binance_testnet,
-    )
+    if _cached_exchange is None:
+        _cached_exchange = BinanceExchange(
+            api_key=settings.binance_api_key.get_secret_value(),
+            api_secret=settings.binance_api_secret.get_secret_value(),
+            testnet=settings.binance_testnet,
+        )
+    return _cached_exchange
 
 
 def _run_cheap_safety_gates(confirm: bool, confirm_message: str) -> None:

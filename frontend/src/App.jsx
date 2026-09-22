@@ -4,12 +4,14 @@ import PaperTrading from "./pages/PaperTrading.jsx";
 import Otopilot from "./pages/Otopilot.jsx";
 import Settings from "./pages/Settings.jsx";
 import Backtest from "./pages/Backtest.jsx";
+import LiveTrading from "./pages/LiveTrading.jsx";
 
 const TABS = [
   { to: "/", label: "Portföy", icon: "◔", end: true },
   { to: "/backtest", label: "Backtest", icon: "⏱" },
   { to: "/paper-trading", label: "Paper Trading", icon: "◫" },
   { to: "/otopilot", label: "Otopilot", icon: "◉" },
+  { to: "/live-trading", label: "Canlı İşlem", icon: "⚠" },
   { to: "/settings", label: "Ayarlar", icon: "⚙" },
 ];
 
@@ -22,6 +24,7 @@ export default function App() {
         <Route path="/otopilot" element={<Otopilot />} />
         <Route path="/backtest" element={<Backtest />} />
         <Route path="/settings" element={<Settings />} />
+        <Route path="/live-trading" element={<LiveTrading />} />
       </Routes>
 
       <nav className="bottom-nav">
