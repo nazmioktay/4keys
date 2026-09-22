@@ -10,6 +10,10 @@ class OrderRequest(BaseModel):
     amount: float = Field(..., gt=0, description="Sembol miktarı (quote değil, base varlık miktarı)")
     price: float | None = Field(default=None, description="Limit emirler için zorunlu")
     market_type: Literal["spot", "future"] = "future"
+    reduce_only: bool = Field(
+        default=False,
+        description="true ise emir yalnızca mevcut pozisyonu azaltabilir/kapatabilir — yeni/ters yönde pozisyon açamaz (Binance 'reduceOnly').",
+    )
     confirm: bool = Field(
         default=False,
         description="Gerçek emir göndermek için açıkça true olmalı. false ise istek reddedilir.",

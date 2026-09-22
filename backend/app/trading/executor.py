@@ -107,6 +107,7 @@ def place_live_order(request: OrderRequest) -> dict:
         amount=request.amount,
         price=request.price,
         market_type=request.market_type,
+        reduce_only=request.reduce_only,
     )
 
 

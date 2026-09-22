@@ -285,10 +285,12 @@ class BinanceExchange(Exchange):
         amount: float,
         price: float | None = None,
         market_type: str = "future",
+        reduce_only: bool = False,
     ) -> dict:
         self._require_auth()
         client = self._client(market_type)
-        return client.create_order(symbol, order_type, side, amount, price)
+        params = {"reduceOnly": True} if reduce_only and market_type == "future" else {}
+        return client.create_order(symbol, order_type, side, amount, price, params)
 
     def cancel_order(self, order_id: str, symbol: str, market_type: str = "future") -> dict:
         self._require_auth()

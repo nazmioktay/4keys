@@ -1,10 +1,12 @@
-import { NavLink, Route, Routes } from "react-router-dom";
+import { Navigate, NavLink, Route, Routes, useLocation } from "react-router-dom";
 import Portfolio from "./pages/Portfolio.jsx";
 import PaperTrading from "./pages/PaperTrading.jsx";
 import Otopilot from "./pages/Otopilot.jsx";
 import Settings from "./pages/Settings.jsx";
 import Backtest from "./pages/Backtest.jsx";
 import LiveTrading from "./pages/LiveTrading.jsx";
+import Login from "./pages/Login.jsx";
+import { auth } from "./api.js";
 
 const TABS = [
   { to: "/", label: "Portföy", icon: "◔", end: true },
@@ -15,7 +17,31 @@ const TABS = [
   { to: "/settings", label: "Ayarlar", icon: "⚙" },
 ];
 
+function RequireAuth({ children }) {
+  const location = useLocation();
+  if (!auth.getToken()) {
+    return <Navigate to="/login" replace state={{ from: location }} />;
+  }
+  return children;
+}
+
 export default function App() {
+  return (
+    <Routes>
+      <Route path="/login" element={<Login />} />
+      <Route
+        path="*"
+        element={
+          <RequireAuth>
+            <AppShell />
+          </RequireAuth>
+        }
+      />
+    </Routes>
+  );
+}
+
+function AppShell() {
   return (
     <div className="app-shell">
       <Routes>

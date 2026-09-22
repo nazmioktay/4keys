@@ -119,6 +119,19 @@ class Settings(BaseSettings):
     def cors_origins_list(self) -> list[str]:
         return [origin.strip() for origin in self.cors_origins.split(",") if origin.strip()]
 
+    # --- Giriş kontrolü (uygulama geneli tek yönetici hesabı) ---
+    # VPS'te herkese açık olduğu için eklendi: bu ikisi boşsa `/auth/login`
+    # 500 döner ve hiç kimse giriş yapamaz — kasıtlı "kapalı kap" davranışı,
+    # yanlışlıkla korumasız kalmaktansa erişilemez kalması tercih edilir.
+    # ASLA koda/git'e yazmayın; yalnızca ortam değişkeni / .env dosyasından okunur.
+    auth_username: str = ""
+    auth_password: SecretStr = SecretStr("")
+    # Token imzalamak için rastgele, uzun bir dize (ör. `openssl rand -hex 32`).
+    # Bu değişirse (veya süreç yeniden başlarsa ve rastgele üretilmişse) o ana
+    # kadar verilmiş tüm token'lar geçersiz kalır — herkes yeniden giriş yapmalı.
+    auth_secret_key: SecretStr = SecretStr("")
+    auth_token_ttl_hours: int = 168  # 7 gün
+
     # --- Binance canlı işlem (Modül 6 — API hazırlığı) ---
     # ASLA koda veya git'e yazmayın; yalnızca ortam değişkeni / .env dosyasından okunur.
     binance_api_key: SecretStr = SecretStr("")

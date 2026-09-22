@@ -1,10 +1,16 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-import { api } from "../api.js";
+import { Link, useNavigate } from "react-router-dom";
+import { api, auth } from "../api.js";
 import ErrorBanner from "../components/ErrorBanner.jsx";
 import Loading from "../components/Loading.jsx";
 
 export default function Settings() {
+  const navigate = useNavigate();
+  const logout = () => {
+    auth.clearToken();
+    navigate("/login", { replace: true });
+  };
+
   const [rules, setRules] = useState(null);
   const [security, setSecurity] = useState(null);
   const [scheduler, setScheduler] = useState(null);
@@ -161,6 +167,12 @@ export default function Settings() {
             <span className="row-value">{db.connected ? "başarılı" : "başarısız"}</span>
           </div>
         )}
+      </div>
+
+      <div className="card">
+        <button className="secondary" style={{ width: "100%" }} onClick={logout}>
+          Çıkış yap
+        </button>
       </div>
     </div>
   );

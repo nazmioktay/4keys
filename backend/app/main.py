@@ -7,8 +7,9 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette_exporter import PrometheusMiddleware, handle_metrics
 
-from app.api.routes import backtest, bank, bist, dca, engine, macro, ml, orderbook, portfolio, rl, scheduler, screener, security, strategy, trading
+from app.api.routes import auth, backtest, bank, bist, dca, engine, macro, ml, orderbook, portfolio, rl, scheduler, screener, security, strategy, trading
 from app.api.routes import db as db_routes
+from app.auth.middleware import AuthMiddleware
 from app.core.config import settings
 from app.db.session import init_db
 from app.scheduler.scheduler import start_scheduler, stop_scheduler
@@ -50,7 +51,11 @@ app = FastAPI(title="4keys", description="Algoritmik kripto trading platformu", 
 # Sıra önemli: CORSMiddleware önce eklenir (dıştaki katman), hata yakalama
 # middleware'i sonra eklenir (içteki katman) — böylece hata yanıtları da
 # CORS işleminden geçer. Starlette `add_middleware` her çağrıda listenin
-# başına ekler; bu yüzden SONRA eklenen İÇTE çalışır.
+# başına ekler; bu yüzden SONRA eklenen İÇTE çalışır. AuthMiddleware EN
+# İÇTE (routes'a en yakın) çalışsın diye ilk eklenen budur — hem CORS
+# preflight (OPTIONS) hem de olağandışı hatalar (UnhandledException) onu
+# sarmalar, 401 yanıtları da CORS başlıklarını alır.
+app.add_middleware(AuthMiddleware)
 app.add_middleware(UnhandledExceptionMiddleware)
 app.add_middleware(
     CORSMiddleware,
@@ -67,6 +72,7 @@ app.add_middleware(
 app.add_middleware(PrometheusMiddleware, app_name="4keys-backend", group_paths=True, prefix="starlette")
 app.add_route("/metrics", handle_metrics)
 
+app.include_router(auth.router)
 app.include_router(screener.router)
 app.include_router(ml.router)
 app.include_router(engine.router)
