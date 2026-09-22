@@ -1,0 +1,348 @@
+import { useEffect, useState } from "react";
+import { api } from "../api.js";
+import Loading from "../components/Loading.jsx";
+import ErrorBanner from "../components/ErrorBanner.jsx";
+
+function fmt(n, digits = 2) {
+  if (n === null || n === undefined || Number.isNaN(n)) return "-";
+  return n.toLocaleString("tr-TR", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+}
+
+export default function Otopilot() {
+  const [status, setStatus] = useState(null);
+  const [pnl, setPnl] = useState(null);
+  const [schedulerStatus, setSchedulerStatus] = useState(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [runningCycle, setRunningCycle] = useState(false);
+
+  const load = async () => {
+    setError("");
+    try {
+      const [s, p] = await Promise.all([api.get("/portfolio/status"), api.get("/portfolio/pnl")]);
+      setStatus(s);
+      setPnl(p);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadSchedulerStatus = async () => {
+    try {
+      setSchedulerStatus(await api.get("/scheduler/status"));
+    } catch {
+      // Sessizce yut — bu yalnızca bilgilendirici bir rozet, sayfanın asıl
+      // işlevini (pozisyon/PNL görüntüleme) engellemesin.
+      setSchedulerStatus(null);
+    }
+  };
+
+  useEffect(() => {
+    load();
+    loadSchedulerStatus();
+    // Zamanlayıcı durumu her 30sn'de bir tazelenir — "devam ediyor" rozetinin
+    // canlı kalması için (sayfa açık kalsa bile son çalışma zamanı ilerlesin).
+    const id = setInterval(loadSchedulerStatus, 30_000);
+    return () => clearInterval(id);
+  }, []);
+
+  const runCycle = async () => {
+    setRunningCycle(true);
+    setError("");
+    try {
+      await api.post("/engine/run-cycle", {});
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setRunningCycle(false);
+    }
+  };
+
+  if (loading) return <div className="page"><Loading /></div>;
+
+  return (
+    <div className="page">
+      <h1 className="page-title">Otopilot</h1>
+      <ErrorBanner message={error} />
+
+      <div className="card">
+        <div className="card-title">
+          Karar döngüsü
+          <button className="primary" style={{ marginLeft: "auto", padding: "6px 14px" }} onClick={runCycle} disabled={runningCycle}>
+            {runningCycle ? "Çalışıyor..." : "Şimdi Çalıştır"}
+          </button>
+        </div>
+        <p className="muted">
+          Zamanlayıcı zaten otomatik olarak periyodik çalıştırıyor (arka planda); burası anlık/manuel tetikleme içindir.
+        </p>
+        <SchedulerStatusBadge schedulerStatus={schedulerStatus} />
+      </div>
+
+      <PnlCard pnl={pnl} />
+      <OpenPositionsCard status={status} />
+      <ClosedHistoryCard status={status} />
+      <TradeHistoryCard />
+    </div>
+  );
+}
+
+function SchedulerStatusBadge({ schedulerStatus }) {
+  // Sadece "Şimdi Çalıştır" butonuna güvenmek yerine, zamanlayıcının
+  // ARKA PLANDA gerçekten periyodik çalışıp çalışmadığını `/scheduler/status`
+  // üzerinden gösterir — kullanıcı sayfayı her açtığında "çalışıyor mu,
+  // durdu mu?" diye merak edip terminalden loglara bakmak zorunda kalmasın.
+  if (!schedulerStatus) return null;
+
+  const job = schedulerStatus.jobs?.find((j) => j.job_id === "engine_cycle");
+  if (!schedulerStatus.enabled || !schedulerStatus.running) {
+    return (
+      <div className="pill neg" style={{ marginTop: 8 }}>
+        ⚠ Zamanlayıcı devre dışı — otopilot otomatik ilerlemiyor.
+      </div>
+    );
+  }
+  if (!job || job.run_count === 0) {
+    return (
+      <div className="muted" style={{ marginTop: 8 }}>
+        ⏳ Zamanlayıcı aktif, ilk karar döngüsü henüz çalışmadı — yakında beklenıyor.
+      </div>
+    );
+  }
+
+  const lastRunMs = job.last_run_at ? Date.now() - new Date(job.last_run_at).getTime() : null;
+  const staleThresholdMs = job.interval_seconds * 3 * 1000;
+  const isStale = lastRunMs !== null && lastRunMs > staleThresholdMs;
+  const minutesAgo = lastRunMs !== null ? Math.max(0, Math.round(lastRunMs / 60000)) : null;
+
+  if (isStale || job.ok === false) {
+    return (
+      <div className="pill neg" style={{ marginTop: 8 }}>
+        ⚠ Zamanlayıcı beklenenden uzun süredir çalışmamış görünüyor (son çalışma: {minutesAgo} dk önce)
+        {job.detail ? ` — ${job.detail}` : ""}.
+      </div>
+    );
+  }
+
+  return (
+    <div className="pill pos" style={{ marginTop: 8 }}>
+      🟢 Otopilot devam ediyor — son karar {minutesAgo === 0 ? "az önce" : `${minutesAgo} dk önce`}
+      {job.detail ? `: ${job.detail}` : ""}.
+    </div>
+  );
+}
+
+function PnlCard({ pnl }) {
+  if (!pnl) return null;
+  const rows = [
+    { label: "Bugün (son 24s)", w: pnl.daily },
+    { label: "Bu hafta (son 7g)", w: pnl.weekly },
+    { label: "Bu ay (son 30g)", w: pnl.monthly },
+    { label: "Toplam", w: pnl.total },
+  ];
+  return (
+    <div className="card">
+      <div className="card-title">PNL özeti</div>
+      {rows.map((r) => (
+        <div className="row" key={r.label}>
+          <div>
+            <div className="row-value">{r.label}</div>
+            <div className="muted">{r.w.trade_count} işlem · %{fmt(r.w.win_rate_pct)} kazanma</div>
+          </div>
+          <span className={"row-value " + (r.w.pnl_quote >= 0 ? "pos" : "neg")}>
+            {r.w.pnl_quote >= 0 ? "+" : ""}${fmt(r.w.pnl_quote)}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function OpenPositionsCard({ status }) {
+  return (
+    <div className="card">
+      <div className="card-title">
+        Açık pozisyonlar (kademeli durum)
+        <span className="pill">{status?.open_positions?.length ?? 0}</span>
+      </div>
+      {!status?.open_positions?.length && <div className="muted">Şu an açık pozisyon yok.</div>}
+      {status?.open_positions?.map((p) => (
+        <div className="row" key={p.symbol}>
+          <div>
+            <div className="row-value">{p.symbol}</div>
+            <div className="muted">
+              {p.direction === "long" ? "Long" : "Short"} · ${fmt(p.entry_price)} · alım {p.entry_fill_index}/{p.entry_tranche_count} dilim
+              {p.exit_fill_index > 0 && ` · satış ${p.exit_fill_index}/${p.exit_tranche_count} dilim`}
+            </div>
+          </div>
+          <div className="row-value">${fmt(p.size_quote)}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ClosedHistoryCard({ status }) {
+  return (
+    <div className="card">
+      <div className="card-title">Son kapanan işlemler (dilimler dahil)</div>
+      {!status?.closed_history?.length && <div className="muted">Henüz kapanan işlem yok.</div>}
+      {status?.closed_history?.slice().reverse().slice(0, 10).map((t, i) => (
+        <div className="row" key={i}>
+          <div>
+            <div className="row-value">
+              {t.symbol}
+              {t.tranche ? <span className="muted"> · dilim {t.tranche}</span> : null}
+            </div>
+            <div className="muted">${fmt(t.size_quote)}{t.partial ? " · kısmi" : ""}</div>
+          </div>
+          <span className={"row-value " + (t.pnl_pct >= 0 ? "pos" : "neg")}>
+            {t.pnl_pct >= 0 ? "+" : ""}{fmt(t.pnl_pct)}%
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+const DATE_RANGE_PRESETS = [
+  { key: "7d", label: "Son 7 gün", days: 7 },
+  { key: "30d", label: "Son 30 gün", days: 30 },
+  { key: "90d", label: "Son 90 gün", days: 90 },
+  { key: "all", label: "Tüm zamanlar", days: null },
+];
+
+function presetSinceIso(days) {
+  if (!days) return null;
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return d.toISOString();
+}
+
+function fmtDateTime(iso) {
+  if (!iso) return "-";
+  return new Date(iso).toLocaleString("tr-TR", { dateStyle: "short", timeStyle: "short" });
+}
+
+// Kalıcı veritabanından (süreç yeniden başlasa da kaybolmayan) TÜM işlem
+// geçmişini — kapanış NEDENİYLE (stop-loss / model sinyali / vb.) birlikte —
+// tarih aralığı ve sembole göre filtrelenebilir şekilde gösterir. Üstteki
+// `ClosedHistoryCard`dan FARKLI: bu, `PortfolioManager`in bellek-içi (süreç
+// yeniden başlayınca sıfırlanan) son 10 kaydı DEĞİL, `GET /db/trades`
+// üzerinden DB'deki TÜM geçmişi okur.
+function TradeHistoryCard() {
+  const [preset, setPreset] = useState("30d");
+  const [symbolFilter, setSymbolFilter] = useState("");
+  const [trades, setTrades] = useState([]);
+  const [summary, setSummary] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      setLoading(true);
+      setError("");
+      try {
+        const days = DATE_RANGE_PRESETS.find((p) => p.key === preset)?.days;
+        const since = presetSinceIso(days);
+        const params = new URLSearchParams();
+        if (since) params.set("since", since);
+        const tradesParams = new URLSearchParams(params);
+        tradesParams.set("limit", "300");
+        if (symbolFilter) tradesParams.set("symbol", symbolFilter);
+        const [t, s] = await Promise.all([
+          api.get(`/db/trades?${tradesParams.toString()}`),
+          api.get(`/db/trades/summary?${params.toString()}`),
+        ]);
+        if (cancelled) return;
+        setTrades(t || []);
+        setSummary(s || []);
+      } catch (err) {
+        if (!cancelled) setError(err.message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [preset, symbolFilter]);
+
+  const symbols = Array.from(new Set(summary.map((s) => s.symbol))).sort();
+
+  return (
+    <div className="card">
+      <div className="card-title">İşlem geçmişi (tüm zamanlar, açıklamalı)</div>
+
+      <div className="tabs">
+        {DATE_RANGE_PRESETS.map((p) => (
+          <button
+            key={p.key}
+            className={"tab-btn" + (preset === p.key ? " active" : "")}
+            onClick={() => setPreset(p.key)}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+
+      {symbols.length > 1 && (
+        <>
+          <label className="field">Ürüne göre filtrele</label>
+          <select value={symbolFilter} onChange={(e) => setSymbolFilter(e.target.value)}>
+            <option value="">Tüm ürünler</option>
+            {symbols.map((sym) => (
+              <option key={sym} value={sym}>{sym}</option>
+            ))}
+          </select>
+        </>
+      )}
+
+      <ErrorBanner message={error} />
+      {loading && <Loading />}
+
+      {!loading && !summary.length && <div className="muted">Bu aralıkta kapanmış işlem yok.</div>}
+
+      {!loading && summary.length > 0 && (
+        <>
+          <div className="muted" style={{ marginTop: 10, marginBottom: 4 }}>Ürüne göre özet</div>
+          {summary.map((s) => (
+            <div className="row" key={s.symbol}>
+              <div>
+                <div className="row-value">{s.symbol}</div>
+                <div className="muted">
+                  {s.trade_count} işlem · %{fmt(s.win_rate_pct)} kazanma · {fmtDateTime(s.first_opened_at)} → {fmtDateTime(s.last_closed_at)}
+                </div>
+              </div>
+              <span className={"row-value " + (s.total_pnl_quote >= 0 ? "pos" : "neg")}>
+                {s.total_pnl_quote >= 0 ? "+" : ""}${fmt(s.total_pnl_quote)}
+              </span>
+            </div>
+          ))}
+
+          <div className="muted" style={{ marginTop: 14, marginBottom: 4 }}>İşlem listesi ({trades.length})</div>
+          {trades.map((t) => (
+            <div className="row" key={t.id}>
+              <div>
+                <div className="row-value">
+                  {t.symbol} · {t.direction === "long" ? "Long" : "Short"}
+                </div>
+                <div className="muted">
+                  {fmtDateTime(t.closed_at)} · ${fmt(t.entry_price)} → ${fmt(t.exit_price)} · ${fmt(t.size_quote)}
+                </div>
+                {t.reason && <div className="muted">{t.reason}</div>}
+              </div>
+              <span className={"row-value " + (t.pnl_pct >= 0 ? "pos" : "neg")}>
+                {t.pnl_pct >= 0 ? "+" : ""}{fmt(t.pnl_pct)}%
+              </span>
+            </div>
+          ))}
+        </>
+      )}
+    </div>
+  );
+}
