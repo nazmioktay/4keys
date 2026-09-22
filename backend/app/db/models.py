@@ -302,3 +302,8 @@ class TradeRecord(Base):
     opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     closed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     source: Mapped[str] = mapped_column(String, default="engine")
+    # Kapanışın NEDEN tetiklendiği (ör. "stop-loss tetiklendi (seviye=...)",
+    # "model kapanış/ters sinyali") — `DecisionEngine`'in ürettiği `Action.reason`
+    # metni, `_add_missing_columns` ile var olan tabloya da eklenir (nullable,
+    # eski satırlar None kalır). Frontend'de işlem geçmişi/açıklama görünümü için.
+    reason: Mapped[str | None] = mapped_column(String, nullable=True)

@@ -221,10 +221,15 @@ class PortfolioManager:
         position.entry_fill_index += 1
         return position
 
-    def close_tranche(self, symbol: str, exit_price: float) -> dict | None:
+    def close_tranche(self, symbol: str, exit_price: float, reason: str | None = None) -> dict | None:
         """Bir satış dilimini kapatır. Pozisyonun tamamı henüz kapanmadıysa
         (`partial: True`) pozisyon açık kalır (küçültülmüş boyutla);
-        son dilimde YUVARLAMA ARTIĞI kalmaması için kalan tüm boyut kapatılır."""
+        son dilimde YUVARLAMA ARTIĞI kalmaması için kalan tüm boyut kapatılır.
+
+        `reason` (opsiyonel): kapanışı tetikleyen `DecisionEngine.Action.reason`
+        metni (ör. "stop-loss tetiklendi...", "model kapanış/ters sinyali") —
+        `trades` tablosuna kaydedilir, frontend'deki işlem geçmişi/açıklama
+        görünümünü besler."""
         position = self.positions.get(symbol)
         if position is None:
             return None
@@ -273,6 +278,7 @@ class PortfolioManager:
             "tranche": position.exit_fill_index,
             "opened_at": position.opened_at.isoformat(),
             "closed_at": datetime.now(timezone.utc).isoformat(),
+            "reason": reason,
         }
         self.closed_history.append(record)
         db.record_trade({k: v for k, v in record.items() if k not in ("partial", "tranche")})
@@ -284,7 +290,7 @@ class PortfolioManager:
         self._update_gauges()
         return record
 
-    def close(self, symbol: str, exit_price: float) -> dict | None:
+    def close(self, symbol: str, exit_price: float, reason: str | None = None) -> dict | None:
         """Pozisyonu TEK seferde, tamamen kapatır (kademeli değil) —
         geriye dönük uyumluluk ve "acil/tam kapat" ihtiyaçları için.
         Modelin normal kapanış sinyalleri `close_tranche` kullanmalı."""
@@ -294,7 +300,7 @@ class PortfolioManager:
         position.exit_tranche_weights = [1.0]
         position.exit_fill_index = 0
         position.exit_base_size_quote = None
-        return self.close_tranche(symbol, exit_price)
+        return self.close_tranche(symbol, exit_price, reason=reason or "manuel/acil kapatma")
 
     def _maybe_trip_kill_switch(self) -> None:
         """Güvenlik Protokolü Bölüm 9.3: günlük/oturum drawdown limiti

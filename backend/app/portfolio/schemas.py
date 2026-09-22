@@ -75,16 +75,24 @@ class RiskRules(BaseModel):
     )
 
     # --- Kademeli (aşamalı) alım/satım ---
-    # Bir pozisyon TEK seferde değil, birden çok "tranche" (dilim) halinde
-    # açılır/kapatılır — piyasayı tek büyük emirle hareket ettirmemek ve
-    # sinyalin bir sonraki döngüde de kalıcı olduğunu teyit etmek için.
+    # Bir pozisyon birden çok "tranche" (dilim) halinde de açılıp/kapanabilir
+    # — piyasayı tek büyük emirle hareket ettirmemek ve sinyalin bir sonraki
+    # döngüde de kalıcı olduğunu teyit etmek için. AMA: `app.backtest.system_runner`
+    # (canlı sistemin PnL/kazanma/drawdown performansını DOĞRULAYAN tek araç,
+    # bkz. README "karlılık") her sinyalde TEK giriş/TEK çıkış simüle eder —
+    # dilimleme hiç modellenmez. VARSAYILAN artık [1.0] (tek seferde aç/kapat)
+    # — böylece paper/canlı trading, backtest'in GERÇEKTEN ölçtüğü sistemle
+    # BİREBİR aynı çalışır (kullanıcı isteği: "aynı şekilde yapılıp
+    # yapılmadığını kontrol et, aynı çalıştığından emin ol"). Dilimleme
+    # isteyen kullanıcı bunu elle çok-elemanlı bir liste vererek açabilir —
+    # ama bu durumda karşılık gelen bir backtest ölçümü YOKTUR.
     entry_tranche_weights: list[float] = Field(
-        default_factory=lambda: [0.5, 0.5],
-        description="Hesaplanan tam pozisyon boyutunun her alım diliminde ne kadarının kullanılacağı (toplamı ~1.0 olmalı). Örn. [0.5, 0.5] = çeyrek Kelly ile hesaplanan tutarın yarısı ilk döngüde, yarısı sinyal bir sonraki döngüde de kalıcıysa açılır.",
+        default_factory=lambda: [1.0],
+        description="Hesaplanan tam pozisyon boyutunun her alım diliminde ne kadarının kullanılacağı (toplamı ~1.0 olmalı). Varsayılan [1.0] = tek seferde tam boyut (backtest'in simüle ettiği ile AYNI). Örn. [0.5, 0.5] ile kademeli açmak da mümkün ama bu backtest'te ÖLÇÜLMEDİ.",
     )
     exit_tranche_weights: list[float] = Field(
-        default_factory=lambda: [0.5, 0.5],
-        description="Kapanış sinyali geldiğinde pozisyonun ne kadarının her dilimde satılacağı (toplamı ~1.0 olmalı). Son dilim, yuvarlama artığı kalmaması için pozisyonun TAMAMINI kapatır.",
+        default_factory=lambda: [1.0],
+        description="Kapanış sinyali geldiğinde pozisyonun ne kadarının her dilimde satılacağı (toplamı ~1.0 olmalı). Varsayılan [1.0] = tek seferde tam kapat (backtest'in simüle ettiği ile AYNI). Son dilim, yuvarlama artığı kalmaması için pozisyonun TAMAMINI kapatır.",
     )
 
     # --- Confidence-weighted boyutlandırma ---

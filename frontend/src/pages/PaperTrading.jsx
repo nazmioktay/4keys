@@ -105,6 +105,7 @@ export default function PaperTrading() {
       <OpenPositionsCard status={status} />
       <TrancheSettingsCard rules={status?.rules} onSaved={load} />
       <ClosedHistoryCard status={status} />
+      <TradeHistoryCard />
     </div>
   );
 }
@@ -223,6 +224,148 @@ function ClosedHistoryCard({ status }) {
           </span>
         </div>
       ))}
+    </div>
+  );
+}
+
+const DATE_RANGE_PRESETS = [
+  { key: "7d", label: "Son 7 gün", days: 7 },
+  { key: "30d", label: "Son 30 gün", days: 30 },
+  { key: "90d", label: "Son 90 gün", days: 90 },
+  { key: "all", label: "Tüm zamanlar", days: null },
+];
+
+function presetSinceIso(days) {
+  if (!days) return null;
+  const d = new Date();
+  d.setDate(d.getDate() - days);
+  return d.toISOString();
+}
+
+function fmtDateTime(iso) {
+  if (!iso) return "-";
+  return new Date(iso).toLocaleString("tr-TR", { dateStyle: "short", timeStyle: "short" });
+}
+
+// Kalıcı veritabanından (süreç yeniden başlasa da kaybolmayan) TÜM işlem
+// geçmişini — kapanış NEDENİYLE (stop-loss / model sinyali / vb.) birlikte —
+// tarih aralığı ve sembole göre filtrelenebilir şekilde gösterir. Üstteki
+// `ClosedHistoryCard`dan FARKLI: bu, `PortfolioManager`in bellek-içi (süreç
+// yeniden başlayınca sıfırlanan) son 10 kaydı DEĞİL, `GET /db/trades`
+// üzerinden DB'deki TÜM geçmişi okur (kullanıcı isteği: "paper trade
+// üzerinde yapılan tüm işlemleri açıklamalarıyla, hangi tarihten itibaren
+// hangi üründen ne kadar PNL kazanıldığını görebilelim").
+function TradeHistoryCard() {
+  const [preset, setPreset] = useState("30d");
+  const [symbolFilter, setSymbolFilter] = useState("");
+  const [trades, setTrades] = useState([]);
+  const [summary, setSummary] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = async () => {
+      setLoading(true);
+      setError("");
+      try {
+        const days = DATE_RANGE_PRESETS.find((p) => p.key === preset)?.days;
+        const since = presetSinceIso(days);
+        const params = new URLSearchParams();
+        if (since) params.set("since", since);
+        const tradesParams = new URLSearchParams(params);
+        tradesParams.set("limit", "300");
+        if (symbolFilter) tradesParams.set("symbol", symbolFilter);
+        const [t, s] = await Promise.all([
+          api.get(`/db/trades?${tradesParams.toString()}`),
+          api.get(`/db/trades/summary?${params.toString()}`),
+        ]);
+        if (cancelled) return;
+        setTrades(t || []);
+        setSummary(s || []);
+      } catch (err) {
+        if (!cancelled) setError(err.message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    };
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [preset, symbolFilter]);
+
+  const symbols = Array.from(new Set(summary.map((s) => s.symbol))).sort();
+
+  return (
+    <div className="card">
+      <div className="card-title">İşlem geçmişi (tüm zamanlar, açıklamalı)</div>
+
+      <div className="tabs">
+        {DATE_RANGE_PRESETS.map((p) => (
+          <button
+            key={p.key}
+            className={"tab-btn" + (preset === p.key ? " active" : "")}
+            onClick={() => setPreset(p.key)}
+          >
+            {p.label}
+          </button>
+        ))}
+      </div>
+
+      {symbols.length > 1 && (
+        <>
+          <label className="field">Ürüne göre filtrele</label>
+          <select value={symbolFilter} onChange={(e) => setSymbolFilter(e.target.value)}>
+            <option value="">Tüm ürünler</option>
+            {symbols.map((sym) => (
+              <option key={sym} value={sym}>{sym}</option>
+            ))}
+          </select>
+        </>
+      )}
+
+      <ErrorBanner message={error} />
+      {loading && <Loading />}
+
+      {!loading && !summary.length && <div className="muted">Bu aralıkta kapanmış işlem yok.</div>}
+
+      {!loading && summary.length > 0 && (
+        <>
+          <div className="muted" style={{ marginTop: 10, marginBottom: 4 }}>Ürüne göre özet</div>
+          {summary.map((s) => (
+            <div className="row" key={s.symbol}>
+              <div>
+                <div className="row-value">{s.symbol}</div>
+                <div className="muted">
+                  {s.trade_count} işlem · %{fmt(s.win_rate_pct)} kazanma · {fmtDateTime(s.first_opened_at)} → {fmtDateTime(s.last_closed_at)}
+                </div>
+              </div>
+              <span className={"row-value " + (s.total_pnl_quote >= 0 ? "pos" : "neg")}>
+                {s.total_pnl_quote >= 0 ? "+" : ""}${fmt(s.total_pnl_quote)}
+              </span>
+            </div>
+          ))}
+
+          <div className="muted" style={{ marginTop: 14, marginBottom: 4 }}>İşlem listesi ({trades.length})</div>
+          {trades.map((t) => (
+            <div className="row" key={t.id}>
+              <div>
+                <div className="row-value">
+                  {t.symbol} · {t.direction === "long" ? "Long" : "Short"}
+                </div>
+                <div className="muted">
+                  {fmtDateTime(t.closed_at)} · ${fmt(t.entry_price)} → ${fmt(t.exit_price)} · ${fmt(t.size_quote)}
+                </div>
+                {t.reason && <div className="muted">{t.reason}</div>}
+              </div>
+              <span className={"row-value " + (t.pnl_pct >= 0 ? "pos" : "neg")}>
+                {t.pnl_pct >= 0 ? "+" : ""}{fmt(t.pnl_pct)}%
+              </span>
+            </div>
+          ))}
+        </>
+      )}
     </div>
   );
 }

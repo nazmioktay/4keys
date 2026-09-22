@@ -114,6 +114,7 @@ def record_trade(trade: dict) -> None:
                     opened_at=datetime.fromisoformat(trade["opened_at"]),
                     closed_at=datetime.fromisoformat(trade["closed_at"]),
                     source=trade.get("source", "engine"),
+                    reason=trade.get("reason"),
                 )
             )
     except SQLAlchemyError:
@@ -416,14 +417,31 @@ def get_all_orderbook_snapshots(limit: int = 200_000) -> pd.DataFrame:
         return pd.DataFrame(columns=["time", "symbol", *ORDERBOOK_SNAPSHOT_COLUMNS])
 
 
-def get_recent_trades(limit: int = 50) -> list[dict]:
+def get_recent_trades(
+    limit: int = 50,
+    symbol: str | None = None,
+    since: datetime | None = None,
+    until: datetime | None = None,
+) -> list[dict]:
+    """`symbol`/`since`/`until` opsiyonel filtrelerle son işlemleri döner
+    (kapanış zamanına göre en yeniden en eskiye). Frontend'deki "İşlem
+    Geçmişi" görünümü (bkz. `GET /db/trades`) bu filtrelerle tarih/sembol
+    bazlı kırılım yapar — bkz. `get_trade_pnl_summary` toplu özet için."""
     if not is_enabled():
         return []
     try:
         with session_scope() as db:
-            rows = db.execute(select(TradeRecord).order_by(TradeRecord.closed_at.desc()).limit(limit)).scalars().all()
+            query = select(TradeRecord).order_by(TradeRecord.closed_at.desc())
+            if symbol:
+                query = query.where(TradeRecord.symbol == symbol)
+            if since:
+                query = query.where(TradeRecord.closed_at >= since)
+            if until:
+                query = query.where(TradeRecord.closed_at <= until)
+            rows = db.execute(query.limit(limit)).scalars().all()
             return [
                 {
+                    "id": r.id,
                     "symbol": r.symbol,
                     "direction": r.direction,
                     "entry_price": r.entry_price,
@@ -434,12 +452,59 @@ def get_recent_trades(limit: int = 50) -> list[dict]:
                     "opened_at": r.opened_at.isoformat(),
                     "closed_at": r.closed_at.isoformat(),
                     "source": r.source,
+                    "reason": r.reason,
                 }
                 for r in rows
             ]
     except SQLAlchemyError:
         logger.exception("failed to read recent trades")
         return []
+
+
+def get_trade_pnl_summary(since: datetime | None = None, until: datetime | None = None) -> list[dict]:
+    """`since`/`until` aralığındaki (verilmezse TÜM geçmiş) kapanmış
+    işlemleri sembole göre gruplar — her sembol için işlem sayısı, kazanma
+    oranı, toplam/ortalama PnL. Frontend'deki "İşlem Geçmişi" sayfasının
+    özet panelini besler (bkz. `GET /db/trades/summary`)."""
+    if not is_enabled():
+        return []
+    try:
+        with session_scope() as db:
+            query = select(TradeRecord)
+            if since:
+                query = query.where(TradeRecord.closed_at >= since)
+            if until:
+                query = query.where(TradeRecord.closed_at <= until)
+            rows = db.execute(query).scalars().all()
+    except SQLAlchemyError:
+        logger.exception("failed to read trade pnl summary")
+        return []
+
+    by_symbol: dict[str, list] = {}
+    for r in rows:
+        by_symbol.setdefault(r.symbol, []).append(r)
+
+    summary = []
+    for symbol, trades in by_symbol.items():
+        wins = sum(1 for t in trades if t.pnl_pct > 0)
+        total_pnl_quote = sum(t.pnl_quote for t in trades)
+        total_pnl_pct = sum(t.pnl_pct for t in trades)
+        first_opened = min(t.opened_at for t in trades)
+        last_closed = max(t.closed_at for t in trades)
+        summary.append(
+            {
+                "symbol": symbol,
+                "trade_count": len(trades),
+                "win_rate_pct": round(wins / len(trades) * 100, 2) if trades else 0.0,
+                "total_pnl_quote": round(total_pnl_quote, 4),
+                "total_pnl_pct": round(total_pnl_pct, 3),
+                "avg_pnl_pct": round(total_pnl_pct / len(trades), 3) if trades else 0.0,
+                "first_opened_at": first_opened.isoformat(),
+                "last_closed_at": last_closed.isoformat(),
+            }
+        )
+    summary.sort(key=lambda s: s["total_pnl_quote"], reverse=True)
+    return summary
 
 
 def get_ohlcv(symbol: str, timeframe: str, limit: int) -> pd.DataFrame:

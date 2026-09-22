@@ -9,6 +9,7 @@ import pandas as pd
 from app.db import repository as db
 from app.exchanges.base import Exchange
 from app.exchanges.cache import fetch_ohlcv_cached
+from app.ml.advanced_indicators import average_true_range
 from app.ml.features import latest_feature_vector
 from app.ml.macro_features import latest_macro_feature_row
 from app.monitoring.metrics import record_ml_prediction
@@ -128,7 +129,15 @@ class DecisionEngine:
         open_confidence: float = 0.5,
         close_confidence: float = 0.45,
         portfolio: PortfolioManager | None = None,
-        assumed_stop_loss_pct: float = 3.0,
+        # GÜNCELLEME: önceden sabit bir yüzdelik (`assumed_stop_loss_pct=3.0`)
+        # kullanılıyordu — bu, `app.backtest.system_runner.run_system_backtest`in
+        # DOĞRULADIĞI risk yönetimiyle (ATR tabanlı, `SystemBacktestRequest.atr_*`)
+        # AYNI DEĞİLDİ: yani paper trading, backtest'in ölçtüğü sistemin
+        # birebir aynısı değildi (bkz. README "canlı vs backtest tutarlılığı").
+        # `atr_period`/`atr_stop_loss_mult` VARSAYILANLARI backtest'in
+        # varsayılanlarıyla (14 / 1.5×ATR) BİREBİR aynı tutulur.
+        atr_period: int = 14,
+        atr_stop_loss_mult: float = 1.5,
         meta_model: MetaLabelModel | None = None,
         lstm_model: LSTMSignalModel | None = None,
         online_model: OnlineSignalModel | None = None,
@@ -148,11 +157,13 @@ class DecisionEngine:
         self.open_confidence = open_confidence
         self.close_confidence = close_confidence
         self.portfolio = portfolio
-        self.assumed_stop_loss_pct = assumed_stop_loss_pct
+        self.atr_period = atr_period
+        self.atr_stop_loss_mult = atr_stop_loss_mult
         self.meta_label_act_threshold = meta_label_act_threshold
         self.meta_model = meta_model
         self.lstm_model = lstm_model
         self.online_model = online_model
+        self._last_atr: dict[str, float] = {}  # sembol -> en son hesaplanan ATR (bkz. `_predict`/`_open`)
         # Ensemble birleştirmesi (`_combine_predictions`) her modelin KENDİ
         # doğrulanmış becerisine (bkz. `app.ml.model_status`'a EN SON eğitimde
         # yazılan `balanced_accuracy`) göre ağırlıklandırılır — önceden
@@ -221,6 +232,12 @@ class DecisionEngine:
         feature_row = latest_feature_vector(ohlcv)
         if feature_row is None:
             return None
+        # Backtest'in ATR bazlı stop-loss'uyla (bkz. `_open`) AYNI formülle
+        # (`average_true_range`, AYNI varsayılan `atr_period`) hesaplanır.
+        atr_series = average_true_range(ohlcv, length=self.atr_period)
+        atr_now = float(atr_series.iloc[-1]) if len(atr_series) else 0.0
+        if pd.notna(atr_now) and atr_now > 0:
+            self._last_atr[symbol] = atr_now
         # Eğitimde kullanılan makro/order-book özellikleriyle tutarlı olması
         # için canlı tahmine de eklenir (bkz. `POST /ml/predict` aynı deseni
         # kullanır) — aksi halde model, eğitimde gördüğü 13 özelliği (11
@@ -340,11 +357,18 @@ class DecisionEngine:
             self.positions.open(symbol, direction, price)
             return None
 
-        stop_loss_price = (
-            price * (1 - self.assumed_stop_loss_pct / 100)
-            if direction == "long"
-            else price * (1 + self.assumed_stop_loss_pct / 100)
-        )
+        # ATR bazlı stop-loss — `app.backtest.system_runner.run_system_backtest`'in
+        # pozisyon açma bloğuyla AYNI formül: `price ± atr_stop_loss_mult * atr_now`.
+        # `_last_atr` bu döngüde `_predict` tarafından doldurulmuş olmalı; yoksa
+        # (ör. ilk çağrıda hiç ATR hesaplanamadıysa) eski sabit %3'e düşülür —
+        # tamamen stop-loz'suz açmaktansa daha güvenli bir yaklaşıklık.
+        atr_now = self._last_atr.get(symbol)
+        if atr_now is not None:
+            stop_loss_price = (
+                price - self.atr_stop_loss_mult * atr_now if direction == "long" else price + self.atr_stop_loss_mult * atr_now
+            )
+        else:
+            stop_loss_price = price * (1 - 0.03) if direction == "long" else price * (1 + 0.03)
         vix_zscore = None
         if self.portfolio.rules.vix_regime_filter_enabled:
             vix_zscore = latest_macro_feature_row().get("macro_vix_norm")
@@ -372,7 +396,7 @@ class DecisionEngine:
             return action
         if action.type == "close":
             if self.portfolio is not None:
-                record = self.portfolio.close_tranche(action.symbol, action.price)
+                record = self.portfolio.close_tranche(action.symbol, action.price, reason=action.reason)
                 if record and record.get("partial"):
                     remaining = self.portfolio.get(action.symbol)
                     total_tranches = len(remaining.exit_tranche_weights) if remaining else record["tranche"]

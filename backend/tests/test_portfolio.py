@@ -372,6 +372,62 @@ class _TrendExchange(Exchange):
         )
 
 
+def test_decision_engine_opens_with_atr_based_stop_loss_matching_backtest_formula():
+    """`DecisionEngine`'in stop-loss'u `app.backtest.system_runner.run_system_backtest`'in
+    pozisyon açma bloğuyla AYNI formülü (`price ± atr_stop_loss_mult * ATR`)
+    kullanmalı — eski sabit-yüzdelik (`assumed_stop_loss_pct`) davranışına
+    bir regresyon olmadığını doğrular. `_StaticOhlcvExchange`'in sabit
+    high-low=2 aralığı -> ATR(14) tam olarak 2.0'a yakınsar."""
+    from app.ml.advanced_indicators import average_true_range
+
+    portfolio = PortfolioManager(
+        starting_equity=1000,
+        rules=RiskRules(max_symbol_exposure_pct=100, max_total_exposure_pct=100),
+    )
+    engine = DecisionEngine(
+        exchange=_StaticOhlcvExchange(),
+        model=_FixedModel("long", 0.9),
+        positions=PaperPositionStore(),
+        timeframe="4h",
+        lookback=220,
+        open_confidence=0.6,
+        close_confidence=0.55,
+        portfolio=portfolio,
+    )
+
+    engine.run_cycle(["BTC/USDT"])
+    position = portfolio.get("BTC/USDT")
+    assert position is not None
+
+    ohlcv = _StaticOhlcvExchange().fetch_ohlcv("BTC/USDT", "4h", 220)
+    expected_atr = float(average_true_range(ohlcv, length=engine.atr_period).iloc[-1])
+    expected_stop = position.entry_price - engine.atr_stop_loss_mult * expected_atr
+    assert position.stop_loss_price == pytest.approx(expected_stop, rel=1e-6)
+
+
+def test_default_risk_rules_use_single_shot_tranches_matching_backtest():
+    """Backtest her sinyalde TEK giriş/TEK çıkış simüle eder (kademeli
+    alım/satım modellemez) — varsayılan `RiskRules` artık paper/canlı
+    trading'i de AYNI davranışa getirir (kullanıcı isteği: canlı ve
+    backtest'in aynı algoritmayla çalıştığından emin olmak)."""
+    rules = RiskRules()
+    assert rules.entry_tranche_weights == [1.0]
+    assert rules.exit_tranche_weights == [1.0]
+
+
+def test_close_action_reason_is_persisted_to_trade_record(monkeypatch):
+    import app.db.repository as db
+
+    captured = {}
+    monkeypatch.setattr(db, "record_trade", lambda trade: captured.update(trade))
+
+    portfolio = PortfolioManager(starting_equity=1000, rules=RiskRules())
+    portfolio.open("BTC/USDT", "long", entry_price=100, size_quote=100, stop_loss_price=90)
+    portfolio.close_tranche("BTC/USDT", exit_price=105, reason="model kapanış/ters sinyali")
+
+    assert captured.get("reason") == "model kapanış/ters sinyali"
+
+
 def test_decision_engine_uses_portfolio_manager_for_sizing():
     from app.ml.dataset import build_training_dataset
     from app.ml.model import SignalModel
