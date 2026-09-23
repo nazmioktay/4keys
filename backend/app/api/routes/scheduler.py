@@ -28,10 +28,6 @@ class SchedulerStatusResponse(BaseModel):
     jobs: list[JobInfo]
 
 
-_JOB_INTERVALS = {
-    SCREENER_REFRESH_JOB_ID: lambda: settings.screener_refresh_seconds,
-    ENGINE_CYCLE_JOB_ID: lambda: settings.engine_cycle_seconds,
-}
 _JOB_RUNNERS = {
     SCREENER_REFRESH_JOB_ID: job_refresh_screener,
     ENGINE_CYCLE_JOB_ID: job_run_engine_cycle,
@@ -40,29 +36,33 @@ _JOB_RUNNERS = {
 
 @router.get("/status", response_model=SchedulerStatusResponse)
 def scheduler_status() -> SchedulerStatusResponse:
+    """Zamanlayıcıda GERÇEKTEN kayıtlı olan TÜM işleri döner (önceden yalnızca
+    screener_refresh/engine_cycle'ı gösteren sabit bir listeydi — auto_retrain
+    (x4) ve periodic_optimization job'ları `ml_auto_retrain_enabled`/
+    `ml_periodic_optimization_enabled` açıkken zamanlayıcıya EKLENİYORDU ama
+    bu uç nokta onları hiç RAPORLAMIYORDU, "haftalık otomatik eğitim çalışıyor
+    mu?" gibi bir soruya API üzerinden yanıt verilemiyordu). Artık
+    `scheduler.get_jobs()`in döndürdüğü GERÇEK listeye dayanır."""
     scheduler = get_scheduler()
     run_status = status.get_all()
 
     jobs: list[JobInfo] = []
-    for job_id, interval_fn in _JOB_INTERVALS.items():
-        next_run_at = None
-        if scheduler is not None:
-            job = scheduler.get_job(job_id)
-            if job is not None and job.next_run_time is not None:
-                next_run_at = job.next_run_time.isoformat()
-        job_status = run_status.get(job_id)
-        jobs.append(
-            JobInfo(
-                job_id=job_id,
-                interval_seconds=interval_fn(),
-                next_run_at=next_run_at,
-                last_run_at=job_status.last_run_at if job_status else None,
-                ok=job_status.ok if job_status else None,
-                detail=job_status.detail if job_status else "",
-                run_count=job_status.run_count if job_status else 0,
-                error_count=job_status.error_count if job_status else 0,
+    if scheduler is not None:
+        for job in scheduler.get_jobs():
+            job_status = run_status.get(job.id)
+            interval = getattr(job.trigger, "interval", None)
+            jobs.append(
+                JobInfo(
+                    job_id=job.id,
+                    interval_seconds=int(interval.total_seconds()) if interval is not None else 0,
+                    next_run_at=job.next_run_time.isoformat() if job.next_run_time else None,
+                    last_run_at=job_status.last_run_at if job_status else None,
+                    ok=job_status.ok if job_status else None,
+                    detail=job_status.detail if job_status else "",
+                    run_count=job_status.run_count if job_status else 0,
+                    error_count=job_status.error_count if job_status else 0,
+                )
             )
-        )
 
     return SchedulerStatusResponse(enabled=settings.scheduler_enabled, running=scheduler is not None, jobs=jobs)
 
