@@ -2,26 +2,34 @@ import { useEffect, useState } from "react";
 import { api } from "../api.js";
 import Loading from "../components/Loading.jsx";
 import ErrorBanner from "../components/ErrorBanner.jsx";
+import RealPositionsCard from "../components/RealPositionsCard.jsx";
 
 function fmt(n, digits = 2) {
   if (n === null || n === undefined || Number.isNaN(n)) return "-";
-  return n.toLocaleString("tr-TR", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+  return Number(n).toLocaleString("tr-TR", { minimumFractionDigits: digits, maximumFractionDigits: digits });
 }
 
 export default function Portfolio() {
-  const [status, setStatus] = useState(null);
   const [security, setSecurity] = useState(null);
+  const [balance, setBalance] = useState(null);
+  const [balanceError, setBalanceError] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
   const load = async () => {
     setError("");
+    setBalanceError("");
     try {
-      const [p, s] = await Promise.all([api.get("/portfolio/status"), api.get("/security/status")]);
-      setStatus(p);
+      const s = await api.get("/security/status");
       setSecurity(s);
     } catch (err) {
       setError(err.message);
+    }
+    try {
+      const b = await api.get("/trading/balance?market_type=future");
+      setBalance(b);
+    } catch (err) {
+      setBalanceError(err.message);
     } finally {
       setLoading(false);
     }
@@ -33,14 +41,20 @@ export default function Portfolio() {
 
   if (loading) return <div className="page"><Loading /></div>;
 
-  const pnl = status ? status.equity - status.starting_equity : 0;
-  const pnlPct = status && status.starting_equity ? (pnl / status.starting_equity) * 100 : 0;
-  const isUp = pnl >= 0;
+  const info = balance?.info || {};
+  const walletBalance = Number(info.totalWalletBalance ?? balance?.total?.USDT ?? 0);
+  const unrealizedPnl = Number(info.totalUnrealizedProfit ?? 0);
+  const marginBalance = Number(info.totalMarginBalance ?? walletBalance + unrealizedPnl);
+  const availableBalance = Number(info.availableBalance ?? 0);
+  const isUp = unrealizedPnl >= 0;
+  const gatesOpen = security?.live_trading_enabled && !security?.kill_switch?.active;
 
   return (
     <div className="page">
       <h1 className="page-title">Portföy</h1>
+      <p className="muted">Gerçek Binance hesabı (Futures) — paper trading/otopilot simülasyonları ayrı sekmelerde.</p>
       <ErrorBanner message={error} />
+      <ErrorBanner message={balanceError} />
 
       {security?.kill_switch?.active && (
         <div className="banner error">
@@ -48,81 +62,23 @@ export default function Portfolio() {
         </div>
       )}
 
-      {status && (
-        <div className="card">
-          <div className="card-title">Toplam değer</div>
-          <div className="value-lg">${fmt(status.equity)}</div>
-          <div className={isUp ? "pos" : "neg"}>
-            {isUp ? "+" : ""}${fmt(pnl)} · {isUp ? "+" : ""}{fmt(pnlPct)}% (oturum)
-          </div>
-        </div>
-      )}
-
       <div className="card">
-        <div className="card-title">
-          Açık pozisyonlar
-          <span className="pill">{status?.open_positions?.length ?? 0}</span>
+        <div className="card-title">Toplam değer (marjin bakiyesi)</div>
+        <div className="value-lg">${fmt(marginBalance)}</div>
+        <div className={isUp ? "pos" : "neg"}>
+          {isUp ? "+" : ""}${fmt(unrealizedPnl)} açık pozisyon P&L
         </div>
-        {!status?.open_positions?.length && <div className="muted">Şu an açık pozisyon yok.</div>}
-        {status?.open_positions?.map((p) => (
-          <div className="row" key={p.symbol}>
-            <div>
-              <div className="row-value">{p.symbol}</div>
-              <div className="muted">{p.direction === "long" ? "Long" : "Short"} · ${fmt(p.entry_price)}</div>
-            </div>
-            <div className="row-value">${fmt(p.size_quote)}</div>
-          </div>
-        ))}
-      </div>
-
-      <div className="card">
-        <div className="card-title">İşlem istatistikleri</div>
-        <div className="row">
-          <span className="row-label">Toplam işlem</span>
-          <span className="row-value">{status?.trade_stats?.num_trades ?? 0}</span>
+        <div className="row" style={{ marginTop: 10 }}>
+          <span className="row-label">Cüzdan bakiyesi</span>
+          <span className="row-value">${fmt(walletBalance)}</span>
         </div>
         <div className="row">
-          <span className="row-label">Kazanma oranı</span>
-          <span className="row-value">{fmt(status?.trade_stats?.win_rate_pct)}%</span>
-        </div>
-        <div className="row">
-          <span className="row-label">Ort. kazanç</span>
-          <span className="row-value pos">+{fmt(status?.trade_stats?.avg_win_pct)}%</span>
-        </div>
-        <div className="row">
-          <span className="row-label">Ort. kayıp</span>
-          <span className="row-value neg">{fmt(status?.trade_stats?.avg_loss_pct)}%</span>
+          <span className="row-label">Kullanılabilir bakiye</span>
+          <span className="row-value">${fmt(availableBalance)}</span>
         </div>
       </div>
 
-      <div className="card">
-        <div className="card-title">Son kapanan işlemler</div>
-        {!status?.closed_history?.length && <div className="muted">Henüz kapanan işlem yok.</div>}
-        {status?.closed_history?.slice().reverse().slice(0, 8).map((t, i) => (
-          <div className="row" key={i}>
-            <span className="row-label">{t.symbol}</span>
-            <span className={"row-value " + (t.pnl_pct >= 0 ? "pos" : "neg")}>
-              {t.pnl_pct >= 0 ? "+" : ""}{fmt(t.pnl_pct)}%
-            </span>
-          </div>
-        ))}
-      </div>
-
-      <div className="card">
-        <div className="card-title">Risk kuralları</div>
-        <div className="row">
-          <span className="row-label">Boyutlandırma</span>
-          <span className="row-value">{status?.rules?.position_sizing_method === "kelly" ? "Kelly" : "Sabit risk"}</span>
-        </div>
-        <div className="row">
-          <span className="row-label">İşlem başına risk</span>
-          <span className="row-value">%{status?.rules?.max_risk_per_trade_pct}</span>
-        </div>
-        <div className="row">
-          <span className="row-label">Günlük zarar limiti</span>
-          <span className="row-value">%{status?.rules?.daily_loss_limit_pct}</span>
-        </div>
-      </div>
+      <RealPositionsCard gatesOpen={gatesOpen} />
     </div>
   );
 }
