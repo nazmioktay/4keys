@@ -116,28 +116,45 @@ def place_live_order(request: OrderRequest) -> dict:
     # TP/SL yalnızca POZİSYON AÇAN/ARTIRAN ana emirlere anlamlıdır — kapatma
     # (reduce_only) emrinde zaten ters yönde bir emirdir, tekrar TP/SL
     # eklemek anlamsız/tehlikeli olurdu (bkz. aşağıdaki close_side mantığı).
+    #
+    # ÖNEMLİ: ana emir (entry) burada ZATEN BAŞARIYLA gönderilmiş durumda —
+    # aşağıdaki SL/TP çağrılarından biri istisna fırlatırsa (ör. Binance
+    # -2021 "would immediately trigger"), bunu YUKARI FIRLATMAK yanlış:
+    # çağıran taraf genel bir 502 görür ve pozisyonun GERÇEKTEN AÇILDIĞINI
+    # hiç öğrenemez — "emir başarısız" sanıp tekrar denerse kazara ikinci
+    # bir pozisyon açabilir. Bu yüzden her SL/TP denemesi ayrı ayrı
+    # yakalanır; başarısız olan `error` alanıyla birlikte sonuca eklenir,
+    # entry sonucu HER ZAMAN döner.
     result: dict = {"entry": entry}
     close_side = "sell" if request.side == "buy" else "buy"
     if request.stop_loss_price and not request.reduce_only:
         logger.warning("LIVE STOP LOSS: %s %s stopPrice=%s", request.symbol, close_side, request.stop_loss_price)
-        result["stop_loss"] = exchange.place_conditional_order(
-            symbol=request.symbol,
-            side=close_side,
-            amount=request.amount,
-            stop_price=request.stop_loss_price,
-            kind="stop_loss",
-            market_type=request.market_type,
-        )
+        try:
+            result["stop_loss"] = exchange.place_conditional_order(
+                symbol=request.symbol,
+                side=close_side,
+                amount=request.amount,
+                stop_price=request.stop_loss_price,
+                kind="stop_loss",
+                market_type=request.market_type,
+            )
+        except Exception as exc:  # noqa: BLE001 - entry zaten gitti, hatayı sonuca göm, yeniden fırlatma
+            logger.exception("stop-loss order failed after entry succeeded")
+            result["stop_loss_error"] = str(exc)
     if request.take_profit_price and not request.reduce_only:
         logger.warning("LIVE TAKE PROFIT: %s %s stopPrice=%s", request.symbol, close_side, request.take_profit_price)
-        result["take_profit"] = exchange.place_conditional_order(
-            symbol=request.symbol,
-            side=close_side,
-            amount=request.amount,
-            stop_price=request.take_profit_price,
-            kind="take_profit",
-            market_type=request.market_type,
-        )
+        try:
+            result["take_profit"] = exchange.place_conditional_order(
+                symbol=request.symbol,
+                side=close_side,
+                amount=request.amount,
+                stop_price=request.take_profit_price,
+                kind="take_profit",
+                market_type=request.market_type,
+            )
+        except Exception as exc:  # noqa: BLE001 - entry (ve olası stop_loss) zaten gitti, hatayı sonuca göm
+            logger.exception("take-profit order failed after entry succeeded")
+            result["take_profit_error"] = str(exc)
     return result
 
 

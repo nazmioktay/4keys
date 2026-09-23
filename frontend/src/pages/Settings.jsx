@@ -32,6 +32,12 @@ function PaperTradingResetCard({ portfolio, onReset }) {
         clear_history: clearHistory,
       });
       setArmed(false);
+      if (!res?.status) {
+        // Backend eski sürümdeyse (henüz yeniden derlenmemişse) `status`
+        // sarmalanmadan doğrudan eski şekilde dönebilir — bu durumda çökmek
+        // yerine anlaşılır bir hata göster.
+        throw new Error("Beklenmeyen yanıt biçimi — backend güncel değil olabilir, birkaç dakika sonra tekrar deneyin.");
+      }
       setResultMsg(
         `Sıfırlandı — yeni bakiye $${fmt(res.status.equity)}` +
           (clearHistory ? `, ${res.trades_deleted} kalıcı işlem kaydı silindi.` : " (kalıcı geçmiş korundu).")

@@ -325,6 +325,25 @@ function OrderForm({ gatesOpen, maxLeverage, onOrderPlaced }) {
   const baseAmount = effectivePrice ? Number(usdtAmount) / effectivePrice : null;
   const liquidationPrice = isFuture ? estimateLiquidationPrice(effectivePrice, leverage, direction) : null;
 
+  // Binance, tetikleme fiyatı zaten geçilmiş bir SL/TP emrini -2021 "Order
+  // would immediately trigger" ile reddeder. Bunu sunucuya göndermeden ÖNCE
+  // yakalamak, hem net bir Türkçe hata mesajı verir hem de "giriş emri
+  // başarılı oldu ama SL/TP başarısız oldu" gibi kafa karıştırıcı kısmi
+  // başarı durumlarını baştan önler.
+  const slTpError = (() => {
+    if (!effectivePrice) return "";
+    const sl = Number(stopLossPrice) || null;
+    const tp = Number(takeProfitPrice) || null;
+    if (direction === "long") {
+      if (sl && sl >= effectivePrice) return "Long pozisyonda stop-loss, güncel/limit fiyatın ALTINDA olmalı.";
+      if (tp && tp <= effectivePrice) return "Long pozisyonda take-profit, güncel/limit fiyatın ÜSTÜNDE olmalı.";
+    } else {
+      if (sl && sl <= effectivePrice) return "Short pozisyonda stop-loss, güncel/limit fiyatın ÜSTÜNDE olmalı.";
+      if (tp && tp >= effectivePrice) return "Short pozisyonda take-profit, güncel/limit fiyatın ALTINDA olmalı.";
+    }
+    return "";
+  })();
+
   const submit = async () => {
     setError("");
     setResult(null);
@@ -357,7 +376,7 @@ function OrderForm({ gatesOpen, maxLeverage, onOrderPlaced }) {
     }
   };
 
-  const canSubmit = gatesOpen && confirmChecked && baseAmount > 0 && !sending;
+  const canSubmit = gatesOpen && confirmChecked && baseAmount > 0 && !sending && !slTpError;
 
   return (
     <div className="card">
@@ -465,6 +484,7 @@ function OrderForm({ gatesOpen, maxLeverage, onOrderPlaced }) {
           <div className="muted">
             Girilirse, ana emir dolduktan sonra ayrı bir reduceOnly STOP_MARKET/TAKE_PROFIT_MARKET emri gönderilir (pozisyonun tamamını kapatır).
           </div>
+          {slTpError && <div className="pill danger" style={{ marginTop: 8 }}>{slTpError}</div>}
         </>
       )}
 
@@ -488,6 +508,13 @@ function OrderForm({ gatesOpen, maxLeverage, onOrderPlaced }) {
       {result && (
         <div className="card" style={{ marginTop: 14, background: "var(--surface-2)" }}>
           <div className="card-title">Emir sonucu</div>
+          {result.raw?.entry && <p className="pos">✓ Ana emir gönderildi — pozisyon açıldı/değişti.</p>}
+          {result.raw?.stop_loss_error && (
+            <p className="neg">⚠ Stop-loss emri BAŞARISIZ oldu: {result.raw.stop_loss_error} — pozisyon şu an bu korumadan yoksun, manuel kontrol edin.</p>
+          )}
+          {result.raw?.take_profit_error && (
+            <p className="neg">⚠ Take-profit emri BAŞARISIZ oldu: {result.raw.take_profit_error} — pozisyon şu an bu korumadan yoksun, manuel kontrol edin.</p>
+          )}
           <pre style={{ whiteSpace: "pre-wrap", fontSize: 12, margin: 0 }}>{JSON.stringify(result.raw, null, 2)}</pre>
         </div>
       )}
