@@ -53,6 +53,19 @@ class Exchange(ABC):
         `app.backtest.data.fetch_full_history`) bunu kullanır.
         """
 
+    def fetch_market_limits(self, symbol: str, market_type: str) -> dict | None:
+        """Bir sembolün miktar/fiyat hassasiyeti ve asgari emir sınırlarını
+        döner: `{"amount_step": float, "amount_min": float, "price_tick":
+        float, "cost_min": float | None}` — borsa bunları reddetmeden ÖNCE
+        emri buna göre yuvarlamak/doğrulamak için (bkz. `app.trading.executor`
+        ve paper trading motorunun `app.engine.decision` kullanımı).
+
+        Varsayılan (geriye dönük uyumlu) uygulama `None` döner — yalnızca
+        gerçek limit bilgisi sağlayabilen borsalar (ör. Binance) bunu
+        override eder; `None` dönerse çağıran taraf hiç doğrulama
+        yapamayacağını anlar (borsanın kendi reddi son çare olarak kalır)."""
+        return None
+
     def fetch_open_interest(self, symbol: str) -> dict | None:
         """Perpetual futures'a özgü açık pozisyon (open interest) verisinin
         ŞU ANKİ anlık görüntüsünü döner: `{"open_interest": float,

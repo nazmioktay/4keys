@@ -1,6 +1,7 @@
 import logging
 
 from app.core.config import settings
+from app.exchanges import get_exchange
 from app.exchanges.binance import BinanceExchange
 from app.security import kill_switch
 from app.security.safety import check_withdrawals_disabled, enforce_leverage_cap
@@ -71,6 +72,40 @@ def _verify_withdrawals_disabled(exchange: BinanceExchange) -> None:
             raise LiveTradingDisabled(message)
 
 
+def _validate_order_limits(request: OrderRequest) -> None:
+    """Borsanın LOT_SIZE/MIN_NOTIONAL/PRICE_FILTER kısıtlarına göre emri
+    Binance'e göndermeden ÖNCE doğrular — frontend'de AYNI kontrol zaten
+    var (bkz. `LiveTrading.jsx`), ama sunucu tarafında da tekrarlanır (bu
+    kod tabanının genel deseni: leverage tavanı gibi güvenlik kontrolleri
+    hiçbir zaman yalnızca istemciye bırakılmaz). Limit bilgisi alınamazsa
+    (`None`) sessizce atlanır — borsanın kendi reddi zaten son çare.
+    `reduce_only` emirlerde asgari emir DEĞERİ (cost_min) kontrol edilmez:
+    küçük kalan bir pozisyonu TAMAMEN kapatmak, o kalıntı asgarinin
+    altında olsa bile mümkün olmalı."""
+    limits = get_exchange("binance").fetch_market_limits(request.symbol, request.market_type)
+    if limits is None:
+        return
+
+    amount_min = limits["amount_min"]
+    if request.amount < amount_min:
+        raise ValueError(f"Miktar ({request.amount}) borsanın asgari işlem miktarının ({amount_min}) altında.")
+
+    step = limits["amount_step"]
+    if step:
+        remainder = abs(round(request.amount / step) * step - request.amount)
+        if remainder > step * 1e-6:
+            rounded = round(request.amount / step) * step
+            raise ValueError(f"Miktar, borsanın adım büyüklüğünün ({step}) katı olmalı — ör. {rounded:g}.")
+
+    if not request.reduce_only and limits["cost_min"] is not None:
+        effective_price = request.price
+        if effective_price is None:
+            effective_price = get_exchange("binance").fetch_ticker_price(request.symbol, request.market_type)
+        cost = request.amount * effective_price
+        if cost < limits["cost_min"]:
+            raise ValueError(f"Emir değeri (${cost:.2f}) borsanın asgari emir değerinin (${limits['cost_min']:g}) altında.")
+
+
 def place_live_order(request: OrderRequest) -> dict:
     """Gerçek borsaya emir gönderir — sırayla şu güvenlik kapılarından geçer:
 
@@ -86,6 +121,7 @@ def place_live_order(request: OrderRequest) -> dict:
     """
     if request.order_type == "limit" and request.price is None:
         raise ValueError("Limit emir için price zorunludur.")
+    _validate_order_limits(request)
 
     _run_cheap_safety_gates(request.confirm, "İstekte confirm=true olmadan gerçek emir gönderilmez.")
     exchange = get_trading_exchange()

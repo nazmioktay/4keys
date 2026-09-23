@@ -380,6 +380,24 @@ class DecisionEngine:
             reason = "; ".join(decision.reasons) or "risk kuralları nedeniyle reddedildi"
             return Action(symbol, "blocked", reason, price, 0.0)
 
+        # Paper trading, borsanın MIN_NOTIONAL kısıtını hiç GÖRMEZ (bkz.
+        # `app.trading.executor._validate_order_limits`, canlı emirlerde
+        # AYNI kontrol var) — bu kontrol olmadan, gerçek hesapta Binance'in
+        # anında reddedeceği kadar küçük bir pozisyon paper'da sorunsuz
+        # "başarılı" görünüp performans istatistiklerini olduğundan
+        # gerçekçi/iyi gösterebilir. Limit bilgisi alınamazsa (`None`)
+        # sessizce atlanır.
+        limits = self.exchange.fetch_market_limits(symbol, "future")
+        if limits and limits.get("cost_min") and decision.size_quote < limits["cost_min"]:
+            return Action(
+                symbol,
+                "blocked",
+                f"hesaplanan pozisyon büyüklüğü (${decision.size_quote:.2f}) borsanın asgari emir değerinin "
+                f"(${limits['cost_min']:g}) altında — gerçek hesapta bu boyutta açılamazdı",
+                price,
+                confidence or 0.0,
+            )
+
         self.portfolio.open(symbol, direction, price, decision.size_quote, stop_loss_price=stop_loss_price)
         return None
 

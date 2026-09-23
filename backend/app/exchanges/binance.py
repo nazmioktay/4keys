@@ -271,6 +271,32 @@ class BinanceExchange(Exchange):
         last = ticker.get("last") or ticker.get("close")
         return float(last)
 
+    def fetch_market_limits(self, symbol: str, market_type: str = "future") -> dict | None:
+        """ccxt'nin `load_markets()` ile önbelleğe aldığı sembol filtrelerinden
+        (Binance'in LOT_SIZE/MIN_NOTIONAL/PRICE_FILTER karşılığı) miktar/fiyat
+        hassasiyeti ve asgari emir sınırlarını çıkarır — herkese açık veridir,
+        kimlik doğrulama gerektirmez. `limits.cost.min` her zaman dolu
+        olmayabilir (bazı sembollerde borsa bunu ayrıca belirtmez); o durumda
+        `cost_min=None` döner, çağıran taraf yalnızca miktar/adım kontrolüyle
+        yetinir."""
+        client = self._client(market_type)
+        client.load_markets()
+        market = client.market(symbol)
+        precision = market.get("precision", {})
+        limits = market.get("limits", {})
+        amount_step = precision.get("amount")
+        amount_min = (limits.get("amount") or {}).get("min") or amount_step
+        price_tick = precision.get("price")
+        cost_min = (limits.get("cost") or {}).get("min")
+        if amount_step is None or amount_min is None or price_tick is None:
+            return None
+        return {
+            "amount_step": float(amount_step),
+            "amount_min": float(amount_min),
+            "price_tick": float(price_tick),
+            "cost_min": float(cost_min) if cost_min is not None else None,
+        }
+
     # ---- Kimlik doğrulamalı hesap/emir işlemleri ----
 
     def fetch_balance(self, market_type: str = "future") -> dict:

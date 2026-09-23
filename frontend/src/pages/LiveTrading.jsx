@@ -277,6 +277,7 @@ function OrderForm({ gatesOpen, maxLeverage, onOrderPlaced }) {
   const [confirmChecked, setConfirmChecked] = useState(false);
 
   const [price, setPrice] = useState(null);
+  const [limits, setLimits] = useState(null);
   const [priceError, setPriceError] = useState("");
   const [priceLoading, setPriceLoading] = useState(false);
 
@@ -296,8 +297,10 @@ function OrderForm({ gatesOpen, maxLeverage, onOrderPlaced }) {
     try {
       const res = await api.get(`/trading/price?symbol=${encodeURIComponent(symbol)}&market_type=${marketType}`);
       setPrice(res.last);
+      setLimits(res.limits);
     } catch (err) {
       setPrice(null);
+      setLimits(null);
       setPriceError(err.message);
     } finally {
       setPriceLoading(false);
@@ -324,8 +327,35 @@ function OrderForm({ gatesOpen, maxLeverage, onOrderPlaced }) {
 
   const isClose = mode === "close";
   const effectivePrice = orderType === "limit" && Number(limitPrice) > 0 ? Number(limitPrice) : price;
-  const baseAmount = effectivePrice ? Number(usdtAmount) / effectivePrice : null;
+  const rawAmount = effectivePrice ? Number(usdtAmount) / effectivePrice : null;
+  // Borsa, miktarın kendi "adım büyüklüğünün" (ör. BTC için 0,001) tam katı
+  // olmasını ister — aksi halde "precision" hatasıyla reddeder. Girilen USDT
+  // tutarından bölünerek bulunan miktar neredeyse hiçbir zaman tam bir kat
+  // olmadığından, göndermeden önce AŞAĞI yuvarlanır (yukarı yuvarlamak,
+  // kullanıcının istediğinden fazla harcamasına yol açardı).
+  const baseAmount =
+    rawAmount && limits?.amount_step ? Math.floor(rawAmount / limits.amount_step) * limits.amount_step : rawAmount;
   const liquidationPrice = isFuture && !isClose ? estimateLiquidationPrice(effectivePrice, leverage, direction) : null;
+
+  // Binance'in LOT_SIZE/MIN_NOTIONAL reddini (belirsiz İngilizce hata metni)
+  // yaşamadan önce, girilen USDT tutarının borsanın asgari miktar/emir
+  // değerini karşılayıp karşılamadığını burada, gönderilmeden ÖNCE kontrol
+  // eder. Kapatma modunda asgari emir DEĞERİ kontrol edilmez (bkz. backend
+  // `_validate_order_limits` — küçük bir kalıntıyı TAMAMEN kapatmak hep
+  // mümkün olmalı), yalnızca miktar sıfır olmasın diye asgari miktar bakılır.
+  const limitsError = (() => {
+    if (!limits || !baseAmount) return "";
+    if (baseAmount < limits.amount_min) {
+      return `Miktar çok düşük — en az ${limits.amount_min} ${symbol.split("/")[0]} olmalı (USDT tutarını artır).`;
+    }
+    if (!isClose && limits.cost_min && effectivePrice) {
+      const cost = baseAmount * effectivePrice;
+      if (cost < limits.cost_min) {
+        return `Emir değeri ($${fmt(cost, 2)}) borsanın asgari emir değerinin ($${fmt(limits.cost_min, 2)}) altında.`;
+      }
+    }
+    return "";
+  })();
 
   // Binance, tetikleme fiyatı zaten geçilmiş bir SL/TP emrini -2021 "Order
   // would immediately trigger" ile reddeder. Bunu sunucuya göndermeden ÖNCE
@@ -387,7 +417,7 @@ function OrderForm({ gatesOpen, maxLeverage, onOrderPlaced }) {
     }
   };
 
-  const canSubmit = gatesOpen && confirmChecked && baseAmount > 0 && !sending && !slTpError;
+  const canSubmit = gatesOpen && confirmChecked && baseAmount > 0 && !sending && !slTpError && !limitsError;
 
   return (
     <div className="card">
@@ -484,7 +514,9 @@ function OrderForm({ gatesOpen, maxLeverage, onOrderPlaced }) {
       <input type="number" step="1" value={usdtAmount} onChange={(e) => setUsdtAmount(e.target.value)} />
       <div className="muted">
         ≈ {baseAmount ? fmt(baseAmount, 6) : "-"} {symbol.split("/")[0]}
+        {limits && ` · asgari ${limits.amount_min} ${symbol.split("/")[0]}${limits.cost_min ? ` / $${fmt(limits.cost_min, 2)}` : ""}`}
       </div>
+      {limitsError && <div className="pill danger" style={{ marginTop: 4 }}>{limitsError}</div>}
 
       {isFuture && !isClose && (
         <div className="row" style={{ marginTop: 10 }}>

@@ -26,13 +26,19 @@ router = APIRouter(prefix="/trading", tags=["trading"])
 
 @router.get("/price")
 def price(symbol: str, market_type: str = "future") -> dict:
-    """Herkese açık, kimlik doğrulamasız anlık fiyat — `.env`'deki hesap
-    anahtarlarına dokunmaz, canlı işlem kapıları kapalıyken de çalışır."""
+    """Herkese açık, kimlik doğrulamasız anlık fiyat + miktar/fiyat limitleri
+    (`amount_step`, `amount_min`, `price_tick`, `cost_min`) — `.env`'deki
+    hesap anahtarlarına dokunmaz, canlı işlem kapıları kapalıyken de çalışır.
+    Frontend, emri göndermeden ÖNCE miktarı bu limitlere göre yuvarlayıp
+    doğrulamak için kullanır (bkz. Binance'in LOT_SIZE/MIN_NOTIONAL
+    reddi yerine, kullanıcıya daha erken/anlaşılır bir uyarı)."""
+    exchange = get_exchange("binance")
     try:
-        last = get_exchange("binance").fetch_ticker_price(symbol, market_type)
+        last = exchange.fetch_ticker_price(symbol, market_type)
     except Exception as exc:  # noqa: BLE001 - borsa/ağ hatası doğrudan mesaj olarak dönsün
         raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return {"symbol": symbol, "last": last, "max_leverage": MAX_LEVERAGE}
+    limits = exchange.fetch_market_limits(symbol, market_type)
+    return {"symbol": symbol, "last": last, "max_leverage": MAX_LEVERAGE, "limits": limits}
 
 
 @router.get("/balance")
