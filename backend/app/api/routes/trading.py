@@ -1,3 +1,5 @@
+import time
+
 from fastapi import APIRouter, HTTPException
 
 from app.exchanges import get_exchange
@@ -35,6 +37,36 @@ def positions() -> list[dict]:
         return exchange.fetch_positions()
     except LiveTradingDisabled as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/pnl-summary")
+def pnl_summary() -> dict:
+    """Gerçek hesabın GERÇEKLEŞMİŞ (kapanmış) PNL'ini gün/hafta/ay/toplam
+    pencerelerinde özetler — Paper Trading/Otopilot'taki `/portfolio/pnl`
+    ile aynı şekli döner, böylece frontend'de aynı `PnlCard` deseni
+    kullanılabilir. Bkz. `BinanceExchange.fetch_income_history` — en son
+    1000 kayıt çekilir (yeni bu hesapta pratikte tüm geçmiş)."""
+    try:
+        exchange = get_trading_exchange()
+        records = exchange.fetch_income_history(limit=1000)
+    except LiveTradingDisabled as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    now_ms = int(time.time() * 1000)
+
+    def window(days: float | None) -> dict:
+        cutoff = now_ms - int(days * 24 * 3600 * 1000) if days else 0
+        rows = [r for r in records if r["time"] >= cutoff]
+        pnl = sum(r["income"] for r in rows)
+        wins = sum(1 for r in rows if r["income"] > 0)
+        count = len(rows)
+        return {
+            "pnl_quote": round(pnl, 4),
+            "trade_count": count,
+            "win_rate_pct": round(wins / count * 100, 2) if count else 0.0,
+        }
+
+    return {"daily": window(1), "weekly": window(7), "monthly": window(30), "total": window(None)}
 
 
 @router.post("/order", response_model=OrderResult)

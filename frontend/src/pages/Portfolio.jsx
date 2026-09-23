@@ -13,12 +13,15 @@ export default function Portfolio() {
   const [security, setSecurity] = useState(null);
   const [balance, setBalance] = useState(null);
   const [balanceError, setBalanceError] = useState("");
+  const [pnl, setPnl] = useState(null);
+  const [pnlError, setPnlError] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
   const load = async () => {
     setError("");
     setBalanceError("");
+    setPnlError("");
     try {
       const s = await api.get("/security/status");
       setSecurity(s);
@@ -32,6 +35,11 @@ export default function Portfolio() {
       setBalanceError(err.message);
     } finally {
       setLoading(false);
+    }
+    try {
+      setPnl(await api.get("/trading/pnl-summary"));
+    } catch (err) {
+      setPnlError(err.message);
     }
   };
 
@@ -79,6 +87,35 @@ export default function Portfolio() {
       </div>
 
       <RealPositionsCard gatesOpen={gatesOpen} />
+
+      <ErrorBanner message={pnlError} />
+      <PnlSummaryCard pnl={pnl} />
+    </div>
+  );
+}
+
+function PnlSummaryCard({ pnl }) {
+  if (!pnl) return null;
+  const rows = [
+    { label: "Bugün (son 24s)", w: pnl.daily },
+    { label: "Bu hafta (son 7g)", w: pnl.weekly },
+    { label: "Bu ay (son 30g)", w: pnl.monthly },
+    { label: "Toplam", w: pnl.total },
+  ];
+  return (
+    <div className="card">
+      <div className="card-title">PNL özeti (gerçekleşmiş, gerçek hesap)</div>
+      {rows.map((r) => (
+        <div className="row" key={r.label}>
+          <div>
+            <div className="row-value">{r.label}</div>
+            <div className="muted">{r.w.trade_count} kayıt · %{fmt(r.w.win_rate_pct)} kazanma</div>
+          </div>
+          <span className={"row-value " + (r.w.pnl_quote >= 0 ? "pos" : "neg")}>
+            {r.w.pnl_quote >= 0 ? "+" : ""}${fmt(r.w.pnl_quote)}
+          </span>
+        </div>
+      ))}
     </div>
   );
 }

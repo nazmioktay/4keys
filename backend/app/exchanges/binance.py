@@ -277,6 +277,19 @@ class BinanceExchange(Exchange):
         self._require_auth()
         return self._client(market_type).fetch_open_orders(symbol)
 
+    def fetch_income_history(self, income_type: str = "REALIZED_PNL", limit: int = 1000) -> list[dict]:
+        """Binance Futures'ın "income history" uç noktasından (`GET
+        /fapi/v1/income`) gerçekleşmiş kâr/zarar kayıtlarını döner — her
+        satır bir pozisyon kapanışının (veya kısmi kapanışının) net PNL'ini
+        taşır (`income`, USDT), ccxt'te unified bir `fetchIncome` metodu
+        olmadığı için ham `fapiPrivateGetIncome` çağrılır. `since`
+        vermeden en son `limit` kaydı çeker — yeni açılan bu hesapta bu,
+        pratikte TÜM geçmişi kapsar; hesap büyüdükçe sayfalama gerekebilir.
+        """
+        self._require_auth()
+        raw = self._futures.fapiPrivateGetIncome({"incomeType": income_type, "limit": limit})
+        return [{"symbol": r.get("symbol"), "income": float(r.get("income", 0)), "time": int(r.get("time", 0))} for r in raw]
+
     def place_order(
         self,
         symbol: str,
