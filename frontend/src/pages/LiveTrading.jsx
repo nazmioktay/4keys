@@ -263,6 +263,7 @@ function estimateLiquidationPrice(entryPrice, leverage, direction) {
 }
 
 function OrderForm({ gatesOpen, maxLeverage, onOrderPlaced }) {
+  const [mode, setMode] = useState("open"); // "open" | "close"
   const [symbol, setSymbol] = useState("BTC/USDT:USDT");
   const [marketType, setMarketType] = useState("future");
   const [direction, setDirection] = useState("long");
@@ -321,17 +322,19 @@ function OrderForm({ gatesOpen, maxLeverage, onOrderPlaced }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbol, marketType]);
 
+  const isClose = mode === "close";
   const effectivePrice = orderType === "limit" && Number(limitPrice) > 0 ? Number(limitPrice) : price;
   const baseAmount = effectivePrice ? Number(usdtAmount) / effectivePrice : null;
-  const liquidationPrice = isFuture ? estimateLiquidationPrice(effectivePrice, leverage, direction) : null;
+  const liquidationPrice = isFuture && !isClose ? estimateLiquidationPrice(effectivePrice, leverage, direction) : null;
 
   // Binance, tetikleme fiyatı zaten geçilmiş bir SL/TP emrini -2021 "Order
   // would immediately trigger" ile reddeder. Bunu sunucuya göndermeden ÖNCE
   // yakalamak, hem net bir Türkçe hata mesajı verir hem de "giriş emri
   // başarılı oldu ama SL/TP başarısız oldu" gibi kafa karıştırıcı kısmi
-  // başarı durumlarını baştan önler.
+  // başarı durumlarını baştan önler. Kapatma modunda TP/SL alanları hiç
+  // gösterilmediği için bu kontrol yalnızca açma modunda anlamlıdır.
   const slTpError = (() => {
-    if (!effectivePrice) return "";
+    if (isClose || !effectivePrice) return "";
     const sl = Number(stopLossPrice) || null;
     const tp = Number(takeProfitPrice) || null;
     if (direction === "long") {
@@ -349,21 +352,29 @@ function OrderForm({ gatesOpen, maxLeverage, onOrderPlaced }) {
     setResult(null);
     setSending(true);
     try {
-      if (isFuture) {
+      if (isFuture && !isClose) {
         await api.post("/trading/leverage", { symbol, leverage, confirm: true });
         await api.post("/trading/margin-mode", { symbol, mode: marginMode, confirm: true });
       }
+      // Açma modunda "Long/Short" doğrudan emir yönüdür (Long=al). Kapatma
+      // modunda ise TERSİdir: elindeki Long pozisyonu kapatmak için SATMAN
+      // gerekir — burada seçilen "Long/Short", emrin yönü değil, KAPATILACAK
+      // pozisyonun yönüdür.
+      const side = isClose
+        ? direction === "long" ? "sell" : "buy"
+        : direction === "long" ? "buy" : "sell";
       const payload = {
         symbol,
-        side: direction === "long" ? "buy" : "sell",
+        side,
         order_type: orderType,
         amount: baseAmount,
         market_type: marketType,
+        reduce_only: isClose,
         confirm: true,
       };
       if (orderType === "limit") payload.price = Number(limitPrice);
-      if (isFuture && Number(stopLossPrice) > 0) payload.stop_loss_price = Number(stopLossPrice);
-      if (isFuture && Number(takeProfitPrice) > 0) payload.take_profit_price = Number(takeProfitPrice);
+      if (isFuture && !isClose && Number(stopLossPrice) > 0) payload.stop_loss_price = Number(stopLossPrice);
+      if (isFuture && !isClose && Number(takeProfitPrice) > 0) payload.take_profit_price = Number(takeProfitPrice);
       const res = await api.post("/trading/order", payload);
       setResult(res);
       setConfirmChecked(false);
@@ -381,6 +392,20 @@ function OrderForm({ gatesOpen, maxLeverage, onOrderPlaced }) {
   return (
     <div className="card">
       <div className="card-title">Emir gönder</div>
+
+      <div className="tabs">
+        <button className={"tab-btn" + (!isClose ? " active" : "")} onClick={() => setMode("open")}>
+          Aç
+        </button>
+        <button className={"tab-btn" + (isClose ? " active" : "")} onClick={() => setMode("close")}>
+          Kapat
+        </button>
+      </div>
+      {isClose && (
+        <p className="muted">
+          reduceOnly emri — yalnızca mevcut pozisyonu azaltır/kapatır, yeni pozisyon açmaz. Limit fiyatıyla kısmi kapatma da yapabilirsin.
+        </p>
+      )}
 
       <label className="field">Sembol</label>
       <input value={symbol} onChange={(e) => setSymbol(e.target.value)} placeholder="BTC/USDT:USDT" />
@@ -409,17 +434,17 @@ function OrderForm({ gatesOpen, maxLeverage, onOrderPlaced }) {
       </div>
       <ErrorBanner message={budgetError} />
 
-      <label className="field">Yön</label>
+      <label className="field">{isClose ? "Kapatılacak pozisyon yönü" : "Yön"}</label>
       <div className="tabs">
         <button className={"tab-btn" + (direction === "long" ? " active" : "")} onClick={() => setDirection("long")}>
-          Long (al)
+          {isClose ? "Long'u kapat (sat)" : "Long (al)"}
         </button>
         <button className={"tab-btn" + (direction === "short" ? " active" : "")} onClick={() => setDirection("short")}>
-          Short (sat)
+          {isClose ? "Short'u kapat (al)" : "Short (sat)"}
         </button>
       </div>
 
-      {isFuture && (
+      {isFuture && !isClose && (
         <>
           <label className="field">Kaldıraç</label>
           <div className="tabs">
@@ -461,20 +486,20 @@ function OrderForm({ gatesOpen, maxLeverage, onOrderPlaced }) {
         ≈ {baseAmount ? fmt(baseAmount, 6) : "-"} {symbol.split("/")[0]}
       </div>
 
-      {isFuture && (
+      {isFuture && !isClose && (
         <div className="row" style={{ marginTop: 10 }}>
           <span className="row-label">Tahmini likidasyon fiyatı</span>
           <span className="row-value neg">{liquidationPrice ? `$${fmt(liquidationPrice, 2)}` : "-"}</span>
         </div>
       )}
-      {isFuture && liquidationPrice && (
+      {isFuture && !isClose && liquidationPrice && (
         <p className="muted">
           Yaklaşık değerdir (izole marjin, sabit %{(MAINTENANCE_MARGIN_RATE * 100).toFixed(2)} sürdürme marjı varsayımıyla) — Binance'in gerçek
           hesaplaması pozisyon büyüklüğüne göre kademeli değişir.
         </p>
       )}
 
-      {isFuture && (
+      {isFuture && !isClose && (
         <>
           <label className="field">Stop-loss fiyatı (opsiyonel)</label>
           <input type="number" step="0.01" value={stopLossPrice} onChange={(e) => setStopLossPrice(e.target.value)} placeholder="boş bırakılabilir" />
@@ -496,7 +521,7 @@ function OrderForm({ gatesOpen, maxLeverage, onOrderPlaced }) {
 
       <div style={{ height: 14 }} />
       <button className="danger primary" onClick={submit} disabled={!canSubmit}>
-        {sending ? "Gönderiliyor..." : "Emri Gönder"}
+        {sending ? "Gönderiliyor..." : isClose ? "Pozisyonu Kapat" : "Pozisyonu Aç"}
       </button>
       {!gatesOpen && (
         <p className="muted" style={{ marginTop: 8 }}>
