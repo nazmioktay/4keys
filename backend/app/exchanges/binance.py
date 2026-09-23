@@ -28,7 +28,15 @@ class BinanceExchange(Exchange):
         # verdiği hıza göre otomatik aralıklandırmasını sağlar.
         auth = {**auth, "enableRateLimit": True, "timeout": 30000}
         self._spot = ccxt.binance(auth)
-        self._futures = ccxt.binance({**auth, "options": {"defaultType": "future"}})
+        # `fetchOpenOrders.warnWithoutSymbol=False`: sembolsüz (hesap geneli)
+        # açık emir sorgusu ccxt'de varsayılan olarak bir uyarıyı İSTİSNA
+        # olarak fırlatır (daha yüksek rate-limit ağırlığına dikkat çekmek
+        # için) — burada bilinçli kabul ediliyor, çünkü Canlı İşlem
+        # ekranındaki "Açık emirler" kartı TEK sembole değil hesabın
+        # TÜMÜNE bakmalı.
+        self._futures = ccxt.binance(
+            {**auth, "options": {"defaultType": "future", "fetchOpenOrders": {"warnWithoutSymbol": False}}}
+        )
         if testnet:
             self._spot.set_sandbox_mode(True)
             self._futures.set_sandbox_mode(True)
@@ -276,6 +284,43 @@ class BinanceExchange(Exchange):
     def fetch_open_orders(self, symbol: str | None = None, market_type: str = "future") -> list[dict]:
         self._require_auth()
         return self._client(market_type).fetch_open_orders(symbol)
+
+    def fetch_my_trades(self, symbol: str, limit: int = 50, market_type: str = "future") -> list[dict]:
+        """Belirli bir sembol için gerçekleşen dolum (fill) geçmişi —
+        Binance'in `userTrades` uç noktası futures'ta sembol İSTER (hesap
+        geneli sorgu desteklemiyor, `income history`den FARKLI)."""
+        self._require_auth()
+        return self._client(market_type).fetch_my_trades(symbol, limit=limit)
+
+    def set_margin_mode(self, symbol: str, mode: str, market_type: str = "future") -> dict:
+        """`mode`: 'cross' | 'isolated'. Zaten o moddaysa Binance -4046
+        ("No need to change margin type") döner — bu, çağıran tarafta
+        zararsız kabul edilip yutulmalı (bkz. executor)."""
+        self._require_auth()
+        return self._client(market_type).set_margin_mode(mode, symbol)
+
+    def place_conditional_order(
+        self,
+        symbol: str,
+        side: str,
+        amount: float,
+        stop_price: float,
+        kind: str,
+        market_type: str = "future",
+    ) -> dict:
+        """Take-profit/stop-loss emri — `closePosition` (miktarı sıfır
+        bırakıp TÜM pozisyonu kapatan) DEĞİL, bilinçli olarak normal
+        `reduceOnly` + açık miktarlı bir STOP_MARKET/TAKE_PROFIT_MARKET
+        emridir: `place_order`daki manuel kapatmayla AYNI, zaten test
+        edilmiş yoldan geçer — `closePosition`in kendi özel kısıtları
+        (miktar sıfır olmalı, ayrı hata kodları) burada devreye girmez.
+        `kind`: 'stop_loss' -> STOP_MARKET, 'take_profit' -> TAKE_PROFIT_MARKET.
+        """
+        self._require_auth()
+        order_type = "STOP_MARKET" if kind == "stop_loss" else "TAKE_PROFIT_MARKET"
+        client = self._client(market_type)
+        params = {"stopPrice": stop_price, "reduceOnly": True}
+        return client.create_order(symbol, order_type, side, amount, None, params)
 
     def fetch_income_history(self, income_type: str = "REALIZED_PNL", limit: int = 1000) -> list[dict]:
         """Binance Futures'ın "income history" uç noktasından (`GET

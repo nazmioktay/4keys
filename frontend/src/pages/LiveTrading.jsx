@@ -71,7 +71,9 @@ export default function LiveTrading() {
 
       <BalanceCard />
       <RealPositionsCard gatesOpen={gatesOpen} />
+      <OpenOrdersCard gatesOpen={gatesOpen} />
       <OrderForm gatesOpen={gatesOpen} maxLeverage={security?.max_leverage} onOrderPlaced={loadSecurity} />
+      <TradeHistoryCard />
     </div>
   );
 }
@@ -128,7 +130,130 @@ function BalanceCard() {
   );
 }
 
+function OpenOrdersCard({ gatesOpen }) {
+  const [orders, setOrders] = useState(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [cancelError, setCancelError] = useState("");
+  const [cancellingId, setCancellingId] = useState(null);
+
+  const load = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      setOrders(await api.get("/trading/open-orders"));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  const cancel = async (o) => {
+    setCancelError("");
+    setCancellingId(o.id);
+    try {
+      await api.post("/trading/cancel-order", { order_id: String(o.id), symbol: o.symbol, market_type: "future", confirm: true });
+      await load();
+    } catch (err) {
+      setCancelError(err.message);
+    } finally {
+      setCancellingId(null);
+    }
+  };
+
+  return (
+    <div className="card">
+      <div className="card-title">
+        Açık emirler (bekleyen)
+        <button className="secondary" style={{ marginLeft: "auto", width: "auto", padding: "4px 12px" }} onClick={load} disabled={loading}>
+          ↻
+        </button>
+      </div>
+      <ErrorBanner message={error} />
+      <ErrorBanner message={cancelError} />
+      {orders && orders.length === 0 && <div className="muted" style={{ marginTop: 8 }}>Bekleyen emir yok.</div>}
+      {orders?.map((o) => (
+        <div className="row" key={o.id}>
+          <div>
+            <div className="row-value">{o.symbol}</div>
+            <div className="muted">
+              {o.side} · {o.type} · {fmt(o.price || o.stopPrice, 2)} · {fmt(o.amount)}
+            </div>
+          </div>
+          <button
+            className="secondary danger"
+            style={{ width: "auto", padding: "6px 12px" }}
+            disabled={!gatesOpen || cancellingId === o.id}
+            onClick={() => cancel(o)}
+          >
+            {cancellingId === o.id ? "İptal ediliyor..." : "İptal Et"}
+          </button>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TradeHistoryCard() {
+  const [symbol, setSymbol] = useState("BTC/USDT:USDT");
+  const [trades, setTrades] = useState(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const load = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      setTrades(await api.get(`/trading/trades?symbol=${encodeURIComponent(symbol)}&limit=50`));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return (
+    <div className="card">
+      <div className="card-title">İşlem geçmişi (gerçekleşen dolumlar)</div>
+      <label className="field">Sembol</label>
+      <input value={symbol} onChange={(e) => setSymbol(e.target.value)} placeholder="BTC/USDT:USDT" />
+      <button className="secondary" onClick={load} disabled={loading} style={{ marginTop: 8 }}>
+        {loading ? "Sorgulanıyor..." : "Getir"}
+      </button>
+      <ErrorBanner message={error} />
+      {trades && trades.length === 0 && <div className="muted" style={{ marginTop: 8 }}>Bu sembol için işlem bulunamadı.</div>}
+      {trades?.slice().reverse().map((t) => (
+        <div className="row" key={t.id}>
+          <div>
+            <div className="row-value">
+              {t.side === "buy" ? "Alış" : "Satış"} · {new Date(t.timestamp).toLocaleString("tr-TR")}
+            </div>
+            <div className="muted">
+              ${fmt(t.price, 2)} × {fmt(t.amount)} · komisyon ${fmt(t.fee?.cost, 4)}
+            </div>
+          </div>
+          <span className="row-value">${fmt(t.cost, 2)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 const LEVERAGE_OPTIONS = [1, 2, 3];
+const MARGIN_MODES = [
+  { key: "isolated", label: "Isolated" },
+  { key: "cross", label: "Cross" },
+];
 const MAINTENANCE_MARGIN_RATE = 0.004; // yaklaşık, düşük notional/BTC-USDT alt dilimi varsayımı
 
 function estimateLiquidationPrice(entryPrice, leverage, direction) {
@@ -142,9 +267,12 @@ function OrderForm({ gatesOpen, maxLeverage, onOrderPlaced }) {
   const [marketType, setMarketType] = useState("future");
   const [direction, setDirection] = useState("long");
   const [leverage, setLeverage] = useState(1);
+  const [marginMode, setMarginMode] = useState("isolated");
   const [orderType, setOrderType] = useState("market");
   const [usdtAmount, setUsdtAmount] = useState("100");
   const [limitPrice, setLimitPrice] = useState("");
+  const [stopLossPrice, setStopLossPrice] = useState("");
+  const [takeProfitPrice, setTakeProfitPrice] = useState("");
   const [confirmChecked, setConfirmChecked] = useState(false);
 
   const [price, setPrice] = useState(null);
@@ -204,6 +332,7 @@ function OrderForm({ gatesOpen, maxLeverage, onOrderPlaced }) {
     try {
       if (isFuture) {
         await api.post("/trading/leverage", { symbol, leverage, confirm: true });
+        await api.post("/trading/margin-mode", { symbol, mode: marginMode, confirm: true });
       }
       const payload = {
         symbol,
@@ -214,6 +343,8 @@ function OrderForm({ gatesOpen, maxLeverage, onOrderPlaced }) {
         confirm: true,
       };
       if (orderType === "limit") payload.price = Number(limitPrice);
+      if (isFuture && Number(stopLossPrice) > 0) payload.stop_loss_price = Number(stopLossPrice);
+      if (isFuture && Number(takeProfitPrice) > 0) payload.take_profit_price = Number(takeProfitPrice);
       const res = await api.post("/trading/order", payload);
       setResult(res);
       setConfirmChecked(false);
@@ -280,6 +411,15 @@ function OrderForm({ gatesOpen, maxLeverage, onOrderPlaced }) {
             ))}
           </div>
           <p className="muted">Kod içi güvenlik tavanı: {cap}x — bu değer arayüzden aşılamaz.</p>
+
+          <label className="field">Marjin modu</label>
+          <div className="tabs">
+            {MARGIN_MODES.map((m) => (
+              <button key={m.key} className={"tab-btn" + (marginMode === m.key ? " active" : "")} onClick={() => setMarginMode(m.key)}>
+                {m.label}
+              </button>
+            ))}
+          </div>
         </>
       )}
 
@@ -313,6 +453,19 @@ function OrderForm({ gatesOpen, maxLeverage, onOrderPlaced }) {
           Yaklaşık değerdir (izole marjin, sabit %{(MAINTENANCE_MARGIN_RATE * 100).toFixed(2)} sürdürme marjı varsayımıyla) — Binance'in gerçek
           hesaplaması pozisyon büyüklüğüne göre kademeli değişir.
         </p>
+      )}
+
+      {isFuture && (
+        <>
+          <label className="field">Stop-loss fiyatı (opsiyonel)</label>
+          <input type="number" step="0.01" value={stopLossPrice} onChange={(e) => setStopLossPrice(e.target.value)} placeholder="boş bırakılabilir" />
+
+          <label className="field">Take-profit fiyatı (opsiyonel)</label>
+          <input type="number" step="0.01" value={takeProfitPrice} onChange={(e) => setTakeProfitPrice(e.target.value)} placeholder="boş bırakılabilir" />
+          <div className="muted">
+            Girilirse, ana emir dolduktan sonra ayrı bir reduceOnly STOP_MARKET/TAKE_PROFIT_MARKET emri gönderilir (pozisyonun tamamını kapatır).
+          </div>
+        </>
       )}
 
       <div style={{ height: 14 }} />

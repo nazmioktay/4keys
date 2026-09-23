@@ -5,7 +5,7 @@ from app.exchanges.binance import BinanceExchange
 from app.security import kill_switch
 from app.security.safety import check_withdrawals_disabled, enforce_leverage_cap
 
-from .schemas import LeverageRequest, OrderRequest
+from .schemas import CancelOrderRequest, LeverageRequest, MarginModeRequest, OrderRequest
 
 logger = logging.getLogger(__name__)
 
@@ -100,7 +100,7 @@ def place_live_order(request: OrderRequest) -> dict:
         request.amount,
         request.price,
     )
-    return exchange.place_order(
+    entry = exchange.place_order(
         symbol=request.symbol,
         side=request.side,
         order_type=request.order_type,
@@ -109,6 +109,36 @@ def place_live_order(request: OrderRequest) -> dict:
         market_type=request.market_type,
         reduce_only=request.reduce_only,
     )
+
+    if not (request.stop_loss_price or request.take_profit_price):
+        return entry
+
+    # TP/SL yalnızca POZİSYON AÇAN/ARTIRAN ana emirlere anlamlıdır — kapatma
+    # (reduce_only) emrinde zaten ters yönde bir emirdir, tekrar TP/SL
+    # eklemek anlamsız/tehlikeli olurdu (bkz. aşağıdaki close_side mantığı).
+    result: dict = {"entry": entry}
+    close_side = "sell" if request.side == "buy" else "buy"
+    if request.stop_loss_price and not request.reduce_only:
+        logger.warning("LIVE STOP LOSS: %s %s stopPrice=%s", request.symbol, close_side, request.stop_loss_price)
+        result["stop_loss"] = exchange.place_conditional_order(
+            symbol=request.symbol,
+            side=close_side,
+            amount=request.amount,
+            stop_price=request.stop_loss_price,
+            kind="stop_loss",
+            market_type=request.market_type,
+        )
+    if request.take_profit_price and not request.reduce_only:
+        logger.warning("LIVE TAKE PROFIT: %s %s stopPrice=%s", request.symbol, close_side, request.take_profit_price)
+        result["take_profit"] = exchange.place_conditional_order(
+            symbol=request.symbol,
+            side=close_side,
+            amount=request.amount,
+            stop_price=request.take_profit_price,
+            kind="take_profit",
+            market_type=request.market_type,
+        )
+    return result
 
 
 def set_live_leverage(request: LeverageRequest) -> dict:
@@ -123,3 +153,33 @@ def set_live_leverage(request: LeverageRequest) -> dict:
 
     logger.warning("LIVE LEVERAGE CHANGE (testnet=%s): %s -> %sx", settings.binance_testnet, request.symbol, request.leverage)
     return exchange.set_leverage(request.symbol, request.leverage)
+
+
+def set_live_margin_mode(request: MarginModeRequest) -> dict:
+    """Gerçek marjin modunu (cross/isolated) değiştirir — aynı güvenlik
+    kapılarından geçer. Binance zaten o moddaysa -4046 hatası döner; bu
+    hata (istenen durum zaten sağlanmış demek olduğu için) yutulup
+    başarı gibi ele alınır."""
+    _run_cheap_safety_gates(request.confirm, "İstekte confirm=true olmadan marjin modu değiştirilmez.")
+    exchange = get_trading_exchange()
+    _verify_withdrawals_disabled(exchange)
+
+    logger.warning("LIVE MARGIN MODE CHANGE (testnet=%s): %s -> %s", settings.binance_testnet, request.symbol, request.mode)
+    try:
+        return exchange.set_margin_mode(request.symbol, request.mode)
+    except Exception as exc:  # noqa: BLE001 - yalnızca "zaten bu modda" durumunu yut, başkasını yeniden fırlat
+        if "-4046" in str(exc) or "No need to change margin type" in str(exc):
+            return {"info": "already in requested margin mode"}
+        raise
+
+
+def cancel_live_order(request: CancelOrderRequest) -> dict:
+    """Bekleyen (henüz dolmamış) gerçek bir emri iptal eder — aynı güvenlik
+    kapılarından geçer (iptal etmek risk AZALTSA da, gerçek hesaba giden
+    her yazma işlemi aynı tutarlı kapılardan geçirilir)."""
+    _run_cheap_safety_gates(request.confirm, "İstekte confirm=true olmadan emir iptal edilmez.")
+    exchange = get_trading_exchange()
+    _verify_withdrawals_disabled(exchange)
+
+    logger.warning("LIVE CANCEL ORDER (testnet=%s): %s order_id=%s", settings.binance_testnet, request.symbol, request.order_id)
+    return exchange.cancel_order(request.order_id, request.symbol, request.market_type)

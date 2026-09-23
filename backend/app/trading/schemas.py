@@ -14,6 +14,14 @@ class OrderRequest(BaseModel):
         default=False,
         description="true ise emir yalnızca mevcut pozisyonu azaltabilir/kapatabilir — yeni/ters yönde pozisyon açamaz (Binance 'reduceOnly').",
     )
+    stop_loss_price: float | None = Field(
+        default=None,
+        description="Verilirse, ana emir başarıyla dolduktan sonra ayrı bir STOP_MARKET (reduceOnly) emri gönderilir.",
+    )
+    take_profit_price: float | None = Field(
+        default=None,
+        description="Verilirse, ana emir başarıyla dolduktan sonra ayrı bir TAKE_PROFIT_MARKET (reduceOnly) emri gönderilir.",
+    )
     confirm: bool = Field(
         default=False,
         description="Gerçek emir göndermek için açıkça true olmalı. false ise istek reddedilir.",
@@ -32,3 +40,16 @@ class LeverageRequest(BaseModel):
 
 class LeverageResult(BaseModel):
     raw: dict
+
+
+class MarginModeRequest(BaseModel):
+    symbol: str
+    mode: Literal["cross", "isolated"]
+    confirm: bool = Field(default=False, description="Gerçek marjin modu değişikliği için açıkça true olmalı.")
+
+
+class CancelOrderRequest(BaseModel):
+    order_id: str
+    symbol: str
+    market_type: Literal["spot", "future"] = "future"
+    confirm: bool = Field(default=False, description="Gerçek emir iptali için açıkça true olmalı.")

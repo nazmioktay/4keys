@@ -4,8 +4,22 @@ from fastapi import APIRouter, HTTPException
 
 from app.exchanges import get_exchange
 from app.security.safety import MAX_LEVERAGE
-from app.trading.executor import LiveTradingDisabled, get_trading_exchange, place_live_order, set_live_leverage
-from app.trading.schemas import LeverageRequest, LeverageResult, OrderRequest, OrderResult
+from app.trading.executor import (
+    LiveTradingDisabled,
+    cancel_live_order,
+    get_trading_exchange,
+    place_live_order,
+    set_live_leverage,
+    set_live_margin_mode,
+)
+from app.trading.schemas import (
+    CancelOrderRequest,
+    LeverageRequest,
+    LeverageResult,
+    MarginModeRequest,
+    OrderRequest,
+    OrderResult,
+)
 
 router = APIRouter(prefix="/trading", tags=["trading"])
 
@@ -35,6 +49,44 @@ def positions() -> list[dict]:
     try:
         exchange = get_trading_exchange()
         return exchange.fetch_positions()
+    except LiveTradingDisabled as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/trades")
+def trades(symbol: str, limit: int = 50, market_type: str = "future") -> list[dict]:
+    """Bir sembol için gerçekleşen dolum (fill) geçmişi — Binance futures
+    sembolsüz hesap-geneli sorguya izin vermiyor, bu yüzden `symbol` zorunlu."""
+    try:
+        exchange = get_trading_exchange()
+        return exchange.fetch_my_trades(symbol, limit=limit, market_type=market_type)
+    except LiveTradingDisabled as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.get("/open-orders")
+def open_orders(market_type: str = "future") -> list[dict]:
+    """Bekleyen (henüz dolmamış) TÜM emirler — sembole göre filtrelenmez,
+    hesabın tamamına bakar."""
+    try:
+        exchange = get_trading_exchange()
+        return exchange.fetch_open_orders(market_type=market_type)
+    except LiveTradingDisabled as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/cancel-order")
+def cancel_order_route(payload: CancelOrderRequest) -> dict:
+    try:
+        return cancel_live_order(payload)
+    except LiveTradingDisabled as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/margin-mode")
+def margin_mode(payload: MarginModeRequest) -> dict:
+    try:
+        return set_live_margin_mode(payload)
     except LiveTradingDisabled as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
