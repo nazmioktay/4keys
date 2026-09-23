@@ -2,7 +2,7 @@ import logging
 from datetime import datetime
 
 import pandas as pd
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.ml.features import FEATURE_COLUMNS
@@ -459,6 +459,23 @@ def get_recent_trades(
     except SQLAlchemyError:
         logger.exception("failed to read recent trades")
         return []
+
+
+def delete_all_trades() -> int:
+    """Kalıcı işlem geçmişini (paper trading/otopilot) TAMAMEN siler —
+    "Paper trading verilerini sıfırla" düğmesinin arkasındaki geri
+    dönüşü olmayan işlem. Gerçek Binance emirleri bu tabloya hiç
+    yazılmıyor (yalnızca `PortfolioManager.close()` yazar), bu yüzden
+    canlı işlem geçmişini ETKİLEMEZ. Döner: silinen satır sayısı."""
+    if not is_enabled():
+        return 0
+    try:
+        with session_scope() as db:
+            result = db.execute(delete(TradeRecord))
+            return result.rowcount or 0
+    except SQLAlchemyError:
+        logger.exception("failed to delete trade history")
+        return 0
 
 
 def get_trade_pnl_summary(since: datetime | None = None, until: datetime | None = None) -> list[dict]:

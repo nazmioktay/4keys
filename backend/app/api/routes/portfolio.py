@@ -14,6 +14,7 @@ from app.portfolio.schemas import (
     RiskRules,
     TradeStats,
 )
+from app.db import repository as db
 from app.portfolio.shared import get_portfolio, reset_portfolio
 
 router = APIRouter(prefix="/portfolio", tags=["portfolio"])
@@ -22,6 +23,12 @@ router = APIRouter(prefix="/portfolio", tags=["portfolio"])
 class ResetRequest(BaseModel):
     starting_equity: float | None = None
     rules: RiskRules | None = None
+    clear_history: bool = False
+
+
+class ResetResponse(BaseModel):
+    status: PortfolioStatus
+    trades_deleted: int
 
 
 @router.get("/status", response_model=PortfolioStatus)
@@ -44,11 +51,16 @@ def update_rules(rules: RiskRules) -> RiskRules:
     return rules
 
 
-@router.post("/reset", response_model=PortfolioStatus)
-def reset(payload: ResetRequest) -> PortfolioStatus:
-    """Portföyü verilen sermaye ve kurallarla sıfırdan başlatır (açık pozisyonlar silinir)."""
+@router.post("/reset", response_model=ResetResponse)
+def reset(payload: ResetRequest) -> ResetResponse:
+    """Portföyü verilen sermaye ve kurallarla sıfırdan başlatır (açık
+    pozisyonlar/bellek içi durum silinir). `clear_history=true` ise
+    KALICI işlem geçmişini de (DB'deki `trades` tablosu — Paper
+    Trading/Otopilot'taki "İşlem geçmişi" kartları) TAMAMEN siler; bu
+    geri alınamaz. Gerçek Binance hesabını/emirlerini hiç etkilemez."""
     portfolio = reset_portfolio(payload.starting_equity, payload.rules)
-    return PortfolioStatus(**portfolio.status())
+    trades_deleted = db.delete_all_trades() if payload.clear_history else 0
+    return ResetResponse(status=PortfolioStatus(**portfolio.status()), trades_deleted=trades_deleted)
 
 
 @router.post("/position-size", response_model=PositionSizeResponse)

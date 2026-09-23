@@ -4,6 +4,84 @@ import { api, auth } from "../api.js";
 import ErrorBanner from "../components/ErrorBanner.jsx";
 import Loading from "../components/Loading.jsx";
 
+function fmt(n, digits = 2) {
+  if (n === null || n === undefined || Number.isNaN(n)) return "-";
+  return Number(n).toLocaleString("tr-TR", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+}
+
+function PaperTradingResetCard({ portfolio, onReset }) {
+  const [startingEquity, setStartingEquity] = useState("1000");
+  const [clearHistory, setClearHistory] = useState(true);
+  const [armed, setArmed] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [error, setError] = useState("");
+  const [resultMsg, setResultMsg] = useState("");
+
+  const arm = () => {
+    setArmed(true);
+    setTimeout(() => setArmed(false), 5000);
+  };
+
+  const doReset = async () => {
+    setError("");
+    setResultMsg("");
+    setResetting(true);
+    try {
+      const res = await api.post("/portfolio/reset", {
+        starting_equity: Number(startingEquity) || undefined,
+        clear_history: clearHistory,
+      });
+      setArmed(false);
+      setResultMsg(
+        `Sıfırlandı — yeni bakiye $${fmt(res.status.equity)}` +
+          (clearHistory ? `, ${res.trades_deleted} kalıcı işlem kaydı silindi.` : " (kalıcı geçmiş korundu).")
+      );
+      onReset?.();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setResetting(false);
+    }
+  };
+
+  return (
+    <div className="card">
+      <div className="card-title">Paper Trading</div>
+      <p className="muted">
+        Paper Trading ve Otopilot aynı simülasyon motorunu paylaşır — burada sıfırlama ikisini birden etkiler. Gerçek Binance hesabına dokunmaz.
+      </p>
+      {portfolio && (
+        <div className="row" style={{ marginTop: 8 }}>
+          <span className="row-label">Şu anki bakiye</span>
+          <span className="row-value">${fmt(portfolio.equity)}</span>
+        </div>
+      )}
+
+      <label className="field">Yeni başlangıç sermayesi (USDT)</label>
+      <input type="number" step="1" value={startingEquity} onChange={(e) => setStartingEquity(e.target.value)} />
+
+      <div style={{ height: 10 }} />
+      <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+        <input type="checkbox" checked={clearHistory} onChange={(e) => setClearHistory(e.target.checked)} />
+        <span>Kalıcı işlem geçmişini de sil (DB'deki tüm kayıtlar — geri alınamaz)</span>
+      </label>
+
+      <div style={{ height: 14 }} />
+      <button
+        className={"secondary" + (armed ? " danger" : "")}
+        style={{ width: "100%" }}
+        disabled={resetting}
+        onClick={() => (armed ? doReset() : arm())}
+      >
+        {resetting ? "Sıfırlanıyor..." : armed ? "Emin misin? Sıfırla" : "Paper Trading'i Sıfırla"}
+      </button>
+
+      <ErrorBanner message={error} />
+      {resultMsg && <p className="pos" style={{ marginTop: 8 }}>{resultMsg}</p>}
+    </div>
+  );
+}
+
 export default function Settings() {
   const navigate = useNavigate();
   const logout = () => {
@@ -12,6 +90,7 @@ export default function Settings() {
   };
 
   const [rules, setRules] = useState(null);
+  const [portfolio, setPortfolio] = useState(null);
   const [security, setSecurity] = useState(null);
   const [scheduler, setScheduler] = useState(null);
   const [db, setDb] = useState(null);
@@ -29,6 +108,7 @@ export default function Settings() {
         api.get("/db/status"),
       ]);
       setRules(p.rules);
+      setPortfolio(p);
       setSecurity(s);
       setScheduler(sch);
       setDb(dbStatus);
@@ -140,6 +220,8 @@ export default function Settings() {
         <button className="primary" onClick={saveRules}>Kaydet</button>
         {saveMsg && <p className="muted" style={{ marginTop: 8 }}>{saveMsg}</p>}
       </div>
+
+      <PaperTradingResetCard portfolio={portfolio} onReset={loadAll} />
 
       <div className="card">
         <div className="card-title">Zamanlayıcı</div>
