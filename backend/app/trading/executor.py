@@ -52,10 +52,18 @@ def get_trading_exchange() -> BinanceExchange:
     return _cached_exchange
 
 
-def _run_cheap_safety_gates(confirm: bool, confirm_message: str) -> None:
+def _run_cheap_safety_gates(confirm: bool, confirm_message: str, *, risk_reducing: bool = False) -> None:
     """Kimlik bilgisi/borsa çağrısı gerektirmeyen, hızlı ve ucuz kontroller —
-    bunlar en anlaşılır hata mesajını vermek için önce çalışır."""
-    if kill_switch.is_active():
+    bunlar en anlaşılır hata mesajını vermek için önce çalışır.
+
+    `risk_reducing=True` ise (reduceOnly kapatma emri, emir iptali) kill
+    switch kontrolü ATLANIR: kill switch'in amacı YENİ risk alınmasını
+    durdurmaktır — mevcut riski AZALTAN bir işlemi de engellemek, tam
+    tersi bir etki yaratır (kullanıcı acil durumda pozisyonunu KAPATAMAZ
+    hale gelir). Bkz. kullanıcı raporu: Otopilot'u durdurmak için kill
+    switch aktive edilince gerçek hesaptaki açık pozisyon da kapatılamaz
+    olmuştu."""
+    if kill_switch.is_active() and not risk_reducing:
         raise LiveTradingDisabled(f"Kill switch aktif: {kill_switch.status().reason}")
     if not settings.enable_live_trading:
         raise LiveTradingDisabled(
@@ -123,7 +131,9 @@ def place_live_order(request: OrderRequest) -> dict:
         raise ValueError("Limit emir için price zorunludur.")
     _validate_order_limits(request)
 
-    _run_cheap_safety_gates(request.confirm, "İstekte confirm=true olmadan gerçek emir gönderilmez.")
+    _run_cheap_safety_gates(
+        request.confirm, "İstekte confirm=true olmadan gerçek emir gönderilmez.", risk_reducing=request.reduce_only
+    )
     exchange = get_trading_exchange()
     _verify_withdrawals_disabled(exchange)
 
@@ -227,10 +237,12 @@ def set_live_margin_mode(request: MarginModeRequest) -> dict:
 
 
 def cancel_live_order(request: CancelOrderRequest) -> dict:
-    """Bekleyen (henüz dolmamış) gerçek bir emri iptal eder — aynı güvenlik
-    kapılarından geçer (iptal etmek risk AZALTSA da, gerçek hesaba giden
-    her yazma işlemi aynı tutarlı kapılardan geçirilir)."""
-    _run_cheap_safety_gates(request.confirm, "İstekte confirm=true olmadan emir iptal edilmez.")
+    """Bekleyen (henüz dolmamış) gerçek bir emri iptal eder — `confirm`/
+    `enable_live_trading` kapılarından geçer, ama kill switch'ten GEÇMEZ
+    (`risk_reducing=True`): bir emri iptal etmek yeni risk yaratmaz,
+    yalnızca bekleyen bir taahhüdü kaldırır (bkz. `_run_cheap_safety_gates`
+    docstring'i)."""
+    _run_cheap_safety_gates(request.confirm, "İstekte confirm=true olmadan emir iptal edilmez.", risk_reducing=True)
     exchange = get_trading_exchange()
     _verify_withdrawals_disabled(exchange)
 
