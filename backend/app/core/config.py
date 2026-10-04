@@ -210,7 +210,12 @@ class Settings(BaseSettings):
     # tutulmalı" — tek bir gürültülü haftanın parametreleri UÇTAN UCA
     # sıçratmasını önler, birkaç hafta boyunca kademeli yakınsar). Bkz.
     # `app.scheduler.jobs.job_periodic_optimization`.
-    ml_periodic_optimization_auto_apply_enabled: bool = True
+    #
+    # VARSAYILAN KAPALI: optimizasyon, kalite kapısı ve hiperparametre/etiket
+    # taramalarıyla AYNI tek holdout penceresinde PnL'i maksimize ediyor —
+    # o pencereye aşırı uyum (overfit) sağlıyor. Walk-forward sistem
+    # backtest'i gelene kadar öneriler yalnızca kaydedilir, uygulanmaz.
+    ml_periodic_optimization_auto_apply_enabled: bool = False
     ml_periodic_optimization_min_improvement_pct: float = 0.1
     ml_periodic_optimization_max_step_fraction: float = 0.5
 

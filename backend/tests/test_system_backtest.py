@@ -1290,3 +1290,104 @@ def test_sweep_xgboost_labeling_targets_covers_full_grid(monkeypatch):
     for p in points:
         assert p.error is None
         assert p.total_pnl_pct == 2.0
+
+
+class _ScriptedModel:
+    """Belirli mum zaman damgalarında sabit yönlü sinyal üreten sahte model
+    — yürütme mekaniğini (dolum fiyatı, stop tetikleme, funding) model
+    davranışından bağımsız, deterministik test etmek için."""
+
+    def __init__(self, signals: dict[pd.Timestamp, int]) -> None:
+        self.signals = {ts.value: direction for ts, direction in signals.items()}
+
+    def predict_batch(self, features: pd.DataFrame):
+        stamps = features["timestamp"].to_numpy()
+        preds = np.array([self.signals.get(int(t), 0) for t in stamps])
+        confs = np.where(preds != 0, 0.9, 0.0)
+        return preds, confs
+
+
+def _scenario_exchange(total: int = 800) -> FakeOscillatingExchange:
+    exchange = FakeOscillatingExchange(total_candles=total)
+    df = exchange.full_df
+    signal_index = total - 60
+    flat = float(df.loc[signal_index, "close"])
+    # Sinyal mumundan sonra fiyat sakin ve yatay: stop/TP yalnızca açıkça
+    # kurgulanan mumda tetiklenebilsin.
+    for col in ("open", "high", "low", "close"):
+        df.loc[signal_index + 1 :, col] = flat + 10.0
+    df.loc[signal_index + 1 :, "high"] = flat + 15.0
+    df.loc[signal_index + 1 :, "low"] = flat + 5.0
+    return exchange, signal_index, flat
+
+
+def _scenario_request(**overrides) -> SystemBacktestRequest:
+    base = dict(candles=700, restrict_to_holdout=False, use_meta_label=False, use_ensemble=False, open_confidence=0.6)
+    base.update(overrides)
+    return SystemBacktestRequest(**base)
+
+
+def test_entry_fills_at_next_bar_open_not_signal_close():
+    exchange, s, flat = _scenario_exchange()
+    exchange.full_df.loc[s + 1, "open"] = flat + 7.0
+    model = _ScriptedModel({exchange.full_df.loc[s, "timestamp"]: 1})
+
+    report = run_system_backtest(exchange, model, None, _scenario_request(), persist=False)
+    legacy = run_system_backtest(exchange, model, None, _scenario_request(entry_on_next_bar_open=False), persist=False)
+
+    # Bu senaryoda işlem kapanmaz; açık pozisyonun giriş fiyatı rapora
+    # yansımadığı için bir kapanış mumu kurgulanır.
+    assert report.trades_closed == 0 and legacy.trades_closed == 0
+
+    exchange.full_df.loc[s + 5, "low"] = flat - 5000.0  # stop'u kesin vuran fitil
+    report = run_system_backtest(exchange, model, None, _scenario_request(), persist=False)
+    legacy = run_system_backtest(exchange, model, None, _scenario_request(entry_on_next_bar_open=False), persist=False)
+    assert report.trades[0].entry_price == pytest.approx(flat + 7.0)
+    assert legacy.trades[0].entry_price == pytest.approx(flat)
+
+
+def test_intrabar_wick_triggers_stop_at_stop_level():
+    exchange, s, flat = _scenario_exchange()
+    exchange.full_df.loc[s + 4, "low"] = flat - 5000.0  # yalnızca fitil, kapanış yatay
+    model = _ScriptedModel({exchange.full_df.loc[s, "timestamp"]: 1})
+
+    report = run_system_backtest(exchange, model, None, _scenario_request(), persist=False)
+    legacy = run_system_backtest(exchange, model, None, _scenario_request(intrabar_stops=False), persist=False)
+
+    assert report.trades_closed == 1
+    trade = report.trades[0]
+    assert trade.exit_reason == "stop_loss"
+    # Açılış stop'un üstünde -> dolum stop seviyesinden (fitilin dibinden değil).
+    assert flat - 5000.0 < trade.exit_price < trade.entry_price
+    # Eski (yalnızca kapanış) davranış bu fitili hiç görmez.
+    assert legacy.trades_closed == 0
+
+
+def test_gap_through_stop_fills_at_open():
+    exchange, s, flat = _scenario_exchange()
+    df = exchange.full_df
+    gap_open = flat - 3000.0
+    df.loc[s + 4, ["open", "high", "low", "close"]] = [gap_open, gap_open + 5, gap_open - 5, gap_open]
+    model = _ScriptedModel({df.loc[s, "timestamp"]: 1})
+
+    report = run_system_backtest(exchange, model, None, _scenario_request(), persist=False)
+
+    trade = report.trades[0]
+    assert trade.exit_reason == "stop_loss"
+    assert trade.exit_price == pytest.approx(gap_open)
+
+
+def test_funding_is_charged_on_longs_held_across_settlements():
+    exchange, s, flat = _scenario_exchange()
+    df = exchange.full_df
+    model = _ScriptedModel({df.loc[s, "timestamp"]: 1, df.loc[s + 30, "timestamp"]: -1})
+
+    with_funding = run_system_backtest(exchange, model, None, _scenario_request(funding_rate_pct_per_8h=0.01), persist=False)
+    without = run_system_backtest(exchange, model, None, _scenario_request(funding_rate_pct_per_8h=0.0), persist=False)
+
+    trade = with_funding.trades[0]
+    assert trade.exit_reason == "signal"
+    eight_hours = 8 * 3600 * 10**9
+    events = pd.Timestamp(trade.exit_time).value // eight_hours - pd.Timestamp(trade.entry_time).value // eight_hours
+    assert events >= 3
+    assert without.trades[0].pnl_pct - trade.pnl_pct == pytest.approx(events * 0.01, abs=1e-3)

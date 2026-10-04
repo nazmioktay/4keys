@@ -65,12 +65,16 @@ class RiskRules(BaseModel):
     # teminat üzerinden büyütür. Üst sınır `MAX_LEVERAGE` (bkz.
     # `app.security.safety`) ile AYNI (3) — GERÇEK borsaya asla bundan fazla
     # kaldıraç gönderilemeyeceği için (`enforce_leverage_cap`), paper'da da
-    # test edilemez bir senaryonun bir anlamı yok. VARSAYILAN 3 (kod içi
-    # tavanın tamamı, kullanıcı isteğiyle) — likidasyon riski ayrıca
-    # değerlendirildi: gerçek stop mesafeleri (ort. %0,77, en dar %0,33)
-    # 3x'teki ~%33 likidasyon eşiğinin çok altında.
+    # test edilemez bir senaryonun bir anlamı yok.
+    #
+    # VARSAYILAN 1: backtest varsayılanı (`SystemBacktestRequest.leverage`)
+    # 1x — paper/canlı 3x çalışırken raporlanan backtest 1x olunca her kayıp
+    # backtest'in doğruladığından 3 kat büyük gerçekleşiyordu (ör. -%2,31
+    # fiyat hareketi -%7,30 olarak yazıldı). Kural: canlı kaldıraç, backtest
+    # raporunun kaldıracıyla AYNI olmalı; 3x istenirse backtest de 3x ile
+    # çalıştırılıp o rapor esas alınmalı.
     leverage: int = Field(
-        3, ge=1, le=3,
+        1, ge=1, le=3,
         description="Teminatın kontrol ettiği nominal pozisyonun çarpanı — sizing'i DEĞİL, gerçekleşen PnL'in büyüklüğünü etkiler.",
     )
 
@@ -104,8 +108,12 @@ class RiskRules(BaseModel):
     confidence_scaling_enabled: bool = Field(
         True, description="Açık ise pozisyon boyutu, tahminin confidence'ına göre (confidence_scaling_min_scale..1.0 arası) ek olarak ölçeklenir."
     )
+    # 0.5 = `live_open_confidence`/backtest'in kullandığı `open_confidence`.
+    # Önceden 0.6'ydı; kalibre güvenler pratikte en fazla ~0.56 olduğundan
+    # canlı pozisyonlar HER ZAMAN yarım boyutta açılıyor, backtest ise tam
+    # ölçeğe kadar çıkabiliyordu.
     confidence_scaling_min_confidence: float = Field(
-        0.6, ge=0, le=1, description="Bu confidence'ta (ve altında) ölçek confidence_scaling_min_scale'e sabitlenir; genelde open_confidence eşiğiyle aynı tutulmalı."
+        0.5, ge=0, le=1, description="Bu confidence'ta (ve altında) ölçek confidence_scaling_min_scale'e sabitlenir; genelde open_confidence eşiğiyle aynı tutulmalı."
     )
     confidence_scaling_min_scale: float = Field(
         0.5, gt=0, le=1, description="confidence_scaling_min_confidence'taki (veya altındaki) ölçek — 1.0 confidence'ta ölçek her zaman 1.0'dır."

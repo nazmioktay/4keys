@@ -10,75 +10,99 @@ logger = logging.getLogger(__name__)
 
 _TIMEFRAME_UNIT_MINUTES = {"m": 1, "h": 60, "d": 1440, "w": 10080}
 
-# Bir mumun "bayat" sayılması için kaç bar geçmesi gerektiği — timeframe'in
-# kendisinden biraz pay bırakır (borsa/işleme küçük gecikmeler için).
-_FRESHNESS_TOLERANCE_BARS = 2
+# Her çağrıda önbellekteki son kaç barın borsadan YENİDEN çekilip üzerine
+# yazılacağı. Eski önbellek, bir mumu henüz oluşurken yakalayıp kalıcı
+# kaydediyordu (ON CONFLICT DO NOTHING) ve son mum 2 bar "taze" sayıldığı
+# için borsaya hiç gitmiyordu — canlı karar motoru 1-2 saatlik donuk/yarım
+# veriyle karar veriyor, stop-loss'lar seviyenin çok ötesinde tetikleniyordu.
+_REFETCH_TAIL_BARS = 3
 
 
-def _timeframe_minutes(timeframe: str) -> int:
+def timeframe_minutes(timeframe: str) -> int:
     unit = timeframe[-1]
     value = int(timeframe[:-1])
     return value * _TIMEFRAME_UNIT_MINUTES.get(unit, 60)
 
 
+def _utc_now_naive() -> pd.Timestamp:
+    return pd.Timestamp.now(tz="UTC").tz_convert(None)
+
+
+def drop_unclosed_bars(ohlcv: pd.DataFrame, timeframe: str, now: pd.Timestamp | None = None) -> pd.DataFrame:
+    """Henüz kapanmamış (açılış zamanı + timeframe > şimdi) mumları atar.
+
+    Eğitim etiketleri ve backtest yalnızca kapanmış mumlar üzerinden
+    hesaplanır; canlı karar da aynı kuralı kullanmalı, yoksa model eğitimde
+    hiç görmediği yarım-mum özellikleriyle tahmin üretir."""
+    if ohlcv.empty:
+        return ohlcv
+    now = _utc_now_naive() if now is None else now
+    timestamps = pd.to_datetime(ohlcv["timestamp"])
+    if timestamps.dt.tz is not None:
+        timestamps = timestamps.dt.tz_convert(None)
+    cutoff = now - pd.Timedelta(minutes=timeframe_minutes(timeframe))
+    return ohlcv.loc[timestamps <= cutoff].reset_index(drop=True)
+
+
 def fetch_ohlcv_cached(exchange: Exchange, symbol: str, timeframe: str, limit: int) -> pd.DataFrame:
-    """`Exchange.fetch_ohlcv`'in ÖNBELLEKLİ hali: `ohlcv_raw` tablosunda
-    önceden kaydedilmiş mumlar varsa borsaya HİÇ gitmez (veya yalnızca
-    EKSİK/YENİ kuyruğu, sırayla tamamlayarak çeker) — önceden her eğitim/
-    karar döngüsü, `ml_train_lookback` (varsayılan 10.000) mumu HER
-    SEFERİNDE baştan borsadan çekiyordu; bu hem gereksiz ağ/CPU maliyeti
-    hem de borsanın rate limitine çarpma riski taşıyordu (bkz. screener
-    taramasının aynı sorundan etkilenmesi).
+    """`Exchange.fetch_ohlcv`'in ÖNBELLEKLİ hali: `ohlcv_raw` tablosundaki
+    geçmiş okunur, borsadan yalnızca son `_REFETCH_TAIL_BARS` bar ve sonrası
+    çekilip upsert edilir. Dönen veri YALNIZCA kapanmış mumları içerir.
 
     DB kapalıysa (`FOURKEYS_DATABASE_URL` boş) doğrudan `exchange.fetch_ohlcv`'e
     düşer — bu katman tamamen opsiyoneldir, DB olmadan da sistem çalışır.
     """
     if not db.is_enabled():
-        return exchange.fetch_ohlcv(symbol, timeframe, limit)
+        return drop_unclosed_bars(exchange.fetch_ohlcv(symbol, timeframe, limit + 1), timeframe).iloc[-limit:].reset_index(
+            drop=True
+        )
 
     cached = db.get_ohlcv(symbol, timeframe, limit)
 
     if cached.empty:
-        fresh = exchange.fetch_ohlcv(symbol, timeframe, limit)
-        db.save_ohlcv_bulk(symbol, timeframe, fresh)
-        return fresh
+        return _fetch_full(exchange, symbol, timeframe, limit)
 
-    last_ts = pd.Timestamp(cached["timestamp"].iloc[-1])
-    if last_ts.tzinfo is None:
-        last_ts = last_ts.tz_localize("UTC")
-    now = pd.Timestamp.now(tz="UTC")
-    timeframe_minutes = _timeframe_minutes(timeframe)
-    is_stale = (now - last_ts).total_seconds() > _FRESHNESS_TOLERANCE_BARS * timeframe_minutes * 60
-
-    if len(cached) >= limit and not is_stale:
-        return cached.iloc[-limit:].reset_index(drop=True)
-
-    # Yalnızca son kaydedilen mumdan SONRAKİ (eksik) kuyruğu çek — sıra ile,
-    # tamamlayarak: `since` son önbellek zaman damgasının hemen ardından
-    # başlar, `exchange.fetch_ohlcv` (bkz. BinanceExchange) `limit > 1000`
-    # olduğunda bu noktadan borsanın izin verdiği kadar ileriye doğru
-    # kendi içinde sayfalar.
-    since_ms = int(last_ts.timestamp() * 1000) + 1
+    bar_minutes = timeframe_minutes(timeframe)
+    tail_start_index = max(0, len(cached) - _REFETCH_TAIL_BARS)
+    tail_start = pd.Timestamp(cached["timestamp"].iloc[tail_start_index])
+    if tail_start.tzinfo is not None:
+        tail_start = tail_start.tz_convert(None)
+    since_ms = int(tail_start.tz_localize("UTC").timestamp() * 1000)
+    bars_needed = int((_utc_now_naive() - tail_start) / pd.Timedelta(minutes=bar_minutes)) + 2
     try:
-        fresh = exchange.fetch_ohlcv(symbol, timeframe, limit, since=since_ms)
+        fresh = exchange.fetch_ohlcv(symbol, timeframe, min(max(bars_needed, 1), max(limit, 1)), since=since_ms)
     except Exception:  # noqa: BLE001 - borsa erişilemezse, en azından ELİMİZDEKİ önbellekle devam edilebilir
         logger.warning("fetch_ohlcv_cached: %s için yeni kuyruk çekilemedi, önbellekle devam ediliyor", symbol)
-        fresh = pd.DataFrame(columns=cached.columns)
+        return drop_unclosed_bars(cached, timeframe).iloc[-limit:].reset_index(drop=True)
 
+    fresh = drop_unclosed_bars(fresh, timeframe)
     if not fresh.empty:
         db.save_ohlcv_bulk(symbol, timeframe, fresh)
-        combined = pd.concat([cached, fresh], ignore_index=True)
-        combined = combined.drop_duplicates(subset="timestamp").sort_values("timestamp").reset_index(drop=True)
+        kept = cached.loc[~pd.to_datetime(cached["timestamp"]).isin(pd.to_datetime(fresh["timestamp"]))]
+        combined = pd.concat([kept, fresh], ignore_index=True).sort_values("timestamp").reset_index(drop=True)
     else:
         combined = cached
 
+    combined = drop_unclosed_bars(combined, timeframe)
     if len(combined) < limit:
         # Önbellek + yeni kuyruk toplamı hâlâ istenenden az — DB muhtemelen
         # soğuk/kısmi (ör. ilk kurulum) — tam geçmişi bir kez borsadan çekip
         # DB'yi bu vesileyle tamamen doldur.
-        full = exchange.fetch_ohlcv(symbol, timeframe, limit)
-        if not full.empty:
-            db.save_ohlcv_bulk(symbol, timeframe, full)
-        return full
+        return _fetch_full(exchange, symbol, timeframe, limit)
 
     return combined.iloc[-limit:].reset_index(drop=True)
+
+
+def _fetch_full(exchange: Exchange, symbol: str, timeframe: str, limit: int) -> pd.DataFrame:
+    full = drop_unclosed_bars(exchange.fetch_ohlcv(symbol, timeframe, limit + 1), timeframe)
+    if not full.empty:
+        db.save_ohlcv_bulk(symbol, timeframe, full)
+    return full.iloc[-limit:].reset_index(drop=True)
+
+
+def repair_ohlcv_cache(exchange: Exchange, symbol: str, timeframe: str, limit: int) -> int:
+    """Son `limit` kapanmış mumu borsadan baştan çekip önbelleğin üzerine
+    yazar. Eski önbellek yarım (henüz oluşurken yakalanmış) mumları kalıcı
+    kaydettiği için geçmişe yayılmış bozuk satırları onarmak içindir."""
+    full = drop_unclosed_bars(exchange.fetch_ohlcv(symbol, timeframe, limit), timeframe)
+    return db.save_ohlcv_bulk(symbol, timeframe, full)

@@ -62,6 +62,19 @@ def _cmd_train_all(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_repair_ohlcv(args: argparse.Namespace) -> int:
+    from app.exchanges.cache import repair_ohlcv_cache
+
+    init_db()
+    exchange = get_exchange(settings.exchange_id)
+    symbol = args.symbol or settings.ml_primary_symbol
+    timeframe = args.timeframe or settings.ml_train_timeframe
+    lookback = args.lookback or settings.ml_train_lookback
+    written = repair_ohlcv_cache(exchange, symbol, timeframe, lookback)
+    print(json.dumps({"symbol": symbol, "timeframe": timeframe, "rows_upserted": written}, ensure_ascii=False))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python -m app.cli",
@@ -100,6 +113,18 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     train_all_parser.set_defaults(func=_cmd_train_all)
+
+    repair_parser = subparsers.add_parser(
+        "repair-ohlcv",
+        help=(
+            "ohlcv_raw önbelleğindeki geçmişi borsadan baştan çekip üzerine yazar — eski önbelleğin "
+            "kalıcı kaydettiği yarım mumları onarmak için. Yeniden eğitimden ÖNCE bir kez çalıştırın."
+        ),
+    )
+    repair_parser.add_argument("--symbol", default=None, help="Varsayılan: settings.ml_primary_symbol")
+    repair_parser.add_argument("--timeframe", default=None, help="Varsayılan: settings.ml_train_timeframe")
+    repair_parser.add_argument("--lookback", type=int, default=None, help="Varsayılan: settings.ml_train_lookback")
+    repair_parser.set_defaults(func=_cmd_repair_ohlcv)
 
     args = parser.parse_args(argv)
     return args.func(args)

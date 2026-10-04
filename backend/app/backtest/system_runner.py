@@ -20,7 +20,7 @@ from app.ml.model_status import get_balanced_accuracy, get_holdout_start_time
 from app.ml.online_model import DEFAULT_ONLINE_MODEL_PATH, OnlineSignalModel
 from app.portfolio.risk_manager import calculate_kelly_position_size, calculate_position_size
 
-from app.exchanges.cache import fetch_ohlcv_cached
+from app.exchanges.cache import fetch_ohlcv_cached, timeframe_minutes
 
 if TYPE_CHECKING:
     from app.ml.lstm_model import LSTMSignalModel
@@ -35,6 +35,8 @@ _DIRECTION_MAP = {1: "long", -1: "short", 0: "neutral"}
 # aynı `len(ohlcv) < 30` kontrolünün, burada göstergelerin ısınma
 # gereksinimine göre büyütülmüş hali).
 _MIN_CANDLES = 250
+# Perpetual funding 00:00/08:00/16:00 UTC'de ödenir.
+_FUNDING_INTERVAL_NS = 8 * 3600 * 1_000_000_000
 
 def _fmt_mult(mult: float | None) -> str:
     return f"{mult}xATR" if mult is not None else "kapalı"
@@ -345,8 +347,14 @@ def run_system_backtest(
         lstm_confidences = [None] * len(features)
 
     cost_pct_roundtrip = (request.commission_pct + request.slippage_pct) * 2
+    bar_delta = pd.Timedelta(minutes=timeframe_minutes(timeframe))
+    ohlcv_open = ohlcv["open"].to_numpy(dtype=float)
+    ohlcv_high = ohlcv["high"].to_numpy(dtype=float)
+    ohlcv_low = ohlcv["low"].to_numpy(dtype=float)
 
     position: dict | None = None
+    pending_entry: dict | None = None  # sinyal mumunda üretilen, bir sonraki mumun açılışında dolacak giriş
+    pending_exit = False  # model kapanış sinyali, bir sonraki mumun açılışında dolacak
     trades: list[dict] = []
     equity = request.initial_balance
     equity_curve = [equity]
@@ -355,11 +363,150 @@ def run_system_backtest(
     max_directional_confidence = 0.0
     meta_label_vetoes = 0
 
+    def _funding_pct(direction: str, entry_fill_time: pd.Timestamp, exit_fill_time: pd.Timestamp) -> float:
+        if request.funding_rate_pct_per_8h == 0:
+            return 0.0
+        events = max(int(exit_fill_time.value // _FUNDING_INTERVAL_NS) - int(entry_fill_time.value // _FUNDING_INTERVAL_NS), 0)
+        paid = events * request.funding_rate_pct_per_8h
+        return paid if direction == "long" else -paid
+
+    def _realize(size_quote: float, exit_price: float, exit_fill_time: pd.Timestamp, ts: pd.Timestamp, i: int, exit_reason: str) -> None:
+        nonlocal equity
+        change_pct = (exit_price / position["entry_price"] - 1) * 100
+        gross_pct = change_pct if position["direction"] == "long" else -change_pct
+        net_pct = gross_pct - cost_pct_roundtrip - _funding_pct(position["direction"], position["entry_fill_time"], exit_fill_time)
+        # `net_pct`: HAM fiyat hareketi (kaldıraçsız). `leveraged_net_pct`:
+        # bu hareketin TEMİNAT üzerindeki gerçek etkisi (bkz.
+        # `SystemBacktestRequest.leverage` yorumu) — Kelly istatistikleri
+        # ve raporlanan pnl_pct BUNU kullanmalı, ham fiyat hareketini değil.
+        leveraged_net_pct = net_pct * request.leverage
+        pnl_quote = size_quote * leveraged_net_pct / 100
+        equity += pnl_quote
+        closed_trade_pnls.append(leveraged_net_pct)
+        trades.append(
+            {
+                "direction": position["direction"],
+                "entry_time": position["entry_time"],
+                "exit_time": ts,
+                "entry_price": position["entry_price"],
+                "exit_price": exit_price,
+                "pnl_pct": round(leveraged_net_pct, 3),
+                "pnl_quote": round(pnl_quote, 4),
+                "equity_after": round(equity, 4),
+                "exit_reason": exit_reason,
+                "duration_candles": i - position["entry_index"],
+                "size_quote": round(size_quote, 4),
+                "size_explanation": position["size_explanation"],
+                "xgboost_direction": position["decision"]["xgboost_direction"],
+                "xgboost_confidence": position["decision"]["xgboost_confidence"],
+                "lstm_direction": position["decision"]["lstm_direction"],
+                "lstm_confidence": position["decision"]["lstm_confidence"],
+                "online_direction": position["decision"]["online_direction"],
+                "online_confidence": position["decision"]["online_confidence"],
+                "decision_reason": position["decision"]["decision_reason"],
+            }
+        )
+        equity_curve.append(equity)
+
+    def _open_position(signal: dict, entry_price: float, entry_time: pd.Timestamp, entry_fill_time: pd.Timestamp, i: int) -> dict:
+        direction = signal["direction"]
+        atr_signal = signal["atr"]
+        initial_stop_loss_price = None
+        take_profit_price = None
+        if request.use_dynamic_exit:
+            # `DynamicExitModel.predict` (peak_pct, trough_pct) döner —
+            # LONG için kâr-al=peak (yukarı), zarar-durdur=trough (aşağı);
+            # SHORT için ters (yukarı hareket SHORT'un zararı, aşağı
+            # hareket kârı) — bkz. `app.ml.dynamic_exit` docstring'i.
+            sample = signal["row"][FEATURE_COLUMNS].to_frame().T
+            peak_pct, trough_pct = dynamic_exit_model.predict(sample)
+            # Ters işaret koruması: peak_pct her zaman >=0 (yukarı),
+            # trough_pct her zaman <=0 (aşağı) beklenir — model nadiren
+            # tersini tahmin ederse, o taraf devre dışı bırakılır
+            # (None) yerine ATR gibi ters/anlamsız bir seviye AÇILMAZ.
+            peak_pct = max(float(peak_pct[0]), 0.0)
+            trough_pct = min(float(trough_pct[0]), 0.0)
+            if direction == "long":
+                take_profit_price = entry_price * (1 + peak_pct / 100) if peak_pct > 0 else None
+                initial_stop_loss_price = entry_price * (1 + trough_pct / 100) if trough_pct < 0 else None
+            else:
+                # SHORT: kâr, fiyat AŞAĞI giderse (trough_pct kullan, halihazırda
+                # negatif -> otomatik entry'nin ALTINDA); zarar, fiyat YUKARI
+                # giderse (peak_pct kullan, pozitif -> otomatik entry'nin ÜSTÜNDE).
+                take_profit_price = entry_price * (1 + trough_pct / 100) if trough_pct < 0 else None
+                initial_stop_loss_price = entry_price * (1 + peak_pct / 100) if peak_pct > 0 else None
+        else:
+            if request.atr_stop_loss_mult is not None:
+                initial_stop_loss_price = (
+                    entry_price - request.atr_stop_loss_mult * atr_signal
+                    if direction == "long"
+                    else entry_price + request.atr_stop_loss_mult * atr_signal
+                )
+            if request.atr_take_profit_mult is not None:
+                take_profit_price = (
+                    entry_price + request.atr_take_profit_mult * atr_signal
+                    if direction == "long"
+                    else entry_price - request.atr_take_profit_mult * atr_signal
+                )
+        size_quote, size_explanation = _compute_position_size(
+            equity, entry_price, initial_stop_loss_price, atr_signal, direction, signal["confidence"], closed_trade_pnls, request
+        )
+        partial_take_profit_price = None
+        if request.partial_take_profit_atr_mult is not None:
+            partial_take_profit_price = (
+                entry_price + request.partial_take_profit_atr_mult * atr_signal
+                if direction == "long"
+                else entry_price - request.partial_take_profit_atr_mult * atr_signal
+            )
+        return {
+            "direction": direction,
+            "entry_price": entry_price,
+            "entry_time": entry_time,
+            "entry_fill_time": entry_fill_time,
+            "entry_index": i,
+            "initial_stop_loss_price": initial_stop_loss_price,
+            "trailing_stop_price": initial_stop_loss_price,
+            "take_profit_price": take_profit_price,
+            "partial_take_profit_price": partial_take_profit_price,
+            "partial_tp_taken": False,
+            "best_price": entry_price,
+            "size_quote": size_quote,
+            "remaining_size_quote": size_quote,
+            "size_explanation": size_explanation,
+            "decision": signal["decision"],
+        }
+
+    def _update_trailing(high_ref: float, low_ref: float, atr_now: float) -> None:
+        if position["direction"] == "long":
+            position["best_price"] = max(position["best_price"], high_ref)
+            if request.atr_trailing_mult is not None:
+                candidate = position["best_price"] - request.atr_trailing_mult * atr_now
+                position["trailing_stop_price"] = max(position["trailing_stop_price"], candidate)
+        else:
+            position["best_price"] = min(position["best_price"], low_ref)
+            if request.atr_trailing_mult is not None:
+                candidate = position["best_price"] + request.atr_trailing_mult * atr_now
+                position["trailing_stop_price"] = min(position["trailing_stop_price"], candidate)
+
     for i in range(len(features)):
         row = features.iloc[i]
         price = float(row["close"])
         ts = pd.Timestamp(int(row["timestamp"]))
         atr_now = float(row["atr"])
+        bar_index = int(valid_positions[i])
+        bar_open = ohlcv_open[bar_index]
+        bar_high = ohlcv_high[bar_index]
+        bar_low = ohlcv_low[bar_index]
+
+        # Önceki mumun kapanışında üretilen sinyaller bu mumun AÇILIŞINDA dolar.
+        if pending_exit and position is not None:
+            _realize(position["remaining_size_quote"], bar_open, ts, ts, i, "signal")
+            position = None
+        pending_exit = False
+        if pending_entry is not None:
+            if position is None:
+                position = _open_position(pending_entry, bar_open, ts, ts, i)
+            pending_entry = None
 
         xgb_pred = Prediction(direction=str(xgb_directions[i]), confidence=float(confidences[i]))
         decision_parts = [f"XGBoost={xgb_pred.direction}({xgb_pred.confidence:.2f})"]
@@ -393,134 +540,83 @@ def run_system_backtest(
             max_directional_confidence = max(max_directional_confidence, confidence)
 
         if position is not None:
-            if position["direction"] == "long":
-                position["best_price"] = max(position["best_price"], price)
-                if request.atr_trailing_mult is not None:
-                    candidate = position["best_price"] - request.atr_trailing_mult * atr_now
-                    position["trailing_stop_price"] = max(position["trailing_stop_price"], candidate)
-                # NOT: `request.atr_stop_loss_mult`/`atr_take_profit_mult` YERİNE
-                # pozisyonun KENDİ `initial_stop_loss_price`/`take_profit_price`
-                # alanlarına bakılır — bu iki alan hem ATR-çarpanı hem de
-                # dinamik-çıkış modundan (bkz. pozisyon açma bloğu) AYNI şekilde
-                # None/dolu olur, kaynağı burada bilmeye gerek yok.
-                stop_hit = position["initial_stop_loss_price"] is not None and price <= position["trailing_stop_price"]
-                take_profit_hit = position["take_profit_price"] is not None and price >= position["take_profit_price"]
+            is_long = position["direction"] == "long"
+            if not request.intrabar_stops:
+                _update_trailing(price, price, atr_now)
+            # NOT: `request.atr_stop_loss_mult`/`atr_take_profit_mult` YERİNE
+            # pozisyonun KENDİ `initial_stop_loss_price`/`take_profit_price`
+            # alanlarına bakılır — bu iki alan hem ATR-çarpanı hem de
+            # dinamik-çıkış modundan (bkz. `_open_position`) AYNI şekilde
+            # None/dolu olur, kaynağı burada bilmeye gerek yok.
+            stop_level = position["trailing_stop_price"] if position["initial_stop_loss_price"] is not None else None
+            tp_level = position["take_profit_price"]
+            stop_reason = (
+                "trailing_stop" if position["trailing_stop_price"] != position["initial_stop_loss_price"] else "stop_loss"
+            )
+            exit_price: float | None = None
+            exit_reason = ""
+            exit_fill_time = ts + bar_delta
+            if request.intrabar_stops:
+                # Stop ve kâr-al aynı mumda vurulduysa mum içindeki sıra
+                # bilinemez — kötümser varsayım: önce stop. Açılış seviyeyi
+                # zaten aştıysa (gap) dolum seviyeden değil açılıştan olur.
+                if stop_level is not None:
+                    if is_long and bar_low <= stop_level:
+                        exit_price, exit_reason = min(stop_level, bar_open), stop_reason
+                    elif not is_long and bar_high >= stop_level:
+                        exit_price, exit_reason = max(stop_level, bar_open), stop_reason
+                if exit_price is None and tp_level is not None:
+                    if is_long and bar_high >= tp_level:
+                        exit_price, exit_reason = max(tp_level, bar_open), "take_profit"
+                    elif not is_long and bar_low <= tp_level:
+                        exit_price, exit_reason = min(tp_level, bar_open), "take_profit"
             else:
-                position["best_price"] = min(position["best_price"], price)
-                if request.atr_trailing_mult is not None:
-                    candidate = position["best_price"] + request.atr_trailing_mult * atr_now
-                    position["trailing_stop_price"] = min(position["trailing_stop_price"], candidate)
-                stop_hit = position["initial_stop_loss_price"] is not None and price >= position["trailing_stop_price"]
-                take_profit_hit = position["take_profit_price"] is not None and price <= position["take_profit_price"]
+                if stop_level is not None and ((is_long and price <= stop_level) or (not is_long and price >= stop_level)):
+                    exit_price, exit_reason = price, stop_reason
+                elif tp_level is not None and ((is_long and price >= tp_level) or (not is_long and price <= tp_level)):
+                    exit_price, exit_reason = price, "take_profit"
 
             # Kademeli kâr alma: pozisyonun TAMAMI değil, yalnızca
             # `partial_take_profit_fraction` kadarı bu ilk (daha yakın) hedefte
-            # realize edilir — kalan `remaining_size_quote`, aşağıdaki tam
-            # kapanış mantığına (stop/take-profit/sinyal) AYNEN tabi kalır, bir
+            # realize edilir — kalan `remaining_size_quote`, tam kapanış
+            # mantığına (stop/take-profit/sinyal) AYNEN tabi kalır, bir
             # pozisyon başına EN FAZLA bir kez tetiklenir (`partial_tp_taken`).
-            partial_tp_hit = (
-                not position["partial_tp_taken"]
-                and position["partial_take_profit_price"] is not None
-                and (
-                    (position["direction"] == "long" and price >= position["partial_take_profit_price"])
-                    or (position["direction"] == "short" and price <= position["partial_take_profit_price"])
-                )
-            )
-            if partial_tp_hit:
-                partial_size = position["remaining_size_quote"] * request.partial_take_profit_fraction
-                change_pct = (price / position["entry_price"] - 1) * 100
-                gross_pct = change_pct if position["direction"] == "long" else -change_pct
-                net_pct = gross_pct - cost_pct_roundtrip
-                # `net_pct`: HAM fiyat hareketi (kaldıraçsız). `leveraged_net_pct`:
-                # bu hareketin TEMİNAT üzerindeki gerçek etkisi (bkz.
-                # `SystemBacktestRequest.leverage` yorumu) — Kelly istatistikleri
-                # ve raporlanan pnl_pct BUNU kullanmalı, ham fiyat hareketini değil.
-                leveraged_net_pct = net_pct * request.leverage
-                pnl_quote = partial_size * leveraged_net_pct / 100
-                equity += pnl_quote
-                closed_trade_pnls.append(leveraged_net_pct)
-                trades.append(
-                    {
-                        "direction": position["direction"],
-                        "entry_time": position["entry_time"],
-                        "exit_time": ts,
-                        "entry_price": position["entry_price"],
-                        "exit_price": price,
-                        "pnl_pct": round(leveraged_net_pct, 3),
-                        "pnl_quote": round(pnl_quote, 4),
-                        "equity_after": round(equity, 4),
-                        "exit_reason": "partial_take_profit",
-                        "duration_candles": i - position["entry_index"],
-                        "size_quote": round(partial_size, 4),
-                        "size_explanation": position["size_explanation"],
-                        "xgboost_direction": position["decision"]["xgboost_direction"],
-                        "xgboost_confidence": position["decision"]["xgboost_confidence"],
-                        "lstm_direction": position["decision"]["lstm_direction"],
-                        "lstm_confidence": position["decision"]["lstm_confidence"],
-                        "online_direction": position["decision"]["online_direction"],
-                        "online_confidence": position["decision"]["online_confidence"],
-                        "decision_reason": position["decision"]["decision_reason"],
-                    }
-                )
-                equity_curve.append(equity)
-                position["remaining_size_quote"] -= partial_size
-                position["partial_tp_taken"] = True
-                continue  # kalan pozisyon acik kalir, ayni barda tam kapanis kontrolu bir sonraki bara birakilir
+            partial_level = position["partial_take_profit_price"]
+            if exit_price is None and not position["partial_tp_taken"] and partial_level is not None:
+                partial_price: float | None = None
+                if request.intrabar_stops:
+                    if is_long and bar_high >= partial_level:
+                        partial_price = max(partial_level, bar_open)
+                    elif not is_long and bar_low <= partial_level:
+                        partial_price = min(partial_level, bar_open)
+                elif (is_long and price >= partial_level) or (not is_long and price <= partial_level):
+                    partial_price = price
+                if partial_price is not None:
+                    partial_size = position["remaining_size_quote"] * request.partial_take_profit_fraction
+                    _realize(partial_size, partial_price, exit_fill_time, ts, i, "partial_take_profit")
+                    position["remaining_size_quote"] -= partial_size
+                    position["partial_tp_taken"] = True
+                    if request.intrabar_stops:
+                        _update_trailing(bar_high, bar_low, atr_now)
+                    continue  # kalan pozisyon acik kalir, ayni barda tam kapanis kontrolu bir sonraki bara birakilir
 
-            opposing = (position["direction"] == "long" and direction == "short") or (
-                position["direction"] == "short" and direction == "long"
-            )
-            signal_close = confidence >= request.close_confidence and (opposing or direction == "neutral")
-            should_close = stop_hit or take_profit_hit or signal_close
+            if exit_price is None:
+                opposing = (is_long and direction == "short") or (not is_long and direction == "long")
+                if confidence >= request.close_confidence and (opposing or direction == "neutral"):
+                    if request.entry_on_next_bar_open:
+                        pending_exit = True
+                        if request.intrabar_stops:
+                            _update_trailing(bar_high, bar_low, atr_now)
+                        continue  # aynı barda yeniden pozisyon açılmaz
+                    exit_price, exit_reason = price, "signal"
 
-            if should_close:
-                if stop_hit:
-                    exit_reason = (
-                        "trailing_stop" if position["trailing_stop_price"] != position["initial_stop_loss_price"] else "stop_loss"
-                    )
-                elif take_profit_hit:
-                    exit_reason = "take_profit"
-                else:
-                    exit_reason = "signal"
-
-                change_pct = (price / position["entry_price"] - 1) * 100
-                gross_pct = change_pct if position["direction"] == "long" else -change_pct
-                net_pct = gross_pct - cost_pct_roundtrip
-                # bkz. yukarıdaki `partial_tp_hit` bloğundaki AYNI yorum —
-                # `leveraged_net_pct`, `net_pct`'in TEMİNAT üzerindeki gerçek etkisi.
-                leveraged_net_pct = net_pct * request.leverage
-                # `remaining_size_quote`: kademeli kâr alma tetiklenmediyse
-                # `size_quote` ile aynıdır; tetiklendiyse yalnızca KALAN kısım
-                # (bkz. yukarıdaki `partial_tp_hit` bloğu).
-                pnl_quote = position["remaining_size_quote"] * leveraged_net_pct / 100
-                equity += pnl_quote
-                closed_trade_pnls.append(leveraged_net_pct)
-                trades.append(
-                    {
-                        "direction": position["direction"],
-                        "entry_time": position["entry_time"],
-                        "exit_time": ts,
-                        "entry_price": position["entry_price"],
-                        "exit_price": price,
-                        "pnl_pct": round(leveraged_net_pct, 3),
-                        "pnl_quote": round(pnl_quote, 4),
-                        "equity_after": round(equity, 4),
-                        "exit_reason": exit_reason,
-                        "duration_candles": i - position["entry_index"],
-                        "size_quote": round(position["remaining_size_quote"], 4),
-                        "size_explanation": position["size_explanation"],
-                        "xgboost_direction": position["decision"]["xgboost_direction"],
-                        "xgboost_confidence": position["decision"]["xgboost_confidence"],
-                        "lstm_direction": position["decision"]["lstm_direction"],
-                        "lstm_confidence": position["decision"]["lstm_confidence"],
-                        "online_direction": position["decision"]["online_direction"],
-                        "online_confidence": position["decision"]["online_confidence"],
-                        "decision_reason": position["decision"]["decision_reason"],
-                    }
-                )
-                equity_curve.append(equity)
+            if exit_price is not None:
+                _realize(position["remaining_size_quote"], exit_price, exit_fill_time, ts, i, exit_reason)
                 position = None
                 continue  # aynı barda hemen yeniden pozisyon açılmaz
+
+            if request.intrabar_stops:
+                _update_trailing(bar_high, bar_low, atr_now)
 
         if position is None and direction in ("long", "short") and confidence >= request.open_confidence:
             if meta_model is not None and request.use_meta_label:
@@ -528,67 +624,11 @@ def run_system_backtest(
                 if not decision.act:
                     meta_label_vetoes += 1
                     continue
-            initial_stop_loss_price = None
-            take_profit_price = None
-            if request.use_dynamic_exit:
-                # `DynamicExitModel.predict` (peak_pct, trough_pct) döner —
-                # LONG için kâr-al=peak (yukarı), zarar-durdur=trough (aşağı);
-                # SHORT için ters (yukarı hareket SHORT'un zararı, aşağı
-                # hareket kârı) — bkz. `app.ml.dynamic_exit` docstring'i.
-                sample = row[FEATURE_COLUMNS].to_frame().T
-                peak_pct, trough_pct = dynamic_exit_model.predict(sample)
-                # Ters işaret koruması: peak_pct her zaman >=0 (yukarı),
-                # trough_pct her zaman <=0 (aşağı) beklenir — model nadiren
-                # tersini tahmin ederse, o taraf devre dışı bırakılır
-                # (None) yerine ATR gibi ters/anlamsız bir seviye AÇILMAZ.
-                peak_pct = max(float(peak_pct[0]), 0.0)
-                trough_pct = min(float(trough_pct[0]), 0.0)
-                if direction == "long":
-                    take_profit_price = price * (1 + peak_pct / 100) if peak_pct > 0 else None
-                    initial_stop_loss_price = price * (1 + trough_pct / 100) if trough_pct < 0 else None
-                else:
-                    # SHORT: kâr, fiyat AŞAĞI giderse (trough_pct kullan, halihazırda
-                    # negatif -> otomatik entry'nin ALTINDA); zarar, fiyat YUKARI
-                    # giderse (peak_pct kullan, pozitif -> otomatik entry'nin ÜSTÜNDE).
-                    take_profit_price = price * (1 + trough_pct / 100) if trough_pct < 0 else None
-                    initial_stop_loss_price = price * (1 + peak_pct / 100) if peak_pct > 0 else None
-            else:
-                if request.atr_stop_loss_mult is not None:
-                    initial_stop_loss_price = (
-                        price - request.atr_stop_loss_mult * atr_now
-                        if direction == "long"
-                        else price + request.atr_stop_loss_mult * atr_now
-                    )
-                if request.atr_take_profit_mult is not None:
-                    take_profit_price = (
-                        price + request.atr_take_profit_mult * atr_now
-                        if direction == "long"
-                        else price - request.atr_take_profit_mult * atr_now
-                    )
-            size_quote, size_explanation = _compute_position_size(
-                equity, price, initial_stop_loss_price, atr_now, direction, confidence, closed_trade_pnls, request
-            )
-            partial_take_profit_price = None
-            if request.partial_take_profit_atr_mult is not None:
-                partial_take_profit_price = (
-                    price + request.partial_take_profit_atr_mult * atr_now
-                    if direction == "long"
-                    else price - request.partial_take_profit_atr_mult * atr_now
-                )
-            position = {
+            signal = {
                 "direction": direction,
-                "entry_price": price,
-                "entry_time": ts,
-                "entry_index": i,
-                "initial_stop_loss_price": initial_stop_loss_price,
-                "trailing_stop_price": initial_stop_loss_price,
-                "take_profit_price": take_profit_price,
-                "partial_take_profit_price": partial_take_profit_price,
-                "partial_tp_taken": False,
-                "best_price": price,
-                "size_quote": size_quote,
-                "remaining_size_quote": size_quote,
-                "size_explanation": size_explanation,
+                "confidence": confidence,
+                "atr": atr_now,
+                "row": row,
                 "decision": {
                     "xgboost_direction": xgb_pred.direction,
                     "xgboost_confidence": round(xgb_pred.confidence, 4),
@@ -599,6 +639,10 @@ def run_system_backtest(
                     "decision_reason": decision_reason,
                 },
             }
+            if request.entry_on_next_bar_open:
+                pending_entry = signal
+            else:
+                position = _open_position(signal, price, ts, ts + bar_delta, i)
 
     trades_closed = len(trades)
     wins = sum(1 for t in trades if t["pnl_pct"] > 0)
@@ -655,6 +699,21 @@ def run_system_backtest(
             )
         ),
     ]
+    warnings.append(
+        "Yürütme: "
+        + (
+            "sinyaller bir sonraki mumun açılışında dolar"
+            if request.entry_on_next_bar_open
+            else "sinyaller sinyal mumunun kapanışında dolar (İYİMSER — gerçekte o fiyattan işlem yapılamaz)"
+        )
+        + "; "
+        + (
+            "stop/kâr-al mum içi high/low ile tetiklenir, gap'te açılıştan dolar"
+            if request.intrabar_stops
+            else "stop/kâr-al yalnızca kapanışla kontrol edilir (İYİMSER)"
+        )
+        + f"; funding %{request.funding_rate_pct_per_8h:g}/8s nominal üzerinden düşülür."
+    )
     if request.leverage > 1:
         warnings.append(
             f"Kaldıraç: {request.leverage}x — pozisyon boyutlandırma (Kelly/fixed_risk) DEĞİŞMEDİ, hâlâ equity'nin "

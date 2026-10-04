@@ -113,6 +113,28 @@ class SystemBacktestRequest(BaseModel):
     close_confidence: float = Field(default=0.45, ge=0.34, le=1.0)
     commission_pct: float = Field(default=0.04, ge=0)
     slippage_pct: float = Field(default=0.02, ge=0)
+    # Gerçekçi yürütme: sinyal mum KAPANIŞINDA üretilir, ama o kapanış
+    # fiyatından işlem yapılamaz — emir bir sonraki mumun açılışında dolar
+    # (canlı motor da sinyali kapanmış mumla üretip anlık fiyattan işlem yapar).
+    entry_on_next_bar_open: bool = Field(
+        default=True,
+        description="True: sinyal (açılış VE model kapanışı) bir sonraki mumun açılışında dolar. False: eski, iyimser davranış (sinyal mumunun kapanışında).",
+    )
+    intrabar_stops: bool = Field(
+        default=True,
+        description=(
+            "True: stop/kâr-al mum içi high/low ile tetiklenir, dolum seviyeden (açılış seviyeyi zaten aştıysa "
+            "açılıştan — gap). Aynı mumda ikisi de vurulursa kötümser (stop) kabul edilir. False: eski davranış "
+            "(yalnızca kapanış, kapanıştan dolum)."
+        ),
+    )
+    # Perpetual futures funding'i her 8 saatte bir (00/08/16 UTC) NOMİNAL
+    # pozisyon üzerinden ödenir: pozitif oranda long öder, short alır. Önceden
+    # backtest bunu hiç düşmüyordu. Varsayılan Binance'in taban oranı (%0,01).
+    funding_rate_pct_per_8h: float = Field(
+        default=0.01,
+        description="8 saatlik funding oranı (%) — long için maliyet, short için gelir. 0 = funding yok sayılır.",
+    )
     # Kaldıraç: pozisyon boyutlandırma (Kelly/fixed_risk, max_position_exposure_pct)
     # DEĞİŞMEZ — o hesap her zaman TEMİNAT (equity'nin yüzdesi) anlamına gelir.
     # Kaldıraç yalnızca o teminatın kontrol ettiği NOMİNAL pozisyonu büyütür:

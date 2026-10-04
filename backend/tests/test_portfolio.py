@@ -555,3 +555,79 @@ def test_decision_engine_force_closes_on_stop_loss_breach():
     assert action is not None
     assert action.type == "close"
     assert "stop-loss" in action.reason
+
+
+class _TickerExchange(_StaticOhlcvExchange):
+    """Mum kapanışı ~110 olan statik seri + ayarlanabilir canlı fiyat."""
+
+    def __init__(self, live_price: float | None) -> None:
+        self.live_price = live_price
+
+    def fetch_ticker_price(self, symbol, market_type="future"):
+        return self.live_price
+
+
+def _engine_with(exchange, model, portfolio, memory=None):
+    return DecisionEngine(
+        exchange=exchange,
+        model=model,
+        positions=PaperPositionStore(),
+        timeframe="4h",
+        lookback=220,
+        open_confidence=0.6,
+        close_confidence=0.55,
+        portfolio=portfolio,
+        signal_bar_memory=memory,
+    )
+
+
+def test_stop_loss_uses_live_price_even_when_bar_close_is_above_stop():
+    portfolio = PortfolioManager(starting_equity=1000, rules=RiskRules(entry_tranche_weights=[1.0]))
+    portfolio.open("BTC/USDT", "long", entry_price=110, size_quote=100, stop_loss_price=105)
+    engine = _engine_with(_TickerExchange(live_price=104.0), _FixedModel("long", 0.9), portfolio)
+
+    action = engine.evaluate("BTC/USDT")
+
+    assert action.type == "close"
+    assert "stop-loss" in action.reason
+    assert action.price == pytest.approx(104.0)
+
+
+def test_stop_loss_not_triggered_when_live_price_is_above_stop():
+    portfolio = PortfolioManager(starting_equity=1000, rules=RiskRules(entry_tranche_weights=[1.0]))
+    portfolio.open("BTC/USDT", "long", entry_price=110, size_quote=100, stop_loss_price=105)
+    engine = _engine_with(_TickerExchange(live_price=108.0), _FixedModel("long", 0.9), portfolio)
+
+    assert engine.evaluate("BTC/USDT").type != "close"
+
+
+def test_model_signal_is_applied_only_once_per_closed_bar():
+    portfolio = PortfolioManager(
+        starting_equity=1000, rules=RiskRules(entry_tranche_weights=[1.0], max_symbol_exposure_pct=100, max_total_exposure_pct=100)
+    )
+    memory: dict = {}
+    engine = _engine_with(_TickerExchange(live_price=None), _FixedModel("long", 0.9), portfolio, memory)
+    assert engine.run_cycle(["BTC/USDT"])[0].type == "open_long"
+
+    # Aynı kapanmış mum, ters sinyal: kapatmamalı (bu mumun sinyali işlendi).
+    engine.model = _FixedModel("short", 0.9)
+    second = engine.run_cycle(["BTC/USDT"])[0]
+    assert second.type == "hold"
+    assert "yeni kapanmış mum yok" in second.reason
+    assert portfolio.get("BTC/USDT") is not None
+
+    # Yeni bir mum kapandığında sinyal yeniden değerlendirilir.
+    memory["BTC/USDT"] = pd.Timestamp("2000-01-01")
+    assert engine.run_cycle(["BTC/USDT"])[0].type == "close"
+
+
+def test_new_bar_entry_uses_live_price_when_available():
+    portfolio = PortfolioManager(
+        starting_equity=1000, rules=RiskRules(entry_tranche_weights=[1.0], max_symbol_exposure_pct=100, max_total_exposure_pct=100)
+    )
+    engine = _engine_with(_TickerExchange(live_price=111.5), _FixedModel("long", 0.9), portfolio, {})
+
+    action = engine.run_cycle(["BTC/USDT"])[0]
+
+    assert action.type == "open_long"
+    assert portfolio.get("BTC/USDT").entry_price == pytest.approx(111.5)

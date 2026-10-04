@@ -576,8 +576,10 @@ def save_ohlcv_bulk(symbol: str, timeframe: str, ohlcv: pd.DataFrame) -> int:
     volume kolonları) tek seferde yazar — `app.backtest.system_runner`,
     Grafana'nın candlestick panelinin okuyabilmesi için backtest'te
     kullanılan geçmişi buraya "backfill" eder (bkz.
-    `record_feature_snapshots_bulk` aynı ON CONFLICT DO NOTHING deseni).
-    Zaten kayıtlı (time, symbol, timeframe) satırlar sessizce atlanır."""
+    `record_feature_snapshots_bulk`). Zaten kayıtlı (time, symbol, timeframe)
+    satırların OHLCV alanları GÜNCELLENİR (upsert): bir mum henüz oluşurken
+    yakalanıp kaydedildiyse, sonraki çekimde kapanmış hali onun üzerine
+    yazılır — önceden ON CONFLICT DO NOTHING ile yarım mum kalıcı oluyordu."""
     if not is_enabled() or ohlcv.empty:
         return 0
 
@@ -610,7 +612,10 @@ def save_ohlcv_bulk(symbol: str, timeframe: str, ohlcv: pd.DataFrame) -> int:
 
             if upsert_insert is not None:
                 stmt = upsert_insert(table).values(rows)
-                stmt = stmt.on_conflict_do_nothing(index_elements=["time", "symbol", "timeframe"])
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=["time", "symbol", "timeframe"],
+                    set_={col: stmt.excluded[col] for col in ("open", "high", "low", "close", "volume")},
+                )
                 db.execute(stmt)
             else:
                 for row in rows:

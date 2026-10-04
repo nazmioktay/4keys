@@ -148,6 +148,13 @@ class DecisionEngine:
         # +%20,67 — örneklem küçüldükçe) geriliyor. `SystemBacktestRequest`
         # ile SENKRON tutulmalı (bkz. o alanın kendi yorumu).
         meta_label_act_threshold: float = 0.6,
+        # Sembol -> sinyali en son değerlendirilen KAPANMIŞ mumun zaman damgası.
+        # Verilirse (canlı döngü verir, bkz. `engine.service`) model sinyali her
+        # kapanmış mum için YALNIZCA BİR KEZ uygulanır — backtest de her mumu
+        # bir kez değerlendirir. Döngü 5 dakikada bir çalıştığı için bu olmadan
+        # aynı saatlik mum 12 kez değerlendiriliyor, kapat/aç çalkalanması
+        # mümkün oluyordu. Stop-loss kontrolü bu kapıdan BAĞIMSIZDIR.
+        signal_bar_memory: dict[str, pd.Timestamp] | None = None,
     ) -> None:
         self.exchange = exchange
         self.model = model
@@ -164,6 +171,8 @@ class DecisionEngine:
         self.lstm_model = lstm_model
         self.online_model = online_model
         self._last_atr: dict[str, float] = {}  # sembol -> en son hesaplanan ATR (bkz. `_predict`/`_open`)
+        self._last_bar_ts: dict[str, pd.Timestamp] = {}  # sembol -> `_predict`'in kullandığı son kapanmış mum
+        self.signal_bar_memory = signal_bar_memory
         # Ensemble birleştirmesi (`_combine_predictions`) her modelin KENDİ
         # doğrulanmış becerisine (bkz. `app.ml.model_status`'a EN SON eğitimde
         # yazılan `balanced_accuracy`) göre ağırlıklandırılır — önceden
@@ -232,6 +241,8 @@ class DecisionEngine:
         feature_row = latest_feature_vector(ohlcv)
         if feature_row is None:
             return None
+        if len(ohlcv):
+            self._last_bar_ts[symbol] = pd.Timestamp(ohlcv["timestamp"].iloc[-1])
         # Backtest'in ATR bazlı stop-loss'uyla (bkz. `_open`) AYNI formülle
         # (`average_true_range`, AYNI varsayılan `atr_period`) hesaplanır.
         atr_series = average_true_range(ohlcv, length=self.atr_period)
@@ -285,29 +296,56 @@ class DecisionEngine:
 
         return prediction, float(feature_row["close"]), feature_row
 
-    def evaluate(self, symbol: str) -> Action | None:
-        result = self._predict(symbol)
-        if result is None:
+    def _live_price(self, symbol: str) -> float | None:
+        try:
+            price = self.exchange.fetch_ticker_price(symbol)
+        except Exception:  # noqa: BLE001 - canlı fiyat alınamazsa son kapanmış mumun kapanışına düşülür
+            logger.warning("engine: %s için canlı fiyat alınamadı, mum kapanışı kullanılacak", symbol)
             return None
-        prediction, price, feature_row = result
-        db.record_signal(symbol, source="ml", direction=prediction.direction, confidence=prediction.confidence, price=price)
-        record_ml_prediction(symbol, prediction.direction, prediction.confidence)
-        position = self.portfolio.get(symbol) if self.portfolio is not None else self.positions.get(symbol)
+        if price is None or not price > 0:
+            return None
+        return float(price)
 
-        # Stop-loss: modelin sinyalinden BAĞIMSIZ, sabit bir risk kapısı —
-        # önceden `stop_loss_price` yalnızca Kelly boyutlandırma hesabında
-        # kullanılıp atılıyordu, fiyat o seviyeyi geçse bile HİÇBİR ZAMAN
-        # kontrol edilmiyordu (bkz. `RiskRules.stop_loss_enabled`,
-        # `PortfolioPosition.stop_loss_breached`). Model hâlâ "tut" diyor
-        # olsa bile bu kontrol önceliklidir.
-        if (
+    def evaluate(self, symbol: str) -> Action | None:
+        position = self.portfolio.get(symbol) if self.portfolio is not None else self.positions.get(symbol)
+        stop_guarded = (
             position is not None
             and self.portfolio is not None
             and self.portfolio.rules.stop_loss_enabled
             and hasattr(position, "stop_loss_breached")
-            and position.stop_loss_breached(price)
-        ):
+        )
+
+        # Stop-loss: modelin sinyalinden BAĞIMSIZ, her döngüde (5 dk) CANLI
+        # fiyatla kontrol edilir — önceden yalnızca saatlik mumun (ve bayat
+        # önbelleğin) kapanışıyla bakıldığı için stop seviyenin çok ötesinde
+        # tetikleniyordu. Model hâlâ "tut" diyor olsa bile önceliklidir.
+        live_price = self._live_price(symbol) if stop_guarded else None
+        if stop_guarded and live_price is not None and position.stop_loss_breached(live_price):
+            return Action(symbol, "close", f"stop-loss tetiklendi (seviye={position.stop_loss_price:.4f})", live_price, 1.0)
+
+        result = self._predict(symbol)
+        if result is None:
+            return None
+        prediction, price, feature_row = result
+
+        # Canlı fiyat alınamadıysa son kapanmış mumla aynı kontrol (yedek yol).
+        if stop_guarded and live_price is None and position.stop_loss_breached(price):
             return Action(symbol, "close", f"stop-loss tetiklendi (seviye={position.stop_loss_price:.4f})", price, 1.0)
+
+        bar_ts = self._last_bar_ts.get(symbol)
+        if self.signal_bar_memory is not None and bar_ts is not None:
+            if self.signal_bar_memory.get(symbol) == bar_ts:
+                return Action(symbol, "hold", "yeni kapanmış mum yok — bu mumun sinyali zaten değerlendirildi", price, prediction.confidence)
+            self.signal_bar_memory[symbol] = bar_ts
+            # Backtest sinyal mumundan SONRAKİ ilk fiyattan (bir sonraki mumun
+            # açılışı) işlem yapar; canlıda bunun karşılığı şu anki fiyattır.
+            if live_price is None:
+                live_price = self._live_price(symbol)
+            if live_price is not None:
+                price = live_price
+
+        db.record_signal(symbol, source="ml", direction=prediction.direction, confidence=prediction.confidence, price=price)
+        record_ml_prediction(symbol, prediction.direction, prediction.confidence)
 
         if position is None:
             if prediction.direction in ("long", "short") and prediction.confidence >= self.open_confidence:

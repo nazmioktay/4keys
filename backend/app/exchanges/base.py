@@ -53,6 +53,11 @@ class Exchange(ABC):
         `app.backtest.data.fetch_full_history`) bunu kullanır.
         """
 
+    def fetch_ticker_price(self, symbol: str, market_type: str = "future") -> float | None:
+        """Sembolün ŞU ANKİ son işlem fiyatı. Varsayılan `None`: canlı fiyat
+        sağlayamayan borsalarda çağıran taraf son kapanmış mumun kapanışına düşer."""
+        return None
+
     def fetch_market_limits(self, symbol: str, market_type: str) -> dict | None:
         """Bir sembolün miktar/fiyat hassasiyeti ve asgari emir sınırlarını
         döner: `{"amount_step": float, "amount_min": float, "price_tick":

@@ -13,6 +13,9 @@ from .positions import PaperPositionStore
 
 # Geriye dönük uyumluluk / portföy yöneticisi olmadan tek başına kullanım için.
 _positions = PaperPositionStore()
+# Her döngüde yeni bir `DecisionEngine` kurulduğu için "bu mumun sinyali
+# işlendi mi" bilgisi döngüler arasında burada tutulur.
+_signal_bar_memory: dict = {}
 
 
 class ModelNotTrained(Exception):
@@ -96,5 +99,6 @@ def run_cycle_once() -> list[Action]:
         meta_model=meta_model,
         lstm_model=lstm_model,
         online_model=online_model,
+        signal_bar_memory=_signal_bar_memory,
     )
     return engine.run_cycle(symbols)
