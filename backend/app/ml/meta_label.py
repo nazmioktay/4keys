@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 import joblib
 import numpy as np
@@ -37,6 +38,55 @@ def build_meta_dataset(primary_model: SignalModel, X: pd.DataFrame, y: pd.Series
     meta_X = X[FEATURE_COLUMNS].copy()
     meta_X["primary_confidence"] = confidences
     return meta_X, meta_y
+
+
+def build_meta_dataset_out_of_fold(
+    X: pd.DataFrame,
+    y: pd.Series,
+    time_frac: pd.Series,
+    primary_factory: Callable[[], SignalModel],
+    n_splits: int = 5,
+    embargo_frac: float = 0.02,
+) -> tuple[pd.DataFrame, pd.Series]:
+    """Meta-label eğitim setini birincil modelin OUT-OF-FOLD tahminlerinden
+    kurar: her walk-forward katmanında birincil modelin taze bir kopyası
+    yalnızca o katmandan ÖNCEKİ veriyle eğitilir, katmanın kendisini tahmin
+    eder. `build_meta_dataset` ise birincil modelin ZATEN EĞİTİLDİĞİ satırlar
+    üzerindeki tahminleri kullanıyordu — orada model neredeyse hep "doğru"
+    göründüğü için meta model gerçek hatayı hiç öğrenemiyordu.
+
+    Hedef yalnızca YÖNLÜ (long/short) tahminlerin doğruluğudur: meta model
+    canlıda/backtest'te sadece bir pozisyon açılmadan önce sorulur, "nötr"
+    tahminlerin doğru çıkması o soruya hiçbir bilgi katmaz.
+
+    `X`/`y`/`time_frac` çağıran tarafından holdout'tan ÖNCEKİ satırlarla
+    sınırlandırılmış olmalıdır (bkz. `app.ml.train.train_meta_label_model`).
+    """
+    from .validation import walk_forward_splits
+
+    meta_parts: list[pd.DataFrame] = []
+    label_parts: list[pd.Series] = []
+    for train_idx, test_idx in walk_forward_splits(time_frac, n_splits=n_splits, embargo_frac=embargo_frac):
+        y_train = y.iloc[train_idx]
+        if y_train.nunique() < 2:
+            continue
+        model = primary_factory()
+        model.fit(X.iloc[train_idx], y_train)
+        X_test = X.iloc[test_idx]
+        predictions, confidences = model.predict_batch(X_test)
+        directional = predictions != 0
+        if not directional.any():
+            continue
+        part = X_test.loc[directional, FEATURE_COLUMNS].copy()
+        part["primary_confidence"] = np.asarray(confidences)[directional]
+        meta_parts.append(part)
+        label_parts.append(
+            pd.Series((predictions[directional] == y.iloc[test_idx].to_numpy()[directional]).astype(int), index=part.index)
+        )
+
+    if not meta_parts:
+        return pd.DataFrame(columns=META_FEATURE_COLUMNS), pd.Series(dtype=int)
+    return pd.concat(meta_parts), pd.concat(label_parts)
 
 
 class MetaLabelModel:

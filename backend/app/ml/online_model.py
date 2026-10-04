@@ -23,8 +23,11 @@ train/holdout ayrımından farklı ama online öğrenme literatüründe
 standart, look-ahead'siz bir değerlendirme yöntemidir.
 """
 
+import copy
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 import joblib
 import numpy as np
@@ -32,6 +35,9 @@ import pandas as pd
 from river import forest
 
 DEFAULT_ONLINE_MODEL_PATH = Path(__file__).parent / "artifacts" / "online_model.joblib"
+# Holdout başlangıcına kadar öğrenmiş anlık görüntü — sistem backtest'i
+# (`restrict_to_holdout`) bunu kullanır; canlı motor tam modeli kullanır.
+DEFAULT_ONLINE_PREHOLDOUT_MODEL_PATH = Path(__file__).parent / "artifacts" / "online_model_preholdout.joblib"
 
 _LABEL_TO_DIRECTION = {1: "long", -1: "short", 0: "neutral"}
 
@@ -126,7 +132,14 @@ class PrequentialReport:
 
 
 def run_prequential_evaluation(
-    X: pd.DataFrame, y: pd.Series, n_models: int = 10, seed: int = 42, window_size: int = 500
+    X: pd.DataFrame,
+    y: pd.Series,
+    n_models: int = 10,
+    seed: int = 42,
+    window_size: int = 500,
+    label_delay: int = 0,
+    snapshot_at_row: int | None = None,
+    on_snapshot: "Callable[[OnlineSignalModel], None] | None" = None,
 ) -> tuple[OnlineSignalModel, PrequentialReport]:
     """"Test-then-train" (prequential) protokolüyle bir `OnlineSignalModel`
     değerlendirir: `X`/`y`'nin satırları KRONOLOJİK SIRAYLA (karıştırılmadan
@@ -140,6 +153,15 @@ def run_prequential_evaluation(
     modelin erken dönemde mi yoksa daha sonra mı iyileştiğini görmek için
     ayrı ayrı raporlanır — kavram kaymasına adaptasyonun bir göstergesi.
 
+    `label_delay`: bir satırın etiketi ancak `label_delay` bar SONRA bilinir
+    (etiket `horizon` bar ileriye bakar). Model o satırı ancak bu kadar satır
+    sonra öğrenir — önceden etiket hemen öğretiliyordu, yani model bir
+    sonraki tahminde henüz gerçekleşmemiş bir sonucu biliyordu.
+
+    `snapshot_at_row`/`on_snapshot`: o satır TAHMİN edilmeden hemen önce
+    modelin bir kopyası `on_snapshot`'a verilir (holdout'tan önce öğrenilmiş
+    hali — sistem backtest'i için).
+
     Döner: (eğitilmiş model, rapor) — model, TÜM veriyi görmüş son hali
     ile döner, canlı kullanıma hazırdır.
     """
@@ -149,13 +171,22 @@ def run_prequential_evaluation(
 
     feature_dicts = X.to_dict(orient="records")
     labels = y.to_numpy()
+    pending: deque[tuple[dict, int]] = deque()
 
-    for feats, label in zip(feature_dicts, labels):
+    for i, (feats, label) in enumerate(zip(feature_dicts, labels)):
+        if on_snapshot is not None and snapshot_at_row is not None and i == snapshot_at_row and model._is_fitted:
+            on_snapshot(copy.deepcopy(model))
         pred = model.predict_one(feats)
         pred_label = {"long": 1, "short": -1, "neutral": 0}[pred.direction]
         predictions.append(pred_label)
         actuals.append(int(label))
-        model.learn_one(feats, int(label))
+        pending.append((feats, int(label)))
+        while len(pending) > label_delay:
+            model.learn_one(*pending.popleft())
+    # Veri setinin sonundaki etiketler de (veri setine girdiklerine göre) zaten
+    # gerçekleşmiş durumda — canlı model bunları da öğrenir.
+    while pending:
+        model.learn_one(*pending.popleft())
 
     predictions_arr = np.array(predictions)
     actuals_arr = np.array(actuals)

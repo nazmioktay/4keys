@@ -59,32 +59,52 @@ def load_macro_history() -> pd.DataFrame:
     return history
 
 
-def _normalize(series: pd.Series) -> pd.Series:
-    mean = series.mean()
-    std = series.std()
-    if not std or pd.isna(std):
-        return pd.Series(0.0, index=series.index)
-    return ((series - mean) / std).clip(-5, 5)
+# Genişleyen (expanding) z-score'un anlamlı olması için gereken en az
+# anlık görüntü sayısı — bundan önce değer NaN (modelde 0.0, nötr) kalır.
+_MIN_NORMALIZE_PERIODS = 20
+
+
+def _expanding_zscore(series: pd.Series) -> pd.Series:
+    """Her nokta YALNIZCA kendisine kadarki geçmişin ortalama/std'siyle
+    normalize edilir. Önceden tüm geçmişin ortalama/std'si kullanılıyordu —
+    eski bir barın değeri, o an henüz bilinmeyen gelecekteki değerlere göre
+    ölçekleniyordu (eğitim ve backtest için geleceğe bakma)."""
+    numeric = pd.to_numeric(series, errors="coerce")
+    mean = numeric.expanding(min_periods=_MIN_NORMALIZE_PERIODS).mean()
+    std = numeric.expanding(min_periods=_MIN_NORMALIZE_PERIODS).std()
+    z = (numeric - mean) / std.where(std > 0)
+    return z.clip(-5, 5)
+
+
+def normalized_macro_history(history: pd.DataFrame) -> pd.DataFrame:
+    """Ham makro anlık görüntülerini ("time" + ham kolonlar) model
+    özelliklerine dönüştürür: "time" + `MACRO_FEATURE_COLUMNS`. Eğitim,
+    backtest ve canlı AYNI dönüşümü kullanır — canlıdaki değer bu tablonun
+    son satırıdır."""
+    result = pd.DataFrame({"time": history["time"]}) if "time" in history.columns else pd.DataFrame(index=history.index)
+    for raw_col, norm_col in _RAW_TO_NORM.items():
+        if raw_col not in history.columns:
+            result[norm_col] = float("nan")
+        elif raw_col == "funding_rate_btc":
+            result[norm_col] = pd.to_numeric(history[raw_col], errors="coerce").clip(-0.01, 0.01) * 100
+        else:
+            result[norm_col] = _expanding_zscore(history[raw_col])
+    return result
 
 
 def latest_macro_feature_row() -> dict[str, float]:
-    """Canlı (tekil bar) tahmin için en son bilinen makro değerlerini,
-    eğitimdekiyle aynı normalizasyonla (tüm geçmişin ortalama/std'si)
-    döner. Makro geçmişi yoksa tüm değerler 0.0 (nötr) döner."""
+    """Canlı (tekil bar) tahmin için en son bilinen makro değerleri,
+    eğitimdekiyle AYNI dönüşümle (`normalized_macro_history`'nin son satırı).
+    Makro geçmişi yoksa tüm değerler 0.0 (nötr) döner."""
     history = load_macro_history()
     result = {col: 0.0 for col in MACRO_FEATURE_COLUMNS}
     if history.empty:
         return result
 
-    latest = history.iloc[-1]
-    for raw_col, norm_col in _RAW_TO_NORM.items():
-        if raw_col not in history.columns or pd.isna(latest[raw_col]):
-            continue
-        if raw_col == "funding_rate_btc":
-            result[norm_col] = float(max(-0.01, min(0.01, latest[raw_col])) * 100)
-        else:
-            normalized = _normalize(history[raw_col])
-            result[norm_col] = float(normalized.iloc[-1])
+    latest = normalized_macro_history(history).iloc[-1]
+    for col in MACRO_FEATURE_COLUMNS:
+        if col in latest.index and not pd.isna(latest[col]):
+            result[col] = float(latest[col])
     return result
 
 
@@ -102,18 +122,14 @@ def merge_macro_features(frame: pd.DataFrame, macro_history: pd.DataFrame) -> pd
     left["_order"] = range(len(left))
     left = left.sort_values("timestamp")
 
-    right = macro_history.rename(columns={"time": "timestamp"}).copy()
+    right = normalized_macro_history(macro_history).rename(columns={"time": "timestamp"})
     right["timestamp"] = pd.to_datetime(right["timestamp"], utc=True).astype("datetime64[ns, UTC]")
 
     merged = pd.merge_asof(left, right, on="timestamp", direction="backward")
     merged = merged.sort_values("_order").reset_index(drop=True)
 
-    for raw_col, norm_col in _RAW_TO_NORM.items():
-        if raw_col not in merged.columns:
-            continue
-        if raw_col == "funding_rate_btc":
-            result[norm_col] = merged[raw_col].clip(-0.01, 0.01).to_numpy() * 100
-        else:
-            result[norm_col] = _normalize(merged[raw_col]).to_numpy()
+    for col in MACRO_FEATURE_COLUMNS:
+        if col in merged.columns:
+            result[col] = merged[col].to_numpy()
 
     return result

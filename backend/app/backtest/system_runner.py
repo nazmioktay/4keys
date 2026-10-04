@@ -11,13 +11,15 @@ from app.engine.decision import DecisionEngine
 from app.exchanges.base import Exchange
 from app.ml.advanced_indicators import average_true_range
 from app.ml.dynamic_exit import DynamicExitModel
-from app.ml.features import FEATURE_COLUMNS, build_features
+from app.ml.features import FEATURE_COLUMNS, MACRO_FEATURE_COLUMNS, TAKER_FLOW_FEATURE_COLUMNS, build_features
+from app.ml.macro_features import load_macro_history, merge_macro_features
 from app.ml.meta_label import MetaLabelModel
 from app.ml.multi_timeframe_features import MULTI_TIMEFRAME_FEATURE_COLUMNS, compute_multi_timeframe_features
 from app.ml.model import DEFAULT_MODEL_PATH, Prediction, SignalModel
 from app.ml.model_paths import DEFAULT_LSTM_MODEL_PATH
 from app.ml.model_status import get_balanced_accuracy, get_holdout_start_time
-from app.ml.online_model import DEFAULT_ONLINE_MODEL_PATH, OnlineSignalModel
+from app.ml.online_model import DEFAULT_ONLINE_MODEL_PATH, DEFAULT_ONLINE_PREHOLDOUT_MODEL_PATH, OnlineSignalModel
+from app.ml.orderflow_features import merge_taker_flow_features
 from app.portfolio.risk_manager import calculate_kelly_position_size, calculate_position_size
 
 from app.exchanges.cache import fetch_ohlcv_cached, timeframe_minutes
@@ -212,15 +214,11 @@ def run_system_backtest(
 
     Bilinen basitleştirmeler (dürüstçe belgelenir, `warnings` alanına da
     yansır):
-    - Makro/order-book/taker-flow/open-interest özellikleri (bkz.
-      `ALL_FEATURE_COLUMNS`) burada hesaplanmaz — bunlar yalnızca "ANLIK"
-      değerlerdir, geçmiş barlar için tarihsel bir zaman serisi YOKTUR.
-      Eksik kolonlar 0.0 (nötr) ile doldurulur — eğitim setindeki makro
-      geçmişi kısa/yok olan ESKİ barlara UYGULANAN AYNI davranış (bkz.
-      README), yani burada YENİ bir yanlılık eklenmiyor.
-      (Üst zaman dilimi/4h-1d trend bağlamı bu basitleştirmeye DAHİL
-      DEĞİL — kaynak OHLCV'den resample edilir, harici kaynağa bağlı
-      değildir, burada da GERÇEK değerlerle hesaplanır.)
+    - Makro ve taker-flow özellikleri eğitimle (`app.ml.dataset`) AYNI
+      yoldan, tarihsel değerleriyle eklenir (makro: DB anlık görüntülerinden
+      as-of eşleştirme; geçmişi olmayan eski barlar NaN -> modelde 0.0, tıpkı
+      eğitimdeki gibi). Order-book/open-interest'in tarihsel karşılığı yok;
+      zaten modelin girdisinden çıkarılmış durumdalar.
     - Kademeli alım/satım (tranche) YOK — her sinyalde tek giriş/tek çıkış
       simüle edilir. Pozisyon boyutu ise `PortfolioManager`'ın (gerçek
       canlı/paper motoru) KULLANDIĞI AYNI Kelly/fixed-risk fonksiyonlarıyla
@@ -257,6 +255,11 @@ def run_system_backtest(
         )
 
     raw_features = build_features(ohlcv)
+    # Eğitimle AYNI opsiyonel özellikler (bkz. `app.ml.dataset._build_symbol_frames`)
+    # — önceden backtest'te hep 0.0'dı, model eğitimde gördüğünden farklı
+    # girdilerle test ediliyordu.
+    raw_features = merge_macro_features(raw_features, load_macro_history())
+    raw_features = merge_taker_flow_features(raw_features, ohlcv, exchange, request.symbol, timeframe)
     raw_features["atr"] = average_true_range(ohlcv, length=request.atr_period)
     # Üst zaman dilimi (4h/1d) trend bağlamı, macro/orderbook/OI'dan FARKLI
     # olarak harici bir veri kaynağına bağlı değildir (kaynak OHLCV'den
@@ -275,7 +278,8 @@ def run_system_backtest(
     # dropna'ya tabidir; htf_* eksikse 0.0 (nötr) ile doldurulur —
     # `model.predict_batch`'in makro/order-book için zaten uyguladığı AYNI
     # tolerans.
-    strict_columns = [c for c in raw_features.columns if c not in MULTI_TIMEFRAME_FEATURE_COLUMNS]
+    optional_columns = set(MULTI_TIMEFRAME_FEATURE_COLUMNS) | set(MACRO_FEATURE_COLUMNS) | set(TAKER_FLOW_FEATURE_COLUMNS)
+    strict_columns = [c for c in raw_features.columns if c not in optional_columns]
     features = raw_features.dropna(subset=strict_columns)
     valid_positions = features.index.to_numpy()
     features = features.reset_index(drop=True)
@@ -331,6 +335,18 @@ def run_system_backtest(
 
     use_lstm = lstm_model is not None and request.use_ensemble
     use_online = online_model is not None and request.use_ensemble
+    online_leak_warning: str | None = None
+    if use_online and request.restrict_to_holdout:
+        # Canlı online model holdout dahil TÜM veriyi öğrenmiş durumda —
+        # holdout'u ölçerken onun yerine holdout başlangıcındaki kopyası kullanılır.
+        if DEFAULT_ONLINE_PREHOLDOUT_MODEL_PATH.exists():
+            online_model = OnlineSignalModel.load_from(DEFAULT_ONLINE_PREHOLDOUT_MODEL_PATH)
+        else:
+            online_leak_warning = (
+                "Online modelin holdout öncesi kopyası bulunamadı (bu özellik eklenmeden önce eğitilmiş) — "
+                "backtest'te kullanılan online model test penceresini zaten öğrenmiş, sonuçlar iyimser olabilir. "
+                "Online modeli yeniden eğitmek kopyayı oluşturur."
+            )
     # Canlı karar motoruyla (`DecisionEngine.__init__`) AYNI beceri
     # ağırlıklandırması — bkz. `_skill_weight` — burada da uygulanır,
     # aksi halde backtest'in ensemble davranışı canlıdan SESSİZCE farklı
@@ -674,9 +690,11 @@ def run_system_backtest(
     warnings: list[str] = []
     if holdout_trim_warning is not None:
         warnings.append(holdout_trim_warning)
+    if online_leak_warning is not None:
+        warnings.append(online_leak_warning)
     warnings += [
-        "Makro/order-book/taker-flow/open-interest özellikleri bu backtest'te hesaplanmaz (yalnızca anlık "
-        "değerleri var, geçmişi yok) — eğitim setindeki eski barlarla AYNI şekilde nötr (0.0) kabul edilir.",
+        "Makro ve taker-flow özellikleri eğitimdeki gibi tarihsel değerleriyle kullanılır; order-book/open-interest "
+        "modelin girdisinde yok (tarihsel karşılıkları olmadığı için eğitimden çıkarıldı).",
         (
             "Ensemble'a dahil edilen modeller: XGBoost" + (" + meta-label filtresi" if meta_model is not None and request.use_meta_label else "")
             + ("".join(f" + {name}" for name in ensemble_note))

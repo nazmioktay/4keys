@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
+import pandas as pd
 
 from app.core.config import settings
 from app.core.memory_probe import log_rss
@@ -12,11 +13,17 @@ from app.exchanges.base import Exchange
 
 from .dataset import LabelingMethod, build_training_dataset, build_training_dataset_with_time
 from .features import ALL_FEATURE_COLUMNS
-from .meta_label import MetaLabelModel, build_meta_dataset
+from .meta_label import MetaLabelModel, build_meta_dataset, build_meta_dataset_out_of_fold
 from .model import DEFAULT_MODEL_PATH, Algorithm, SignalModel
 from .model_paths import DEFAULT_LSTM_MODEL_PATH, DEFAULT_PATCHTST_MODEL_PATH
 from .model_status import write_model_status
-from .online_model import DEFAULT_ONLINE_MODEL_PATH, OnlineSignalModel, PrequentialReport, run_prequential_evaluation
+from .online_model import (
+    DEFAULT_ONLINE_MODEL_PATH,
+    DEFAULT_ONLINE_PREHOLDOUT_MODEL_PATH,
+    OnlineSignalModel,
+    PrequentialReport,
+    run_prequential_evaluation,
+)
 from .regime import RegimeModel, build_regime_labeled_dataset, fit_regime_model
 from .sequence_dataset import build_sequence_dataset
 from .validation import OutOfSampleReport, WalkForwardReport, evaluate_out_of_sample, run_walk_forward_validation, split_out_of_sample
@@ -843,6 +850,7 @@ def train_online_signal_model(
     n_models: int = 10,
     window_size: int = 500,
     persist: bool = True,
+    holdout_frac: float = 0.2,
 ) -> tuple[OnlineSignalModel, PrequentialReport]:
     """Kullanıcı önerisi: XGBoost/LSTM'in periyodik toptan (batch)
     yeniden eğitimi yerine, verinin akışından ANLIK öğrenen bir model
@@ -855,14 +863,14 @@ def train_online_signal_model(
     `fit(X, y)` DEĞİL, `run_prequential_evaluation` ile bar-bar
     test-then-train'dir — bkz. o fonksiyonun docstring'i.
 
-    NOT: Birden fazla sembol verilirse, semboller `time_frac`'e göre değil
-    `_build_symbol_frames`'in sırasına göre ART ARDA (önce tüm A sembolü,
-    sonra tüm B sembolü) işlenir — her sembolün KENDİ içinde kronolojik
-    sıra korunur, ama semboller arası GERÇEK takvim sırası değildir. BTC-only
-    (veya BTC-öncelikli az sayıda sembol) kullanmak bu basitleştirmeyi
-    önemsiz kılar.
+    Satırlar gerçek takvim sırasıyla (`bar_timestamp`) işlenir; her etiket
+    ancak `horizon` bar sonra öğretilir (bkz. `run_prequential_evaluation`
+    `label_delay`). Birincil modelle AYNI holdout sınırında (`holdout_frac`,
+    birincil sembolün holdout başlangıcı) modelin bir kopyası
+    `DEFAULT_ONLINE_PREHOLDOUT_MODEL_PATH`'e kaydedilir — sistem backtest'i
+    holdout'u ölçerken o pencereyi hiç görmemiş bu kopyayı kullanır.
     """
-    X, y, _time_frac, _bar_timestamp, _symbol_col = build_training_dataset_with_time(
+    X, y, time_frac, bar_timestamp, symbol_col = build_training_dataset_with_time(
         exchange,
         symbols,
         timeframe or settings.ml_train_timeframe,
@@ -877,7 +885,29 @@ def train_online_signal_model(
     if len(X) < 60:
         raise ValueError(f"Online model eğitimi için yeterli veri yok ({len(X)} satır).")
 
-    model, report = run_prequential_evaluation(X, y, n_models=n_models, window_size=window_size)
+    order = np.argsort(pd.to_datetime(bar_timestamp).to_numpy(), kind="stable")
+    X = X.iloc[order].reset_index(drop=True)
+    y = y.iloc[order].reset_index(drop=True)
+    time_frac = time_frac.iloc[order].reset_index(drop=True)
+    bar_timestamp = pd.Series(pd.to_datetime(bar_timestamp).to_numpy()[order])
+    symbol_col = symbol_col.iloc[order].reset_index(drop=True)
+
+    primary_holdout = (symbol_col == settings.ml_primary_symbol) & (time_frac > 1.0 - holdout_frac)
+    snapshot_at_row: int | None = None
+    if primary_holdout.any():
+        holdout_start = bar_timestamp[primary_holdout].min()
+        snapshot_at_row = int(np.argmax((bar_timestamp >= holdout_start).to_numpy()))
+
+    snapshots: list[OnlineSignalModel] = []
+    model, report = run_prequential_evaluation(
+        X,
+        y,
+        n_models=n_models,
+        window_size=window_size,
+        label_delay=horizon,
+        snapshot_at_row=snapshot_at_row,
+        on_snapshot=snapshots.append,
+    )
 
     # Kalite kapısı — bkz. `train_signal_model_validated`'daki AYNI mantık.
     # Prequential değerlendirme her satırı işlediği için burada "holdout"
@@ -892,6 +922,10 @@ def train_online_signal_model(
         logger.warning("online model rejected: %s", report.rejection_reason)
     elif persist:
         model.save()
+        if snapshots:
+            snapshots[0].save(DEFAULT_ONLINE_PREHOLDOUT_MODEL_PATH)
+        else:
+            DEFAULT_ONLINE_PREHOLDOUT_MODEL_PATH.unlink(missing_ok=True)
 
     if persist:
         write_model_status(
@@ -922,17 +956,27 @@ def train_meta_label_model(
     labeling_method: LabelingMethod = "threshold",
     take_profit_pct: float = 2.0,
     stop_loss_pct: float = 2.0,
+    holdout_frac: float = 0.2,
+    walk_forward_splits: int = 5,
+    embargo_frac: float = 0.02,
 ) -> tuple[MetaLabelModel, int]:
     """Birincil modelin sinyaline "gir/girme" kararı verecek meta-label
     modelini eğitir (bkz. `app.ml.meta_label`).
 
-    Aynı eğitim setini (aynı sembol/parametrelerle) yeniden kurup birincil
-    modelin bu veri üzerindeki tahminlerinin doğru/yanlış olduğunu meta
-    etiket olarak kullanır. Bu nedenle `primary_model`'in bu semboller
-    üzerinde zaten eğitilmiş (veya en azından aynı özellik uzayına sahip)
-    olması gerekir.
+    SIZINTI KORUMASI: önceden meta etiketler, birincil modelin ZATEN
+    EĞİTİLDİĞİ (ve backtest'in ölçtüğü holdout'u da kapsayan) TÜM satırlar
+    üzerindeki tahminlerinden üretiliyordu. Artık:
+    - yalnızca birincil modelle AYNI holdout sınırından (`holdout_frac`)
+      ÖNCEKİ satırlar kullanılır — backtest'in test penceresi meta modele
+      hiç gösterilmez;
+    - birincil tahminler OUT-OF-FOLD üretilir (bkz.
+      `build_meta_dataset_out_of_fold`), birincil modelin kendi
+      hiperparametreleriyle her katmanda yeniden eğitilen kopyalarla;
+    - hedef yalnızca yönlü tahminlerin doğruluğudur.
+
+    `primary_model` yalnızca hiperparametre kaynağı olarak kullanılır.
     """
-    X, y = build_training_dataset(
+    X, y, time_frac, _bar_timestamp, _symbol_col = build_training_dataset_with_time(
         exchange,
         symbols,
         timeframe or settings.ml_train_timeframe,
@@ -949,18 +993,41 @@ def train_meta_label_model(
             f"Meta-label eğitimi için yeterli veri yok ({len(X)} satır)."
         )
 
-    meta_X, meta_y = build_meta_dataset(primary_model, X, y)
+    X_train, y_train, _X_holdout, _y_holdout = split_out_of_sample(X, y, time_frac, holdout_frac)
+    # `walk_forward_splits` 0..1 ekseni bekler — eğitim diliminin kendi içinde yeniden ölçeklenir.
+    train_time_frac = time_frac[X_train.index] / max(1.0 - holdout_frac, 1e-9)
 
-    if meta_y.nunique() < 2:
+    def _primary_factory() -> SignalModel:
+        return SignalModel(
+            algorithm=primary_model.algorithm,
+            calibrate=primary_model._calibrate,
+            calibration_method=primary_model._calibration_method,
+            xgb_params=primary_model.xgb_params,
+        )
+
+    meta_X, meta_y = build_meta_dataset_out_of_fold(
+        X_train.reset_index(drop=True),
+        y_train.reset_index(drop=True),
+        train_time_frac.reset_index(drop=True),
+        _primary_factory,
+        n_splits=walk_forward_splits,
+        embargo_frac=embargo_frac,
+    )
+
+    if len(meta_y) < 30 or meta_y.nunique() < 2:
         raise ValueError(
-            "Birincil model bu veri setinde ya hep doğru ya hep yanlış tahmin etmiş; "
-            "meta-label modeli iki sınıf olmadan eğitilemez. Daha fazla/çeşitli veri deneyin."
+            f"Meta-label için yeterli out-of-fold yönlü tahmin yok ({len(meta_y)} satır) ya da birincil model "
+            "bu tahminlerde hep doğru/hep yanlış; meta-label modeli iki sınıf olmadan eğitilemez."
         )
 
     meta_model = MetaLabelModel()
     meta_model.fit(meta_X, meta_y)
     meta_model.save()
-    logger.info("meta-label model trained on %d rows", len(meta_X))
+    logger.info(
+        "meta-label model trained on %d out-of-fold directional rows (pre-holdout, hit rate %.3f)",
+        len(meta_X),
+        float(meta_y.mean()),
+    )
     return meta_model, len(meta_X)
 
 
