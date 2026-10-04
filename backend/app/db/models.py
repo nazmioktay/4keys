@@ -307,3 +307,17 @@ class TradeRecord(Base):
     # metni, `_add_missing_columns` ile var olan tabloya da eklenir (nullable,
     # eski satırlar None kalır). Frontend'de işlem geçmişi/açıklama görünümü için.
     reason: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+class PortfolioStateRow(Base):
+    """Paylaşılan paper portföyünün (`app.portfolio.shared`) TEK satırlık
+    kalıcı anlık görüntüsü — açık pozisyonlar, equity, son kapanmış işlemler
+    (Kelly istatistikleri bunlardan hesaplanır), kurallar ve günlük zarar
+    sayacı JSON olarak tutulur. Önceden hepsi yalnızca bellekteydi: backend
+    yeniden başlayınca açık pozisyon ve Kelly geçmişi kayboluyordu."""
+
+    __tablename__ = "portfolio_state"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    state_json: Mapped[str] = mapped_column(String)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)

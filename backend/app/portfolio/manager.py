@@ -1,4 +1,5 @@
-from dataclasses import dataclass, field
+import logging
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 
 from app.core.config import settings
@@ -8,6 +9,12 @@ from app.security import kill_switch
 
 from .risk_manager import calculate_kelly_position_size, calculate_position_size, evaluate_risk
 from .schemas import PnlSummary, PnlWindow, PositionExposure, RiskDecision, RiskRules, TradeStats
+
+logger = logging.getLogger(__name__)
+
+# Kalıcı durumda tutulan en fazla kapanmış işlem kaydı — Kelly istatistikleri
+# ve PNL pencereleri için yeterli, JSON satırını sınırsız büyütmez.
+_MAX_PERSISTED_HISTORY = 1000
 
 
 @dataclass
@@ -71,12 +78,75 @@ class PortfolioManager:
     """
 
     def __init__(self, starting_equity: float, rules: RiskRules | None = None) -> None:
+        # `persist_enabled` yalnızca süreç genelindeki paylaşılan portföyde
+        # (bkz. `app.portfolio.shared`) açılır — backtest/test örnekleri DB'ye yazmaz.
+        self.persist_enabled = False
         self.starting_equity = starting_equity
         self.equity = starting_equity
-        self.rules = rules or RiskRules()
+        self._rules = rules or RiskRules()
         self.realized_pnl_session = 0.0
+        # Günlük zarar limiti (`RiskRules.daily_loss_limit_pct`) için UTC gün
+        # başında sıfırlanan sayaç — önceden süreç ömrü boyunca biriken
+        # `realized_pnl_session` kullanılıyordu, "günlük" limit aslında
+        # "restart'tan beri" limitiydi.
+        self.day_key = datetime.now(timezone.utc).date().isoformat()
+        self.realized_pnl_today = 0.0
         self.positions: dict[str, PortfolioPosition] = {}
         self.closed_history: list[dict] = []
+
+    @property
+    def rules(self) -> RiskRules:
+        return self._rules
+
+    @rules.setter
+    def rules(self, value: RiskRules) -> None:
+        self._rules = value
+        self.persist()
+
+    def _roll_day(self, now: datetime | None = None) -> None:
+        today = (now or datetime.now(timezone.utc)).date().isoformat()
+        if today != self.day_key:
+            self.day_key = today
+            self.realized_pnl_today = 0.0
+
+    # --- Kalıcılık ---
+    def to_state(self) -> dict:
+        return {
+            "starting_equity": self.starting_equity,
+            "equity": self.equity,
+            "realized_pnl_session": self.realized_pnl_session,
+            "day_key": self.day_key,
+            "realized_pnl_today": self.realized_pnl_today,
+            "rules": self._rules.model_dump(),
+            "positions": [
+                {**asdict(p), "opened_at": p.opened_at.isoformat()} for p in self.positions.values()
+            ],
+            "closed_history": self.closed_history[-_MAX_PERSISTED_HISTORY:],
+        }
+
+    @classmethod
+    def from_state(cls, state: dict) -> "PortfolioManager":
+        manager = cls(starting_equity=float(state["starting_equity"]), rules=RiskRules(**state.get("rules", {})))
+        manager.equity = float(state.get("equity", manager.starting_equity))
+        manager.realized_pnl_session = float(state.get("realized_pnl_session", 0.0))
+        manager.day_key = state.get("day_key", manager.day_key)
+        manager.realized_pnl_today = float(state.get("realized_pnl_today", 0.0))
+        for raw in state.get("positions", []):
+            data = dict(raw)
+            data["opened_at"] = datetime.fromisoformat(data["opened_at"])
+            position = PortfolioPosition(**data)
+            manager.positions[position.symbol] = position
+        manager.closed_history = list(state.get("closed_history", []))
+        manager._roll_day()
+        return manager
+
+    def persist(self) -> None:
+        if not self.persist_enabled:
+            return
+        try:
+            db.save_portfolio_state(self.to_state())
+        except Exception:  # noqa: BLE001 - kalıcılık hatası işlem akışını durdurmamalı
+            logger.exception("portfolio state could not be persisted")
 
     def get(self, symbol: str) -> PortfolioPosition | None:
         return self.positions.get(symbol)
@@ -117,8 +187,9 @@ class PortfolioManager:
         regime_scale, regime_reason = self._regime_scale(vix_zscore)
         size_quote *= regime_scale
 
+        self._roll_day()
         exposures = [PositionExposure(symbol=p.symbol, size_quote=p.size_quote) for p in self.positions.values()]
-        decision = evaluate_risk(self.equity, exposures, self.realized_pnl_session, symbol, size_quote, self.rules)
+        decision = evaluate_risk(self.equity, exposures, self.realized_pnl_today, symbol, size_quote, self.rules)
         if regime_reason:
             decision = RiskDecision(allowed=decision.allowed and regime_scale > 0, size_quote=decision.size_quote, reasons=[*decision.reasons, regime_reason])
         return decision
@@ -203,6 +274,7 @@ class PortfolioManager:
         )
         self.positions[symbol] = position
         self._update_gauges()
+        self.persist()
         return position
 
     def add_entry_tranche(self, symbol: str, price: float) -> PortfolioPosition | None:
@@ -219,6 +291,7 @@ class PortfolioManager:
         position.entry_price = (position.entry_price * position.size_quote + price * add_size) / total_size
         position.size_quote = total_size
         position.entry_fill_index += 1
+        self.persist()
         return position
 
     def close_tranche(self, symbol: str, exit_price: float, reason: str | None = None) -> dict | None:
@@ -260,8 +333,10 @@ class PortfolioManager:
         # getiriden FARKLI (daha küçük) bir sayıyla hesap yapar.
         leveraged_pnl_pct = pnl_pct * self.rules.leverage
         pnl_quote = close_size * leveraged_pnl_pct / 100
+        self._roll_day()
         self.equity += pnl_quote
         self.realized_pnl_session += pnl_quote
+        self.realized_pnl_today += pnl_quote
         position.size_quote -= close_size
         position.exit_fill_index += 1
 
@@ -288,6 +363,7 @@ class PortfolioManager:
             self.positions.pop(symbol, None)
         self._maybe_trip_kill_switch()
         self._update_gauges()
+        self.persist()
         return record
 
     def close(self, symbol: str, exit_price: float, reason: str | None = None) -> dict | None:
@@ -324,6 +400,7 @@ class PortfolioManager:
             "equity": round(self.equity, 6),
             "starting_equity": self.starting_equity,
             "realized_pnl_session": round(self.realized_pnl_session, 6),
+            "realized_pnl_today": round(self.realized_pnl_today, 6),
             "open_positions": [
                 {
                     "symbol": p.symbol,

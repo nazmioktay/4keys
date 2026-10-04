@@ -98,7 +98,7 @@ def evaluate_risk(
         return RiskDecision(
             allowed=False,
             size_quote=0.0,
-            reasons=[f"Günlük/oturum zarar limiti (%{rules.daily_loss_limit_pct}) aşıldı, yeni işlem açılmıyor."],
+            reasons=[f"Günlük (UTC) zarar limiti (%{rules.daily_loss_limit_pct}) aşıldı, yeni işlem açılmıyor."],
         )
 
     open_symbols = {p.symbol for p in open_positions}

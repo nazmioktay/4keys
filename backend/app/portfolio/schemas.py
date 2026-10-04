@@ -28,7 +28,7 @@ class RiskRules(BaseModel):
     max_total_exposure_pct: float = Field(60.0, gt=0, description="Tüm açık pozisyonların toplamının sermayeye oranı üst sınırı")
     max_symbol_exposure_pct: float = Field(60.0, gt=0, description="Tek bir sembole ayrılabilecek maksimum sermaye yüzdesi")
     max_concurrent_positions: int = Field(5, ge=1, description="Aynı anda açık olabilecek maksimum farklı sembol sayısı")
-    daily_loss_limit_pct: float = Field(5.0, gt=0, description="Bu yüzdeye ulaşan günlük/oturum zararında yeni işlem açılmaz")
+    daily_loss_limit_pct: float = Field(5.0, gt=0, description="Gerçekleşen zarar o UTC gün içinde bu yüzdeye ulaşırsa yeni işlem açılmaz (gün başında sıfırlanır)")
 
     # --- Kelly kriteri tabanlı pozisyon boyutlandırma ---
     # GÜNCELLEME (bkz. README "karlılık", kullanıcı isteği: "paper trading'e
@@ -204,6 +204,7 @@ class PortfolioStatus(BaseModel):
     equity: float
     starting_equity: float
     realized_pnl_session: float
+    realized_pnl_today: float = 0.0  # UTC gün başında sıfırlanır — günlük zarar limiti bunu kullanır
     open_positions: list[dict]
     closed_history: list[dict]
     rules: RiskRules

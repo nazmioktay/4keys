@@ -1,3 +1,4 @@
+import json
 import logging
 from datetime import datetime
 
@@ -16,6 +17,7 @@ from .models import (
     OpenInterestSnapshot,
     OptimizationRun,
     OrderbookSnapshot,
+    PortfolioStateRow,
     SignalRecord,
     TradeRecord,
 )
@@ -797,3 +799,36 @@ def get_recent_optimization_runs(symbol: str | None = None, limit: int = 20) -> 
     except SQLAlchemyError:
         logger.exception("failed to read optimization runs")
         return []
+
+
+_PORTFOLIO_STATE_ID = 1
+
+
+def save_portfolio_state(state: dict) -> None:
+    """Paylaşılan portföyün anlık görüntüsünü (bkz. `PortfolioManager.to_state`)
+    tek satıra yazar (varsa üzerine)."""
+    if not is_enabled():
+        return
+    try:
+        payload = json.dumps(state, ensure_ascii=False, default=str)
+        with session_scope() as db:
+            row = db.get(PortfolioStateRow, _PORTFOLIO_STATE_ID)
+            if row is None:
+                db.add(PortfolioStateRow(id=_PORTFOLIO_STATE_ID, state_json=payload))
+            else:
+                row.state_json = payload
+                row.updated_at = datetime.now().astimezone()
+    except SQLAlchemyError:
+        logger.exception("portfolio state persist failed")
+
+
+def load_portfolio_state() -> dict | None:
+    if not is_enabled():
+        return None
+    try:
+        with session_scope() as db:
+            row = db.get(PortfolioStateRow, _PORTFOLIO_STATE_ID)
+            return json.loads(row.state_json) if row is not None else None
+    except (SQLAlchemyError, ValueError):
+        logger.exception("portfolio state load failed")
+        return None
