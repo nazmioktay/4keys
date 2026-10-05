@@ -128,7 +128,8 @@ def test_live_breakeven_does_not_apply_new_stop_to_the_bar_that_triggered_it():
     position = portfolio.open("BTC/USDT", "long", entry_price=100, size_quote=100, stop_loss_price=98)
     position.opened_at = datetime(2024, 1, 1, tzinfo=timezone.utc)  # statik serinin son mumu bundan sonra başlıyor
     position.entry_atr = 1.5
-    exchange = _ScriptedBarExchange(live_price=101.5, last_bar=(100.0, 102.0, 99.5, 101.5))
+    # Canlı fiyat (101,0) tek başına eşiği (101,5) geçmez: başabaşı KAPANMIŞ mumun high'ı (102) tetikler.
+    exchange = _ScriptedBarExchange(live_price=101.0, last_bar=(100.0, 102.0, 99.5, 101.5))
     engine = _engine_with(exchange, _FixedModel("long", 0.9), portfolio)
 
     breakeven_stop = 100 * (1 + (portfolio.rules.commission_pct + portfolio.rules.slippage_pct) * 2 / 100)
@@ -146,6 +147,57 @@ def test_live_breakeven_does_not_apply_new_stop_to_the_bar_that_triggered_it():
     third = engine.evaluate("BTC/USDT")
     assert third is not None and third.type == "close"
     assert third.price == pytest.approx(position.stop_loss_price)
+
+
+def test_live_breakeven_triggered_by_live_price_applies_only_after_the_forming_bar():
+    # Oluşan (henüz kapanmamış) mumda önce dip yaşandı, SONRA canlı fiyat başabaşı tetikledi.
+    # Mum kapanınca o dip yeni stop'a karşı değerlendirilmemeli: stop mumun ortasında çekildi,
+    # dip stop'tan ÖNCEydi (bkz. stop_effective_from_bar = son kapanmış mum + 1 bar).
+    portfolio = _portfolio(breakeven_atr_mult=1.0)
+    position = portfolio.open("BTC/USDT", "long", entry_price=100, size_quote=100, stop_loss_price=98)
+    position.opened_at = datetime(2024, 1, 1, tzinfo=timezone.utc)
+    position.entry_atr = 1.5
+    # Son KAPANMIŞ mum: high 100,8 (başabaşı tetiklemez); canlı fiyat 102 tetikler.
+    exchange = _ScriptedBarExchange(live_price=102.0, last_bar=(100.0, 100.8, 99.6, 100.5))
+    engine = _engine_with(exchange, _FixedModel("long", 0.9), portfolio)
+
+    first = engine.evaluate("BTC/USDT")
+
+    assert position.breakeven_done is True
+    last_closed = engine._last_bar_ts["BTC/USDT"]
+    assert pd.Timestamp(position.stop_effective_from_bar) == last_closed + pd.Timedelta(hours=4)  # oluşan mum
+    assert first is None or first.type != "close"
+
+    # Oluşan mum kapandı: dip (99,9) yeni stop'un (~100,12) altında ama stop'tan ÖNCEYDİ.
+    exchange.last_bar = (100.5, 102.0, 99.9, 101.5)
+    exchange.live_price = 101.5
+    exchange.shift_bars = 1
+    second = engine.evaluate("BTC/USDT")
+    assert second is None or second.type != "close"
+
+    # Sonraki mum low'u gerçekten stop'un altına iniyor -> kapanmalı.
+    exchange.last_bar = (101.5, 101.8, 100.0, 100.6)
+    exchange.shift_bars = 2
+    third = engine.evaluate("BTC/USDT")
+    assert third is not None and third.type == "close"
+    assert third.price == pytest.approx(position.stop_loss_price)
+
+
+def test_stop_effective_from_bar_survives_state_roundtrip():
+    import json
+
+    portfolio = _portfolio(breakeven_atr_mult=1.0)
+    position = portfolio.open("BTC/USDT", "long", entry_price=100, size_quote=100, stop_loss_price=98)
+    position.stop_effective_from_bar = "2026-10-05T12:00:00"
+
+    restored = PortfolioManager.from_state(json.loads(json.dumps(portfolio.to_state())))
+
+    assert restored.get("BTC/USDT").stop_effective_from_bar == "2026-10-05T12:00:00"
+
+    # Alan eklenmeden ÖNCE kaydedilmiş bir durum da yüklenebilmeli (None).
+    legacy = json.loads(json.dumps(portfolio.to_state()))
+    del legacy["positions"][0]["stop_effective_from_bar"]
+    assert PortfolioManager.from_state(legacy).get("BTC/USDT").stop_effective_from_bar is None
 
 
 def test_live_time_exit_closes_old_position():

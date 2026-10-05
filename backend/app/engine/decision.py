@@ -355,7 +355,7 @@ class DecisionEngine:
             return max(stop, float(bar["open"]))
         return None
 
-    def _apply_breakeven(self, symbol: str, position, observed_price: float) -> None:
+    def _apply_breakeven(self, symbol: str, position, observed_price: float, observed_is_live: bool = True) -> None:
         """Backtest'teki `_apply_breakeven` ile aynı kural: lehe hareket giriş
         ATR'sinin `breakeven_atr_mult` katına ulaşınca stop girişe (+maliyet)
         çekilir, bir kez. En iyi fiyat canlı fiyat ve son kapanmış mumun
@@ -384,7 +384,14 @@ class DecisionEngine:
         if position.breakeven_done:
             last_bar_ts = self._last_bar_ts.get(symbol)
             if last_bar_ts is not None:
-                position.stop_effective_from_bar = pd.Timestamp(last_bar_ts).isoformat()
+                effective_from = pd.Timestamp(last_bar_ts)
+                live_move = observed_price - position.entry_price if is_long else position.entry_price - observed_price
+                if observed_is_live and live_move >= trigger:
+                    # Başabaşı CANLI fiyat, henüz kapanmamış (oluşan) mum içinde tetikledi: o mumun
+                    # dip/tepesi stop çekilmeden ÖNCE yaşanmış olabilir, yeni stop'a karşı
+                    # değerlendirilmemeli — stop yalnızca oluşan mumdan SONRAKİ mumlar için geçerli.
+                    effective_from += pd.Timedelta(minutes=timeframe_minutes(self.timeframe))
+                position.stop_effective_from_bar = effective_from.isoformat()
             self.portfolio.persist()
 
     def _time_exit_reason(self, position) -> str | None:
@@ -434,7 +441,7 @@ class DecisionEngine:
             return self._stop_action(symbol, position, price)
 
         if position is not None and self.portfolio is not None:
-            self._apply_breakeven(symbol, position, live_price if live_price is not None else price)
+            self._apply_breakeven(symbol, position, live_price if live_price is not None else price, live_price is not None)
             time_exit = self._time_exit_reason(position)
             if time_exit is not None:
                 return Action(symbol, "close", time_exit, live_price if live_price is not None else price, 1.0)
