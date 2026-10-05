@@ -2,8 +2,9 @@ import logging
 
 from app.backtest.data import timeframe_to_minutes
 from app.backtest.schemas import SystemBacktestRequest
-from app.backtest.system_runner import run_periodic_optimization
+from app.backtest.walk_forward import prepare_walk_forward, run_walk_forward_optimization
 from app.core.config import settings
+from app.core.live_overrides import persist_live_overrides
 from app.db import repository as db
 from app.engine.service import ModelNotTrained, run_cycle_once
 from app.exchanges import get_exchange
@@ -307,6 +308,25 @@ def _dampened_step(current: float, recommended: float, fraction: float) -> float
     return current + fraction * (recommended - current)
 
 
+def run_periodic_optimization(exchange, model, meta_model, base_request, lstm_model=None, online_model=None):
+    """Haftalık optimizasyon artık walk-forward raporuyla çalışır (plan Faz 4):
+    katman modelleri üretimdeki modelin hiperparametreleriyle bir kez
+    eğitilir, adaylar PnL / maks. drawdown skoruyla ve "yeterli işlem + katmanların
+    en az yarısında kâr" koşuluyla seçilir. LSTM/online walk-forward'a dahil
+    değildir (katman başına yeniden eğitilmiyorlar) — parametreler yok sayılır."""
+    prepared = prepare_walk_forward(exchange, base_request, primary_template=model, use_meta_label=meta_model is not None)
+    return run_walk_forward_optimization(exchange, prepared, base_request)
+
+
+def _improvement_is_enough(result) -> bool:
+    if result.recommended_score is not None and result.current_score is not None:
+        return result.recommended_score >= result.current_score + settings.ml_periodic_optimization_min_score_improvement
+    return (
+        result.recommended_total_pnl_pct
+        >= result.current_total_pnl_pct + settings.ml_periodic_optimization_min_improvement_pct
+    )
+
+
 def job_periodic_optimization() -> None:
     """Periyodik iş (bkz. `Settings.ml_periodic_optimization_enabled`,
     varsayılan AÇIK, haftalık): `app.backtest.system_runner.run_periodic_optimization`
@@ -357,10 +377,7 @@ def job_periodic_optimization() -> None:
         )
 
         applied = False
-        if settings.ml_periodic_optimization_auto_apply_enabled and (
-            result.recommended_total_pnl_pct
-            >= result.current_total_pnl_pct + settings.ml_periodic_optimization_min_improvement_pct
-        ):
+        if settings.ml_periodic_optimization_auto_apply_enabled and _improvement_is_enough(result):
             fraction = settings.ml_periodic_optimization_max_step_fraction
             settings.live_open_confidence = _dampened_step(result.current_open_confidence, result.recommended_open_confidence, fraction)
             settings.live_close_confidence = _dampened_step(result.current_close_confidence, result.recommended_close_confidence, fraction)
@@ -370,6 +387,9 @@ def job_periodic_optimization() -> None:
                 result.current_meta_label_act_threshold, result.recommended_meta_label_act_threshold, fraction
             )
             applied = True
+            # Önceden yalnızca bellekteydi — restart'ta varsayılanlara dönüyordu.
+            persist_live_overrides()
+            get_portfolio().persist()
 
         db.record_optimization_run(
             {
@@ -392,6 +412,9 @@ def job_periodic_optimization() -> None:
                 "current_win_rate_pct": result.current_win_rate_pct,
                 "current_total_pnl_pct": result.current_total_pnl_pct,
                 "current_max_drawdown_pct": result.current_max_drawdown_pct,
+                "current_score": result.current_score,
+                "recommended_score": result.recommended_score,
+                "method": result.method,
                 "applied": applied,
             }
         )

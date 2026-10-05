@@ -11,6 +11,7 @@ from app.api.routes import auth, backtest, bank, bist, dca, engine, macro, ml, o
 from app.api.routes import db as db_routes
 from app.auth.middleware import AuthMiddleware
 from app.core.config import settings
+from app.core.live_overrides import apply_persisted_live_overrides
 from app.db.session import init_db
 from app.scheduler.scheduler import start_scheduler, stop_scheduler
 
@@ -41,6 +42,7 @@ class UnhandledExceptionMiddleware(BaseHTTPMiddleware):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
+    apply_persisted_live_overrides()
     start_scheduler()
     yield
     stop_scheduler()

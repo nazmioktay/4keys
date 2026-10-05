@@ -207,6 +207,8 @@ def run_system_backtest(
     online_model: OnlineSignalModel | None = None,
     dynamic_exit_model: DynamicExitModel | None = None,
     persist: bool = True,
+    ohlcv: pd.DataFrame | None = None,
+    eval_window: tuple[pd.Timestamp, pd.Timestamp] | None = None,
 ) -> SystemBacktestReport:
     """Canlı karar motorunun kullandığı AYNI modelleri (XGBoost birincil +
     varsa meta-label filtresi + varsa LSTM/online ensemble) `request.symbol`
@@ -230,6 +232,12 @@ def run_system_backtest(
       ise ATR çarpanı YERİNE `DynamicExitModel`in (bkz. `app.ml.dynamic_exit`)
       girişteki 63 özelliğe bakarak ürettiği regresyon tahmini kullanılır.
 
+    `ohlcv` verilirse borsadan/önbellekten yeniden çekilmez. `eval_window`
+    (başlangıç dahil, bitiş hariç) verilirse simülasyon yalnızca o zaman
+    aralığındaki barları oynatır ve diskteki modelin holdout kaydı yerine bu
+    pencere kullanılır — walk-forward sistem backtest'i her katmanı böyle
+    çalıştırır (bkz. `run_walk_forward_system_backtest`).
+
     `persist=False` verilirse sonuç `backtest_runs` tablosuna YAZILMAZ (id=None
     döner) — ör. `sweep_confidence_thresholds` gibi arka arkaya çok sayıda
     deneme yapan çağrılarda geçmişi/Grafana panellerini kirletmemek için.
@@ -246,7 +254,8 @@ def run_system_backtest(
     # (bu bug'da olduğu gibi) 2019-2020 gibi alakasız bir dönem test
     # edilir. `fetch_ohlcv_cached` (eğitimle AYNI yol) en son mumları
     # döner ve DB önbelleğinden faydalanır.
-    ohlcv = fetch_ohlcv_cached(exchange, request.symbol, timeframe, request.candles)
+    if ohlcv is None:
+        ohlcv = fetch_ohlcv_cached(exchange, request.symbol, timeframe, request.candles)
 
     if len(ohlcv) < _MIN_CANDLES:
         raise ValueError(
@@ -301,9 +310,21 @@ def run_system_backtest(
     # holdout ÖNCESİ barlar hâlâ `raw_features`/`ohlcv`'de MEVCUT —
     # yalnızca SİMÜLASYON DÖNGÜSÜ (aşağıda) holdout'tan başlar, bu geçmiş
     # kullanım (gösterge ısınması) sızıntı SAYILMAZ (gelecek bilgi değil).
-    holdout_start_time = get_holdout_start_time(DEFAULT_MODEL_PATH) if request.restrict_to_holdout else None
+    holdout_start_time = (
+        get_holdout_start_time(DEFAULT_MODEL_PATH) if request.restrict_to_holdout and eval_window is None else None
+    )
     holdout_trim_warning: str | None = None
-    if holdout_start_time is not None:
+    if eval_window is not None:
+        stamps = features["timestamp"].to_numpy()
+        keep_mask = (stamps >= pd.Timestamp(eval_window[0]).value) & (stamps < pd.Timestamp(eval_window[1]).value)
+        features = features[keep_mask].reset_index(drop=True)
+        valid_positions = valid_positions[keep_mask]
+        predictions = predictions[keep_mask]
+        confidences = confidences[keep_mask]
+        xgb_directions = xgb_directions[keep_mask]
+        if len(features) < 30:
+            raise ValueError(f"Değerlendirme penceresinde yalnızca {len(features)} bar var (en az 30 gerekli).")
+    elif holdout_start_time is not None:
         cutoff_ns = pd.Timestamp(holdout_start_time).value
         keep_mask = features["timestamp"].to_numpy() >= cutoff_ns
         excluded = int((~keep_mask).sum())
@@ -1110,6 +1131,11 @@ class OptimizationRunResult:
     current_win_rate_pct: float
     current_total_pnl_pct: float
     current_max_drawdown_pct: float
+    # Walk-forward optimizasyonunda (bkz. `app.backtest.walk_forward.run_walk_forward_optimization`)
+    # adaylar bu skorla (PnL / maks. drawdown) sıralanır; tek-holdout yolunda None.
+    current_score: float | None = None
+    recommended_score: float | None = None
+    method: str = "holdout"
 
 
 def run_periodic_optimization(

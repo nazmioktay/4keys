@@ -35,6 +35,14 @@ class Settings(BaseSettings):
     # sayısını (çoklu-sembolün kattığı ek satırlar) BTC'nin KENDİ geçmişini
     # derinleştirerek dengelemek için.
     ml_train_lookback: int = 30000
+    # Canlı karar döngüsünün her sembol için çektiği/özelliklerini hesapladığı
+    # mum sayısı. Önceden `ml_train_lookback` (30.000) kullanılıyordu: tek
+    # sembolde ~16 sn çekme + ~60-80 sn özellik hesabı, 5 dakikalık döngü
+    # bitemiyor, döngüler (ve stop-loss kontrolleri) atlanıyordu. Gerçek BTC
+    # verisinde 5.000 ile 30.000 mumdan hesaplanan son 50 barın özellikleri
+    # en fazla 1e-4 farklı (EWM'ler yakınsıyor, OBV yalnızca farklarıyla
+    # kullanılıyor, günlük üst-TF ~208 bar ile ısınıyor) — 4 kat daha hızlı.
+    engine_ohlcv_lookback: int = 5000
 
     # --- Eğitim sembol seçimi: BTC-öncelikli + uyumluluk filtresi ---
     # Önceden eğitim evreni doğrudan screener'ın Top-N Long + Top-N Short
@@ -217,6 +225,9 @@ class Settings(BaseSettings):
     # backtest'i gelene kadar öneriler yalnızca kaydedilir, uygulanmaz.
     ml_periodic_optimization_auto_apply_enabled: bool = False
     ml_periodic_optimization_min_improvement_pct: float = 0.1
+    # Walk-forward optimizasyonunda otomatik uygulama için önerinin skorunun
+    # (PnL / maks. drawdown) mevcut skoru en az bu kadar geçmesi gerekir.
+    ml_periodic_optimization_min_score_improvement: float = 0.25
     ml_periodic_optimization_max_step_fraction: float = 0.5
 
     # Canlı karar motorunun (`app.engine.service.run_cycle_once`) HER

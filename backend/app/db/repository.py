@@ -17,7 +17,7 @@ from .models import (
     OpenInterestSnapshot,
     OptimizationRun,
     OrderbookSnapshot,
-    PortfolioStateRow,
+    AppStateRow,
     SignalRecord,
     TradeRecord,
 )
@@ -801,34 +801,37 @@ def get_recent_optimization_runs(symbol: str | None = None, limit: int = 20) -> 
         return []
 
 
-_PORTFOLIO_STATE_ID = 1
-
-
-def save_portfolio_state(state: dict) -> None:
-    """Paylaşılan portföyün anlık görüntüsünü (bkz. `PortfolioManager.to_state`)
-    tek satıra yazar (varsa üzerine)."""
+def save_app_state(key: str, state: dict) -> None:
+    """`app_state` tablosuna `key` için JSON durumu yazar (varsa üzerine)."""
     if not is_enabled():
         return
     try:
         payload = json.dumps(state, ensure_ascii=False, default=str)
         with session_scope() as db:
-            row = db.get(PortfolioStateRow, _PORTFOLIO_STATE_ID)
+            row = db.get(AppStateRow, key)
             if row is None:
-                db.add(PortfolioStateRow(id=_PORTFOLIO_STATE_ID, state_json=payload))
+                db.add(AppStateRow(key=key, state_json=payload))
             else:
                 row.state_json = payload
-                row.updated_at = datetime.now().astimezone()
     except SQLAlchemyError:
-        logger.exception("portfolio state persist failed")
+        logger.exception("app state persist failed (%s)", key)
 
 
-def load_portfolio_state() -> dict | None:
+def load_app_state(key: str) -> dict | None:
     if not is_enabled():
         return None
     try:
         with session_scope() as db:
-            row = db.get(PortfolioStateRow, _PORTFOLIO_STATE_ID)
+            row = db.get(AppStateRow, key)
             return json.loads(row.state_json) if row is not None else None
     except (SQLAlchemyError, ValueError):
-        logger.exception("portfolio state load failed")
+        logger.exception("app state load failed (%s)", key)
         return None
+
+
+def save_portfolio_state(state: dict) -> None:
+    save_app_state("portfolio", state)
+
+
+def load_portfolio_state() -> dict | None:
+    return load_app_state("portfolio")

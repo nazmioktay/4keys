@@ -21,6 +21,7 @@ from app.backtest.system_runner import (
     sweep_meta_label_threshold,
     sweep_position_sizing,
 )
+from app.backtest.walk_forward import WalkForwardSystemReport, run_walk_forward_system_backtest
 from app.core.config import settings
 from app.db import repository as db
 from app.exchanges import get_exchange
@@ -400,3 +401,37 @@ def sweep_labeling_targets_route(payload: SweepLabelingTargetsRequest) -> SweepL
         online_model=online_model,
     )
     return SweepLabelingTargetsResponse(points=[SweepLabelingTargetsPoint(**p.__dict__) for p in points])
+
+
+class WalkForwardRequest(BaseModel):
+    base_request: SystemBacktestRequest = Field(default_factory=SystemBacktestRequest)
+    n_folds: int = Field(default=4, ge=2, le=12)
+    min_train_frac: float = Field(default=0.4, gt=0.1, lt=0.9)
+    final_test_frac: float = Field(default=0.1, ge=0.0, lt=0.5)
+    include_final_test: bool = Field(
+        default=False,
+        description="True yalnızca nihai doğrulama için: ayrılmış son dilim de test edilir. Parametre ararken False bırakın.",
+    )
+    use_meta_label: bool = True
+
+
+@router.post("/system/walk-forward", response_model=WalkForwardSystemReport)
+def run_walk_forward(payload: WalkForwardRequest) -> WalkForwardSystemReport:
+    """Walk-forward sistem backtest'i (bkz. `app.backtest.walk_forward`):
+    her katmanda model yalnızca o katmandan önceki verilerle yeniden eğitilir.
+    Uzun sürer (katman başına bir model + meta-label eğitimi)."""
+    exchange = get_exchange(settings.exchange_id)
+    template = SignalModel.load_from() if DEFAULT_MODEL_PATH.exists() else None
+    try:
+        return run_walk_forward_system_backtest(
+            exchange,
+            payload.base_request,
+            primary_template=template,
+            n_folds=payload.n_folds,
+            min_train_frac=payload.min_train_frac,
+            final_test_frac=payload.final_test_frac,
+            include_final_test=payload.include_final_test,
+            use_meta_label=payload.use_meta_label,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc

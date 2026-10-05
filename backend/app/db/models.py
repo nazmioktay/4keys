@@ -279,6 +279,11 @@ class OptimizationRun(Base):
     current_max_drawdown_pct: Mapped[float] = mapped_column(Float)
 
     applied: Mapped[bool] = mapped_column(Boolean, default=False)
+    # Walk-forward optimizasyonu (plan Faz 4): adayların sıralandığı skor
+    # (PnL / maks. drawdown) ve yöntem ("walk_forward" | "holdout").
+    current_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    recommended_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    method: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
 class TradeRecord(Base):
@@ -309,15 +314,17 @@ class TradeRecord(Base):
     reason: Mapped[str | None] = mapped_column(String, nullable=True)
 
 
-class PortfolioStateRow(Base):
-    """Paylaşılan paper portföyünün (`app.portfolio.shared`) TEK satırlık
-    kalıcı anlık görüntüsü — açık pozisyonlar, equity, son kapanmış işlemler
-    (Kelly istatistikleri bunlardan hesaplanır), kurallar ve günlük zarar
-    sayacı JSON olarak tutulur. Önceden hepsi yalnızca bellekteydi: backend
-    yeniden başlayınca açık pozisyon ve Kelly geçmişi kayboluyordu."""
+class AppStateRow(Base):
+    """Süreç yeniden başladığında kaybolmaması gereken küçük durumlar için
+    anahtar -> JSON deposu:
+    - "portfolio": paylaşılan paper portföyü (açık pozisyonlar, equity, son
+      kapanmış işlemler — Kelly istatistikleri bunlardan hesaplanır —, kurallar,
+      günlük zarar sayacı). Önceden hepsi yalnızca bellekteydi.
+    - "live_overrides": haftalık optimizasyonun canlıya uyguladığı eşikler
+      (bkz. `app.core.live_overrides`)."""
 
-    __tablename__ = "portfolio_state"
+    __tablename__ = "app_state"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    key: Mapped[str] = mapped_column(String, primary_key=True)
     state_json: Mapped[str] = mapped_column(String)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)

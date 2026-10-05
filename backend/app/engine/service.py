@@ -87,7 +87,9 @@ def run_cycle_once() -> list[Action]:
         # candle_timeframe'i, 4h, teknik skor gösterimi için ayrı kalmaya
         # devam eder — bkz. app/screener/scanner.py).
         timeframe=settings.ml_train_timeframe,
-        lookback=settings.ml_train_lookback,
+        # Tahmin için yalnızca göstergelerin ısınmasına yetecek kadar geçmiş
+        # gerekir — bkz. `Settings.engine_ohlcv_lookback`.
+        lookback=min(settings.engine_ohlcv_lookback, settings.ml_train_lookback),
         # Sabit kod değeri DEĞİL, `settings.live_open_confidence`/
         # `live_close_confidence`'tan okunur — bkz. `Settings` docstring'i:
         # `job_periodic_optimization` (auto-apply açıksa) bunu ÇALIŞMA

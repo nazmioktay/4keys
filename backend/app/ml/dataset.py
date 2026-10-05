@@ -83,6 +83,44 @@ def _compute_labels(
     return label_future_direction(ohlcv["close"], horizon, threshold_pct)
 
 
+def build_symbol_frame(
+    exchange: Exchange,
+    symbol: str,
+    timeframe: str,
+    ohlcv: pd.DataFrame,
+    horizon: int,
+    threshold_pct: float,
+    labeling_method: LabelingMethod,
+    take_profit_pct: float,
+    stop_loss_pct: float,
+    macro_history: pd.DataFrame | None = None,
+) -> pd.DataFrame:
+    """Tek bir sembolün HAZIR `ohlcv`'sinden özellik + etiket çerçevesi
+    (`label`, `symbol`, `time_frac`, `bar_timestamp` kolonlarıyla) üretir.
+    Eğitim (`_build_symbol_frames`) ve walk-forward sistem backtest'i
+    (`app.backtest.walk_forward`) AYNI işlem hattını bu fonksiyon üzerinden kullanır."""
+    if macro_history is None:
+        macro_history = load_macro_history()
+    features = build_features(ohlcv)
+    log_rss(f"{symbol}: build_features sonrası")
+    _persist_feature_snapshots(symbol, timeframe, features)
+    features = merge_macro_features(features, macro_history)
+    features = merge_orderbook_features(features, load_orderbook_history(symbol))
+    features = merge_taker_flow_features(features, ohlcv, exchange, symbol, timeframe)
+    features = merge_open_interest_features(features, load_open_interest_history(symbol))
+    log_rss(f"{symbol}: macro/orderbook/taker/OI merge sonrası")
+    htf_features = compute_multi_timeframe_features(ohlcv)
+    for col in MULTI_TIMEFRAME_FEATURE_COLUMNS:
+        features[col] = htf_features[col].to_numpy()
+    labels = _compute_labels(ohlcv, labeling_method, horizon, threshold_pct, take_profit_pct, stop_loss_pct)
+    frame = features.copy()
+    frame["label"] = labels
+    frame["symbol"] = symbol
+    frame["time_frac"] = (pd.RangeIndex(len(frame)) / max(len(frame) - 1, 1))
+    frame["bar_timestamp"] = ohlcv["timestamp"].to_numpy()
+    return frame.dropna(subset=FEATURE_COLUMNS + ["label"])
+
+
 def _build_symbol_frames(
     exchange: Exchange,
     symbols: list[str],
@@ -115,24 +153,18 @@ def _build_symbol_frames(
             if len(ohlcv) < 60:
                 continue
             warn_if_gaps(symbol, timeframe, ohlcv, timeframe_to_minutes(timeframe))
-            features = build_features(ohlcv)
-            log_rss(f"{symbol}: build_features sonrası")
-            _persist_feature_snapshots(symbol, timeframe, features)
-            features = merge_macro_features(features, macro_history)
-            features = merge_orderbook_features(features, load_orderbook_history(symbol))
-            features = merge_taker_flow_features(features, ohlcv, exchange, symbol, timeframe)
-            features = merge_open_interest_features(features, load_open_interest_history(symbol))
-            log_rss(f"{symbol}: macro/orderbook/taker/OI merge sonrası")
-            htf_features = compute_multi_timeframe_features(ohlcv)
-            for col in MULTI_TIMEFRAME_FEATURE_COLUMNS:
-                features[col] = htf_features[col].to_numpy()
-            labels = _compute_labels(ohlcv, labeling_method, horizon, threshold_pct, take_profit_pct, stop_loss_pct)
-            frame = features.copy()
-            frame["label"] = labels
-            frame["symbol"] = symbol
-            frame["time_frac"] = (pd.RangeIndex(len(frame)) / max(len(frame) - 1, 1))
-            frame["bar_timestamp"] = ohlcv["timestamp"].to_numpy()
-            frame = frame.dropna(subset=FEATURE_COLUMNS + ["label"])
+            frame = build_symbol_frame(
+                exchange,
+                symbol,
+                timeframe,
+                ohlcv,
+                horizon,
+                threshold_pct,
+                labeling_method,
+                take_profit_pct,
+                stop_loss_pct,
+                macro_history,
+            )
             if not frame.empty:
                 frames.append(frame)
             log_rss(f"{symbol}: sembol tamamlandı")
