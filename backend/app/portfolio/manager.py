@@ -30,6 +30,11 @@ class PortfolioPosition:
     entry_atr: float | None = None
     best_price: float | None = None
     breakeven_done: bool = False
+    # Stop çekildiği anda son kapanmış mumun başlangıcı (ISO). Bu muma KADAR
+    # olan mumlar önceki stop'la değerlendirilmiştir; mum içi stop kontrolü
+    # (bkz. `DecisionEngine._bar_stop_fill`) yeni stop'u yalnızca SONRAKİ
+    # mumlara uygular — backtest'teki sıra (önce kontrol, sonra güncelleme).
+    stop_effective_from_bar: str | None = None
 
     # --- Kademeli alım/satım durumu ---
     # Pozisyon açıldığı andaki kural ağırlıkları burada DONDURULUR — rules

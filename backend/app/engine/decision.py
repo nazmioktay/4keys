@@ -339,6 +339,15 @@ class DecisionEngine:
         bar = self._bar_since_open(symbol, position)
         if bar is None or position.stop_loss_price is None:
             return None
+        if position.stop_effective_from_bar is not None:
+            bar_start = pd.Timestamp(bar["timestamp"])
+            effective_from = pd.Timestamp(position.stop_effective_from_bar)
+            if bar_start.tzinfo is not None:
+                bar_start = bar_start.tz_convert(None)
+            if effective_from.tzinfo is not None:
+                effective_from = effective_from.tz_convert(None)
+            if bar_start <= effective_from:
+                return None  # bu mum stop çekilmeden ÖNCE oluştu/kapandı
         stop = position.stop_loss_price
         if position.direction == "long" and float(bar["low"]) <= stop:
             return min(stop, float(bar["open"]))
@@ -373,6 +382,9 @@ class DecisionEngine:
             position.stop_loss_price = min(position.stop_loss_price, position.entry_price * (1 - cost_pct / 100))
             position.breakeven_done = True
         if position.breakeven_done:
+            last_bar_ts = self._last_bar_ts.get(symbol)
+            if last_bar_ts is not None:
+                position.stop_effective_from_bar = pd.Timestamp(last_bar_ts).isoformat()
             self.portfolio.persist()
 
     def _time_exit_reason(self, position) -> str | None:

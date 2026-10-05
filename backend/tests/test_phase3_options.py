@@ -104,6 +104,50 @@ def test_live_breakeven_moves_stop_once_price_runs_in_favour():
     assert position.stop_loss_price == pytest.approx(100 * (1 + (portfolio.rules.commission_pct + portfolio.rules.slippage_pct) * 2 / 100))
 
 
+class _ScriptedBarExchange(_TickerExchange):
+    """Statik serinin SON mumunu (open, high, low, close) ile değiştirir;
+    `shift_bars` serinin zamanını ileri kaydırır (= yeni bir mum kapandı)."""
+
+    def __init__(self, live_price, last_bar, shift_bars=0):
+        super().__init__(live_price)
+        self.last_bar = last_bar
+        self.shift_bars = shift_bars
+
+    def fetch_ohlcv(self, symbol, timeframe, limit, since=None):
+        df = super().fetch_ohlcv(symbol, timeframe, limit, since)
+        df["timestamp"] = df["timestamp"] + pd.Timedelta(hours=4) * self.shift_bars
+        df.loc[df.index[-1], ["open", "high", "low", "close"]] = self.last_bar
+        return df
+
+
+def test_live_breakeven_does_not_apply_new_stop_to_the_bar_that_triggered_it():
+    # Mumun başında low 99,5, sonunda high 102: stop girişe (+maliyet, ~100,12) çekilir.
+    # Fiyat hiç geri dönmedi — AYNI mumun low'u yeni stop'a karşı kontrol edilmemeli
+    # (backtest sırası: mumun kontrolü önceki stop'la, güncelleme yalnızca sonraki mumları etkiler).
+    portfolio = _portfolio(breakeven_atr_mult=1.0)
+    position = portfolio.open("BTC/USDT", "long", entry_price=100, size_quote=100, stop_loss_price=98)
+    position.opened_at = datetime(2024, 1, 1, tzinfo=timezone.utc)  # statik serinin son mumu bundan sonra başlıyor
+    position.entry_atr = 1.5
+    exchange = _ScriptedBarExchange(live_price=101.5, last_bar=(100.0, 102.0, 99.5, 101.5))
+    engine = _engine_with(exchange, _FixedModel("long", 0.9), portfolio)
+
+    breakeven_stop = 100 * (1 + (portfolio.rules.commission_pct + portfolio.rules.slippage_pct) * 2 / 100)
+
+    first = engine.evaluate("BTC/USDT")  # stop'u çeker
+    assert position.breakeven_done is True and position.stop_loss_price == pytest.approx(breakeven_stop)
+    assert first is None or first.type != "close"
+
+    second = engine.evaluate("BTC/USDT")  # sonraki 5 dk'lık döngü, AYNI mum
+    assert second is None or second.type != "close"
+
+    # Yeni bir mum kapanır ve low'u gerçekten stop'un altına iner → kapanmalı.
+    exchange.last_bar = (101.0, 101.5, 100.0, 100.5)
+    exchange.shift_bars = 1
+    third = engine.evaluate("BTC/USDT")
+    assert third is not None and third.type == "close"
+    assert third.price == pytest.approx(position.stop_loss_price)
+
+
 def test_live_time_exit_closes_old_position():
     portfolio = _portfolio(max_holding_bars=3)
     position = portfolio.open("BTC/USDT", "long", entry_price=110, size_quote=100, stop_loss_price=100)
