@@ -2,6 +2,7 @@ import json
 import logging
 from datetime import datetime
 
+import numpy as np
 import pandas as pd
 from sqlalchemy import delete, select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
@@ -632,6 +633,12 @@ def save_ohlcv_bulk(symbol: str, timeframe: str, ohlcv: pd.DataFrame) -> int:
         return 0
 
 
+def _to_native(row: dict) -> dict:
+    """numpy skalerlerini (np.float64 vb.) Python tiplerine çevirir —
+    psycopg2 bunları `np.float64(...)` metni olarak SQL'e gömüyor."""
+    return {k: v.item() if isinstance(v, (np.number, np.bool_)) else v for k, v in row.items()}
+
+
 def save_backtest_run(run: dict, trades: list[dict]) -> int | None:
     """Bir sistem backtest çalıştırmasının özetini + işlem listesini
     kaydeder, oluşturulan `BacktestRun.id`'yi döner (DB kapalıysa None).
@@ -641,12 +648,12 @@ def save_backtest_run(run: dict, trades: list[dict]) -> int | None:
         return None
     try:
         with session_scope() as db:
-            run_row = BacktestRun(**run)
+            run_row = BacktestRun(**_to_native(run))
             db.add(run_row)
             db.flush()  # id'yi almak için
             run_id = run_row.id
             for trade in trades:
-                db.add(BacktestTradeRow(run_id=run_id, **trade))
+                db.add(BacktestTradeRow(run_id=run_id, **_to_native(trade)))
         return run_id
     except SQLAlchemyError:
         logger.exception("backtest run persist failed")
@@ -753,7 +760,7 @@ def record_optimization_run(run: dict) -> int | None:
         return None
     try:
         with session_scope() as db:
-            row = OptimizationRun(**run)
+            row = OptimizationRun(**_to_native(run))
             db.add(row)
             db.flush()
             return row.id
