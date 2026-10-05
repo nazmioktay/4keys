@@ -495,6 +495,9 @@ class DecisionEngine:
             self.positions.open(symbol, direction, price)
             return None
 
+        if not self.portfolio.rules.allow_new_entries:
+            return Action(symbol, "blocked", "yeni pozisyon açma kapalı (RiskRules.allow_new_entries)", price, 0.0)
+
         # ATR bazlı stop-loss — `app.backtest.system_runner.run_system_backtest`'in
         # pozisyon açma bloğuyla AYNI formül: `price ± atr_stop_loss_mult * atr_now`.
         # `_last_atr` bu döngüde `_predict` tarafından doldurulmuş olmalı; yoksa

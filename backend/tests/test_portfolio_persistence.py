@@ -75,3 +75,27 @@ def test_daily_loss_counter_resets_at_utc_day_boundary():
     assert pm.realized_pnl_today == 0.0
     # oturum toplamı korunur, yalnızca günlük sayaç sıfırlanır
     assert pm.realized_pnl_session < -50
+
+
+def test_disabled_new_entries_block_opens_but_stops_still_work():
+    from tests.test_portfolio import _engine_with, _FixedModel, _TickerExchange
+
+    rules = RiskRules(entry_tranche_weights=[1.0], max_symbol_exposure_pct=100, max_total_exposure_pct=100, allow_new_entries=False)
+    portfolio = PortfolioManager(starting_equity=1000, rules=rules)
+    engine = _engine_with(_TickerExchange(live_price=None), _FixedModel("long", 0.9), portfolio, {})
+
+    action = engine.run_cycle(["BTC/USDT"])[0]
+    assert action.type == "blocked"
+    assert "yeni pozisyon açma kapalı" in action.reason
+    assert portfolio.get("BTC/USDT") is None
+
+    # önceden açılmış bir pozisyonun stop'u hâlâ çalışır
+    portfolio.open("ETH/USDT", "long", entry_price=110, size_quote=100, stop_loss_price=105)
+    engine = _engine_with(_TickerExchange(live_price=104.0), _FixedModel("long", 0.9), portfolio)
+    assert engine.evaluate("ETH/USDT").type == "close"
+
+
+def test_allow_new_entries_survives_restart():
+    shared.reset_portfolio(starting_equity=1000, rules=RiskRules(allow_new_entries=False))
+    shared._portfolio = None
+    assert shared.get_portfolio().rules.allow_new_entries is False

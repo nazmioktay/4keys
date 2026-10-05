@@ -28,6 +28,12 @@ class RiskRules(BaseModel):
     max_total_exposure_pct: float = Field(60.0, gt=0, description="Tüm açık pozisyonların toplamının sermayeye oranı üst sınırı")
     max_symbol_exposure_pct: float = Field(60.0, gt=0, description="Tek bir sembole ayrılabilecek maksimum sermaye yüzdesi")
     max_concurrent_positions: int = Field(5, ge=1, description="Aynı anda açık olabilecek maksimum farklı sembol sayısı")
+    # Kill switch'ten farkı: kill switch karar döngüsünün TAMAMINI durdurur
+    # (açık pozisyonların stop/çıkış yönetimi dahil) ve yalnızca bellektedir.
+    # Bu anahtar yalnızca YENİ girişleri engeller; açık pozisyonlar yönetilmeye
+    # devam eder, portföy durumuyla birlikte kalıcıdır. Walk-forward ölçümü
+    # sinyalin negatif beklentili olduğunu gösterdiğinde kapatılır.
+    allow_new_entries: bool = Field(True, description="Kapalıysa yeni pozisyon açılmaz; açık pozisyonların stop/çıkış yönetimi sürer.")
     daily_loss_limit_pct: float = Field(5.0, gt=0, description="Gerçekleşen zarar o UTC gün içinde bu yüzdeye ulaşırsa yeni işlem açılmaz (gün başında sıfırlanır)")
 
     # --- Kelly kriteri tabanlı pozisyon boyutlandırma ---
