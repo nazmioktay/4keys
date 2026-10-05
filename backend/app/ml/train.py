@@ -16,7 +16,7 @@ from .features import ALL_FEATURE_COLUMNS
 from .meta_label import MetaLabelModel, build_meta_dataset, build_meta_dataset_out_of_fold
 from .model import DEFAULT_MODEL_PATH, Algorithm, SignalModel
 from .model_paths import DEFAULT_LSTM_MODEL_PATH, DEFAULT_PATCHTST_MODEL_PATH
-from .model_status import get_split_boundary, write_model_status
+from .model_status import get_champion_fit_end, get_split_boundary, write_model_status
 from .online_model import (
     DEFAULT_ONLINE_MODEL_PATH,
     DEFAULT_ONLINE_PREHOLDOUT_MODEL_PATH,
@@ -74,9 +74,17 @@ def _champion_challenger_verdict(
         use_meta_label=False,
         restrict_to_holdout=False,
     )
-    start = pd.Timestamp(holdout_start_time)
-    if start.tzinfo is not None:
-        start = start.tz_convert(None)
+    def _naive(value) -> pd.Timestamp:
+        stamp = pd.Timestamp(value)
+        return stamp.tz_convert(None) if stamp.tzinfo is not None else stamp
+
+    # İki model de GÖRMEDİĞİ pencerede karşılaştırılır: meydan okuyan holdout'u
+    # hiç görmedi; şampiyon ise tam veriyle yeniden eğitildiyse (refit) eğitim
+    # bitişine kadar görmüştür — pencere ikisinin SONRASINDA başlar.
+    start = _naive(holdout_start_time)
+    champion_fit_end = get_champion_fit_end(DEFAULT_MODEL_PATH)
+    if champion_fit_end is not None:
+        start = max(start, _naive(champion_fit_end))
     window = (start, pd.Timestamp.max)
     scores = {}
     for name, candidate in (("challenger", challenger), ("champion", champion)):
@@ -88,6 +96,14 @@ def _champion_challenger_verdict(
             return True, None
     challenger_score, challenger_report = scores["challenger"]
     champion_score, champion_report = scores["champion"]
+    min_trades = settings.ml_champion_challenger_min_trades
+    if min(challenger_report.trades_closed, champion_report.trades_closed) < min_trades:
+        logger.warning(
+            "champion/challenger: karşılaştırma penceresi (%s sonrası) çok kısa — challenger %d, champion %d işlem "
+            "(en az %d gerekli); karşılaştırma yapılamadı, challenger mutlak kalite kapısına göre kabul ediliyor.",
+            start.isoformat(), challenger_report.trades_closed, champion_report.trades_closed, min_trades,
+        )
+        return True, None
     logger.info(
         "champion/challenger: challenger skor=%.3f (PnL %%%.2f, DD %%%.2f, %d işlem) vs champion skor=%.3f (PnL %%%.2f, DD %%%.2f, %d işlem)",
         challenger_score, challenger_report.total_pnl_pct, challenger_report.max_drawdown_pct, challenger_report.trades_closed,
@@ -272,20 +288,31 @@ def train_signal_model_validated(
         rejection_reason = verdict[1]
         logger.warning("model rejected (algorithm=%s): %s", algorithm, rejection_reason)
     elif persist:
+        refit = False
+        fit_end = None
         if settings.ml_refit_on_full_data and len(X_holdout) > 0:
             # Plan 3.4: doğrulama bittikten sonra dağıtılan model en yeni %20'yi
             # de görerek yeniden eğitilir. Bu durumda holdout artık "görülmemiş"
-            # değildir — kayıt silinir, /backtest/system/run bunu uyarıyla
-            # bildirir; dürüst ölçüm için walk-forward backtest kullanılmalı.
+            # değildir — /backtest/system/run bunu uyarıyla bildirir; dürüst
+            # ölçüm için walk-forward backtest kullanılmalı. Sınırın kendisi ve
+            # eğitimin bittiği an kaydedilir ki sonraki karşılaştırmalar bu
+            # şampiyonun gördüğü pencerede yapılmasın.
             model = _factory()
             model.fit(X, y)
-            holdout_start_time = None
+            refit = True
+            primary_stamps = bar_timestamp[symbol_col == settings.ml_primary_symbol]
+            fit_end = (primary_stamps if len(primary_stamps) else bar_timestamp).max()
         model.save()
         write_model_status(
             DEFAULT_MODEL_PATH,
             enabled=True,
             balanced_accuracy=oos_report.balanced_accuracy,
+            # Refit'te de sınır KORUNUR (meta/online eğitim sınırı + şampiyon
+            # karşılaştırma penceresi); "görülmemiş veri" iddiası ise
+            # `refit_on_full_data` ile kaldırılır (bkz. `get_holdout_start_time`).
             holdout_start_time=holdout_start_time.isoformat() if holdout_start_time is not None else None,
+            fit_end_time=pd.Timestamp(fit_end).isoformat() if refit else None,
+            refit_on_full_data=refit,
         )
 
     logger.info(

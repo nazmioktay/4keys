@@ -187,3 +187,67 @@ def test_auto_retrain_does_not_retrain_meta_after_rejected_challenger(monkeypatc
 
     assert called == []
     assert "meta-label yeniden eğitilmedi" in status.get_all()[jobs.AUTO_RETRAIN_JOB_ID].detail
+
+
+# --- Tam veriyle eğitilmiş şampiyonla adil karşılaştırma (denetim bulgusu 3) ---
+
+from app.ml.model_status import get_holdout_start_time, get_split_boundary
+
+
+def _refit_champion_status(path, holdout="2026-06-01", fit_end="2026-09-01"):
+    write_model_status(
+        path,
+        enabled=True,
+        balanced_accuracy=0.42,
+        holdout_start_time=pd.Timestamp(holdout).isoformat(),
+        fit_end_time=pd.Timestamp(fit_end).isoformat(),
+        refit_on_full_data=True,
+    )
+
+
+def test_refit_champion_is_not_compared_on_data_it_was_trained_on(champion_on_disk, tmp_path, monkeypatch):
+    _refit_champion_status(train_module.DEFAULT_MODEL_PATH)
+    fit_end = pd.Timestamp("2026-09-01")
+    windows = []
+
+    def fake_run(exchange, model, meta, request, persist=True, eval_window=None, **kwargs):
+        windows.append(eval_window)
+        if model is champion_on_disk:
+            # şampiyon yalnızca KENDİ eğitim verisini içeren pencerede şişmiş skor alır
+            return _Report(pnl=20.0 if eval_window[0] < fit_end else 1.0, dd=2.0)
+        return _Report(pnl=5.0, dd=2.0)
+
+    monkeypatch.setattr(system_runner, "run_system_backtest", fake_run)
+
+    ok, reason = train_module._champion_challenger_verdict(None, SignalModel(), pd.Timestamp("2026-08-01"))
+
+    assert ok is True and reason is None
+    assert all(w[0] == fit_end for w in windows)  # max(şampiyonun eğitim bitişi, meydan okuyanın holdout başı)
+
+
+def test_challenger_is_not_rejected_when_comparison_window_is_too_short(champion_on_disk, monkeypatch):
+    windows = _scores(monkeypatch, champion_on_disk, _Report(pnl=2.0, dd=4.0, trades=5), _Report(pnl=6.0, dd=2.0, trades=5))
+
+    ok, reason = train_module._champion_challenger_verdict(None, SignalModel(), pd.Timestamp("2026-06-01"))
+
+    assert (ok, reason) == (True, None)  # karşılaştırma yapılamadı -> mutlak kalite kapısına düşülür
+    assert windows  # backtest denendi
+
+
+def test_refit_keeps_holdout_boundary_but_marks_model_as_seen_data(tmp_path, monkeypatch):
+    from tests.test_xgboost import TrendExchange
+
+    path = tmp_path / "signal_model.joblib"
+    monkeypatch.setattr(train_module, "DEFAULT_MODEL_PATH", path)
+    monkeypatch.setattr(settings, "ml_champion_challenger_enabled", False)
+    monkeypatch.setattr(settings, "ml_min_balanced_accuracy", 0.0)
+    monkeypatch.setattr(settings, "ml_refit_on_full_data", True)
+    monkeypatch.setattr(settings, "ml_primary_symbol", "UPUSDT")  # holdout sınırı birincil sembolden hesaplanır
+    monkeypatch.setattr(SignalModel, "save", lambda self, *a, **k: None)
+
+    train_module.train_signal_model_validated(
+        TrendExchange(seed=5), ["UPUSDT"], horizon=5, threshold_pct=0.5, timeframe="4h", lookback=400, walk_forward_splits=3
+    )
+
+    assert get_split_boundary(path) is not None  # meta/online/karşılaştırma sınırı korunur
+    assert get_holdout_start_time(path) is None  # ama backtest bu modelde "görülmemiş veri" iddia etmez

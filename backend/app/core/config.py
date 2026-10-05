@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     # (champion - tolerans) kadar yapamazsa kaydedilmez.
     ml_champion_challenger_enabled: bool = True
     ml_champion_challenger_tolerance: float = 0.0
+    # Karşılaştırma penceresinde (şampiyonun eğitim bitişi / meydan okuyanın holdout
+    # başlangıcından sonrası) iki modelden biri bu kadar işlem üretemezse skorlar
+    # anlamsızdır: meydan okuyan REDDEDİLMEZ, mutlak kalite kapısına düşülür.
+    ml_champion_challenger_min_trades: int = 30
     # Doğrulamadan sonra dağıtılacak modeli holdout dahil TÜM veriyle yeniden
     # eğit (plan 3.4). Varsayılan kapalı: açıkken holdout tabanlı sistem
     # backtest'i (/backtest/system/run) artık "görülmemiş veri" ölçmez —

@@ -16,6 +16,8 @@ def write_model_status(
     balanced_accuracy: float,
     reason: str | None = None,
     holdout_start_time: str | None = None,
+    fit_end_time: str | None = None,
+    refit_on_full_data: bool | None = None,
 ) -> None:
     """Bir modelin (LSTM/online) canlı karar motorunda KULLANILIP
     KULLANILMAYACAĞINI, eğitimin SONUNDA otomatik olarak belirler ve
@@ -38,7 +40,14 @@ def write_model_status(
     test eder). `None` verilirse (ör. model REDDEDİLDİ, disk'teki dosya
     DEĞİŞMEDİ) daha önce kaydedilmiş değer OLDUĞU GİBİ korunur — reddedilen
     bir denemenin holdout'u, diskte hâlâ duran ESKİ modelin holdout'unun
-    üzerine yanlışlıkla yazılmaz."""
+    üzerine yanlışlıkla yazılmaz.
+
+    `refit_on_full_data=True` (bkz. `Settings.ml_refit_on_full_data`): dağıtılan
+    model doğrulamadan sonra holdout dahil TÜM veriyle yeniden eğitildi.
+    `holdout_start_time` bu durumda da KORUNUR (meta/online eğitim sınırı ve
+    şampiyon/meydan okuyan penceresi için), ama model o dilimi GÖRDÜĞÜ için
+    `get_holdout_start_time` `None` döner; `fit_end_time` (ISO) modelin eğitimde
+    gördüğü son bar'dır. `None` verilen alanlar önceki değeri korur."""
     model_path.parent.mkdir(parents=True, exist_ok=True)
     previous = read_model_status(model_path) or {}
     status = {
@@ -47,6 +56,8 @@ def write_model_status(
         "reason": reason,
         "updated_at": datetime.now(timezone.utc).isoformat(),
         "holdout_start_time": holdout_start_time if holdout_start_time is not None else previous.get("holdout_start_time"),
+        "fit_end_time": fit_end_time if fit_end_time is not None else previous.get("fit_end_time"),
+        "refit_on_full_data": refit_on_full_data if refit_on_full_data is not None else previous.get("refit_on_full_data", False),
     }
     try:
         _status_path(model_path).write_text(json.dumps(status))
@@ -89,8 +100,22 @@ def get_holdout_start_time(model_path: Path) -> str | None:
     zaman damgasını döner (bkz. `write_model_status`) — kayıt yoksa
     (ör. bu alan henüz hiç yazılmamış eski bir model) `None`."""
     status = read_model_status(model_path)
+    if not status or status.get("refit_on_full_data"):
+        # Tam veriyle yeniden eğitilmiş model holdout'u GÖRDÜ — "görülmemiş
+        # pencere" iddia edilemez (bkz. `get_split_boundary` ham sınır için).
+        return None
+    return status.get("holdout_start_time")
+
+
+def get_champion_fit_end(model_path: Path) -> str | None:
+    """Modelin eğitimde GÖRDÜĞÜ son bar (ISO): tam veriyle yeniden eğitilmişse
+    kayıtlı `fit_end_time`, aksi halde holdout'un başlangıcı (holdout'u hiç
+    görmedi). Şampiyon/meydan okuyan karşılaştırma penceresinin alt sınırıdır."""
+    status = read_model_status(model_path)
     if not status:
         return None
+    if status.get("refit_on_full_data"):
+        return status.get("fit_end_time") or status.get("holdout_start_time")
     return status.get("holdout_start_time")
 
 
@@ -98,8 +123,10 @@ def get_split_boundary(model_path: Path) -> str | None:
     """Üretimdeki birincil modelin kayıtlı train/holdout sınırı (ISO) — meta-label
     ve online modelin eğitim sınırı HER ZAMAN buradan alınır; böylece backtest'in
     "görülmemiş" saydığı dönemi bu modeller öğrenmiş olmaz. Kayıt yoksa `None`
-    (çağıran taraf `holdout_frac` yedeğine düşer)."""
-    return get_holdout_start_time(model_path)
+    (çağıran taraf `holdout_frac` yedeğine düşer). Tam veriyle yeniden eğitilmiş
+    modelde de HAM sınırı döner (bkz. `write_model_status`)."""
+    status = read_model_status(model_path)
+    return status.get("holdout_start_time") if status else None
 
 
 def read_model_status(model_path: Path) -> dict | None:
