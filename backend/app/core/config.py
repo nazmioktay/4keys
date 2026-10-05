@@ -49,6 +49,12 @@ class Settings(BaseSettings):
     # backtest'i (/backtest/system/run) artık "görülmemiş veri" ölçmez —
     # karar walk-forward backtest'le verilmeli.
     ml_refit_on_full_data: bool = False
+    # Etiketleme seçenekleri (plan 3.1) — varsayılan = eski davranış. Birincil model,
+    # meta-label, online model (ve LSTM/rejim) AYNI değerlerle eğitilir:
+    # `tie_neutral`: aynı mumda iki bariyer de dokunulduysa etiket nötr;
+    # `label_cost_pct`: bariyerler round-trip maliyet (%) kadar genişler.
+    ml_label_tie_neutral: bool = False
+    ml_label_cost_pct: float = 0.0
     # Canlı karar döngüsünün her sembol için çektiği/özelliklerini hesapladığı
     # mum sayısı. Önceden `ml_train_lookback` (30.000) kullanılıyordu: tek
     # sembolde ~16 sn çekme + ~60-80 sn özellik hesabı, 5 dakikalık döngü

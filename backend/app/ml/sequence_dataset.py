@@ -30,6 +30,8 @@ def build_sequence_dataset(
     take_profit_pct: float = 2.0,
     stop_loss_pct: float = 2.0,
     feature_columns: list[str] | None = None,
+    tie_neutral: bool = False,
+    label_cost_pct: float = 0.0,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """LSTM/PatchTST eğitimi için kayan pencereli (sliding window) sekans
     veri seti kurar. `app.ml.dataset.build_training_dataset`'ten farkı:
@@ -98,7 +100,9 @@ def build_sequence_dataset(
             htf_features = compute_multi_timeframe_features(ohlcv)
             for col in MULTI_TIMEFRAME_FEATURE_COLUMNS:
                 features[col] = htf_features[col].to_numpy()
-            labels = _compute_labels(ohlcv, labeling_method, horizon, threshold_pct, take_profit_pct, stop_loss_pct)
+            labels = _compute_labels(
+                ohlcv, labeling_method, horizon, threshold_pct, take_profit_pct, stop_loss_pct, tie_neutral, label_cost_pct
+            )
             frame = features.copy()
             frame["label"] = labels
             frame = frame.dropna(subset=dense_columns + ["label"]).reset_index(drop=True)

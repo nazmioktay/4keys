@@ -158,13 +158,13 @@ def prepare_walk_forward(
     `primary_template`: katman modellerinin hiperparametre kaynağı (genelde
     üretimdeki model); verilmezse varsayılan `SignalModel`.
     `labeling`: eğitim etiketlemesi — varsayılan ensemble etiketlemesi
-    (`app.ml.train._ENSEMBLE_LABELING`).
+    (`app.ml.train.ensemble_labeling()`).
     `ohlcv`/`frame`: hazır veri/özellik çerçevesi (testler, tekrar kullanım).
     `drop_features`: özellik sadeleştirme denemesi (bkz. `_MaskedModel`).
     """
-    from app.ml.train import _ENSEMBLE_LABELING  # local import: train -> backtest döngüsünü önler
+    from app.ml.train import ensemble_labeling  # local import: train -> backtest döngüsünü önler
 
-    labeling = dict(labeling or _ENSEMBLE_LABELING)
+    labeling = dict(labeling or ensemble_labeling())
     timeframe = request.timeframe or "1h"
     bar = pd.Timedelta(minutes=timeframe_minutes(timeframe))
     horizon = int(labeling.get("horizon", 8))

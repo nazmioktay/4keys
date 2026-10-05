@@ -199,6 +199,8 @@ def train_signal_model_validated(
     embargo_frac: float = 0.02,
     persist: bool = True,
     xgb_params: dict | None = None,
+    tie_neutral: bool | None = None,
+    label_cost_pct: float | None = None,
 ) -> TrainingResult:
     """`app.ml.validation`'daki overfitting korumalarıyla (walk-forward +
     purged/embargo CV + out-of-sample holdout) eğitim yapar (bkz. rehber
@@ -221,6 +223,8 @@ def train_signal_model_validated(
         labeling_method,
         take_profit_pct,
         stop_loss_pct,
+        tie_neutral=settings.ml_label_tie_neutral if tie_neutral is None else tie_neutral,
+        label_cost_pct=settings.ml_label_cost_pct if label_cost_pct is None else label_cost_pct,
     )
 
     if len(X) < 60:
@@ -365,6 +369,8 @@ def _train_sequence_model(
     model_kind: str,
     persist: bool = True,
     seed: int | None = 42,
+    tie_neutral: bool | None = None,
+    label_cost_pct: float | None = None,
 ):
     """LSTM/PatchTST gibi sekans modellerinin ortak eğitim iskeleti —
     veri kurma, holdout/doğrulama bölme, erken durdurma ile fit ve
@@ -402,6 +408,8 @@ def _train_sequence_model(
         take_profit_pct=take_profit_pct,
         stop_loss_pct=stop_loss_pct,
         feature_columns=resolved_columns,
+        tie_neutral=settings.ml_label_tie_neutral if tie_neutral is None else tie_neutral,
+        label_cost_pct=settings.ml_label_cost_pct if label_cost_pct is None else label_cost_pct,
     )
 
     if len(X) < 60:
@@ -496,6 +504,8 @@ def train_lstm_signal_model(
     feature_columns: list[str] | None = None,
     persist: bool = True,
     seed: int | None = 42,
+    tie_neutral: bool | None = None,
+    label_cost_pct: float | None = None,
 ) -> LSTMTrainingResult:
     """LSTM (Faz B) modelini kayan pencereli sekans veri setiyle eğitir —
     bkz. `_train_sequence_model` (ortak iskelet). `persist=False`,
@@ -526,6 +536,8 @@ def train_lstm_signal_model(
         "LSTM",
         persist=persist,
         seed=seed,
+        tie_neutral=tie_neutral,
+        label_cost_pct=label_cost_pct,
     )
     return LSTMTrainingResult(
         model=model,
@@ -571,6 +583,8 @@ def train_patchtst_signal_model(
     feature_columns: list[str] | None = None,
     persist: bool = True,
     seed: int | None = 42,
+    tie_neutral: bool | None = None,
+    label_cost_pct: float | None = None,
 ) -> PatchTSTTrainingResult:
     """PatchTST'ten esinlenilmiş patch-tabanlı Transformer modelini eğitir
     (bkz. `app.ml.patchtst_model` — LSTM'e alternatif, LSTM'in BTC-only
@@ -602,6 +616,8 @@ def train_patchtst_signal_model(
         "PatchTST",
         persist=persist,
         seed=seed,
+        tie_neutral=tie_neutral,
+        label_cost_pct=label_cost_pct,
     )
     return PatchTSTTrainingResult(
         model=model,
@@ -819,6 +835,8 @@ def train_signal_models_by_regime(
     holdout_frac: float = 0.2,
     walk_forward_splits: int = 5,
     persist: bool = True,
+    tie_neutral: bool | None = None,
+    label_cost_pct: float | None = None,
 ) -> tuple[RegimeModel, list[RegimeTrainingResult]]:
     """Hibrit rejim+ML yaklaşımı (kullanıcı önerisi): önce piyasa rejimini
     (volatilite+trend uzayında GMM ile, bkz. `app.ml.regime`) tespit eden
@@ -852,6 +870,8 @@ def train_signal_models_by_regime(
         labeling_method=labeling_method,
         take_profit_pct=take_profit_pct,
         stop_loss_pct=stop_loss_pct,
+        tie_neutral=settings.ml_label_tie_neutral if tie_neutral is None else tie_neutral,
+        label_cost_pct=settings.ml_label_cost_pct if label_cost_pct is None else label_cost_pct,
     )
 
     results: list[RegimeTrainingResult] = []
@@ -960,6 +980,8 @@ def train_online_signal_model(
     window_size: int = 500,
     persist: bool = True,
     holdout_frac: float = 0.2,
+    tie_neutral: bool | None = None,
+    label_cost_pct: float | None = None,
 ) -> tuple[OnlineSignalModel, PrequentialReport]:
     """Kullanıcı önerisi: XGBoost/LSTM'in periyodik toptan (batch)
     yeniden eğitimi yerine, verinin akışından ANLIK öğrenen bir model
@@ -989,6 +1011,8 @@ def train_online_signal_model(
         labeling_method,
         take_profit_pct,
         stop_loss_pct,
+        tie_neutral=settings.ml_label_tie_neutral if tie_neutral is None else tie_neutral,
+        label_cost_pct=settings.ml_label_cost_pct if label_cost_pct is None else label_cost_pct,
     )
 
     if len(X) < 60:
@@ -1076,6 +1100,8 @@ def train_meta_label_model(
     holdout_frac: float = 0.2,
     walk_forward_splits: int = 5,
     embargo_frac: float = 0.02,
+    tie_neutral: bool | None = None,
+    label_cost_pct: float | None = None,
 ) -> tuple[MetaLabelModel, int]:
     """Birincil modelin sinyaline "gir/girme" kararı verecek meta-label
     modelini eğitir (bkz. `app.ml.meta_label`).
@@ -1103,6 +1129,8 @@ def train_meta_label_model(
         labeling_method,
         take_profit_pct,
         stop_loss_pct,
+        tie_neutral=settings.ml_label_tie_neutral if tie_neutral is None else tie_neutral,
+        label_cost_pct=settings.ml_label_cost_pct if label_cost_pct is None else label_cost_pct,
     )
 
     if len(X) < 30:
@@ -1218,6 +1246,18 @@ _ENSEMBLE_LABELING = {
 }
 
 
+def ensemble_labeling() -> dict:
+    """`_ENSEMBLE_LABELING` + etiketleme seçenekleri (`Settings.ml_label_tie_neutral`,
+    `Settings.ml_label_cost_pct`, plan 3.1; varsayılan = eski davranış). Üretim
+    eğitimi, walk-forward ve etiketleme taraması BU tek tanımı kullanır — böylece
+    birincil model, meta-label ve online model AYNI soruyu öğrenir."""
+    return {
+        **_ENSEMBLE_LABELING,
+        "tie_neutral": settings.ml_label_tie_neutral,
+        "label_cost_pct": settings.ml_label_cost_pct,
+    }
+
+
 def train_all_models(
     exchange: Exchange,
     symbols: list[str],
@@ -1280,7 +1320,7 @@ def train_all_models(
             # dengeli bir 3 sınıf dağılımı veriyor (üretimde doğrulandı: nötr
             # oranı %84.7 -> %17.7); gerçek dağılım her eğitimde
             # `true_class_counts` ile raporlanır.
-            primary = train_signal_model_validated(exchange, symbols, lookback=lookback, **_ENSEMBLE_LABELING)
+            primary = train_signal_model_validated(exchange, symbols, lookback=lookback, **ensemble_labeling())
             detail = (
                 f"{primary.rows_used} satır, oos_balanced_acc={primary.out_of_sample.balanced_accuracy:.3f}, "
                 f"gerçek={primary.out_of_sample.true_class_counts}, "
@@ -1317,7 +1357,7 @@ def train_all_models(
             # yapar (XGBoost, kendi öğrendiği sorunun cevabını doğru verse
             # bile FARKLI bir soruya göre "yanlış" sayılır) — üretimde tam
             # olarak bu yaşandı: 768 açılış girişiminin 767'si veto edildi.
-            _, meta_rows = train_meta_label_model(exchange, symbols, primary.model, lookback=lookback, **_ENSEMBLE_LABELING)
+            _, meta_rows = train_meta_label_model(exchange, symbols, primary.model, lookback=lookback, **ensemble_labeling())
             results.append(TrainAllStepResult("meta_label", True, f"{meta_rows} satır"))
         except ValueError as exc:
             results.append(TrainAllStepResult("meta_label", False, str(exc)))
@@ -1327,7 +1367,7 @@ def train_all_models(
         results.append(TrainAllStepResult("lstm", True, "atlandı (skip_steps)"))
     else:
         try:
-            lstm_result = train_lstm_signal_model(exchange, symbols, **_ENSEMBLE_LABELING)
+            lstm_result = train_lstm_signal_model(exchange, symbols, **ensemble_labeling())
             detail = f"{lstm_result.rows_used} satır, oos_balanced_acc={lstm_result.out_of_sample.balanced_accuracy:.3f}"
             if not lstm_result.accepted:
                 detail = f"REDDEDİLDİ: {lstm_result.rejection_reason} ({detail})"
@@ -1340,7 +1380,7 @@ def train_all_models(
         results.append(TrainAllStepResult("online", True, "atlandı (skip_steps)"))
     else:
         try:
-            _, online_report = train_online_signal_model(exchange, symbols, window_size=500, lookback=lookback, **_ENSEMBLE_LABELING)
+            _, online_report = train_online_signal_model(exchange, symbols, window_size=500, lookback=lookback, **ensemble_labeling())
             detail = f"{online_report.rows_used} satır, overall_balanced_acc={online_report.overall_balanced_accuracy:.3f}"
             if not online_report.accepted:
                 detail = f"REDDEDİLDİ: {online_report.rejection_reason} ({detail})"
@@ -1354,7 +1394,7 @@ def train_all_models(
     else:
         try:
             _, regime_results = train_signal_models_by_regime(
-                exchange, symbols, n_regimes=3, walk_forward_splits=3, **_ENSEMBLE_LABELING
+                exchange, symbols, n_regimes=3, walk_forward_splits=3, **ensemble_labeling()
             )
             summary = "; ".join(
                 f"rejim {r.regime}: {r.rows_used} satır" + (f" (REDDEDİLDİ: {r.error})" if r.error else "") for r in regime_results

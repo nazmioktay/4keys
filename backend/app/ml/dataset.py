@@ -139,6 +139,8 @@ def _build_symbol_frames(
     labeling_method: LabelingMethod,
     take_profit_pct: float,
     stop_loss_pct: float,
+    tie_neutral: bool = False,
+    label_cost_pct: float = 0.0,
 ) -> list[pd.DataFrame]:
     """Her sembol için özellik+etiket çerçevesini, kronolojik sırası
     korunmuş ve `time_frac` (0..1, o sembolün serisi içindeki göreli
@@ -172,6 +174,8 @@ def _build_symbol_frames(
                 take_profit_pct,
                 stop_loss_pct,
                 macro_history,
+                tie_neutral=tie_neutral,
+                label_cost_pct=label_cost_pct,
             )
             if not frame.empty:
                 frames.append(frame)
@@ -194,6 +198,8 @@ def build_training_dataset(
     labeling_method: LabelingMethod = "threshold",
     take_profit_pct: float = 2.0,
     stop_loss_pct: float = 2.0,
+    tie_neutral: bool = False,
+    label_cost_pct: float = 0.0,
 ) -> tuple[pd.DataFrame, pd.Series]:
     """Birden çok sembolün geçmiş verisinden birleşik eğitim seti üretir.
 
@@ -210,7 +216,8 @@ def build_training_dataset(
       (max_horizon) belirler.
     """
     frames = _build_symbol_frames(
-        exchange, symbols, timeframe, lookback, horizon, threshold_pct, labeling_method, take_profit_pct, stop_loss_pct
+        exchange, symbols, timeframe, lookback, horizon, threshold_pct, labeling_method, take_profit_pct, stop_loss_pct,
+        tie_neutral=tie_neutral, label_cost_pct=label_cost_pct,
     )
     if not frames:
         return pd.DataFrame(columns=ALL_FEATURE_COLUMNS), pd.Series(dtype="float")
@@ -231,6 +238,8 @@ def build_training_dataset_with_time(
     labeling_method: LabelingMethod = "threshold",
     take_profit_pct: float = 2.0,
     stop_loss_pct: float = 2.0,
+    tie_neutral: bool = False,
+    label_cost_pct: float = 0.0,
 ) -> tuple[pd.DataFrame, pd.Series, pd.Series, pd.Series, pd.Series]:
     """`build_training_dataset` ile aynıdır, ek olarak her satır için
     `time_frac`'i (walk-forward/purged CV ve out-of-sample holdout
@@ -245,7 +254,8 @@ def build_training_dataset_with_time(
     — yalnızca `settings.ml_primary_symbol`'ün holdout'u kullanılır).
     """
     frames = _build_symbol_frames(
-        exchange, symbols, timeframe, lookback, horizon, threshold_pct, labeling_method, take_profit_pct, stop_loss_pct
+        exchange, symbols, timeframe, lookback, horizon, threshold_pct, labeling_method, take_profit_pct, stop_loss_pct,
+        tie_neutral=tie_neutral, label_cost_pct=label_cost_pct,
     )
     if not frames:
         empty = pd.Series(dtype="float")

@@ -200,6 +200,8 @@ def build_regime_labeled_dataset(
     labeling_method: str = "threshold",
     take_profit_pct: float = 2.0,
     stop_loss_pct: float = 2.0,
+    tie_neutral: bool = False,
+    label_cost_pct: float = 0.0,
 ) -> tuple[pd.DataFrame, pd.Series, pd.Series, pd.Series]:
     """Hibrit rejim+ML yaklaşımı için: XGBoost'un standart eğitim setini
     (`app.ml.dataset._build_symbol_frames` ile AYNI özellik/etiketleme
@@ -217,7 +219,8 @@ def build_regime_labeled_dataset(
     from .features import ALL_FEATURE_COLUMNS
 
     frames = _build_symbol_frames(
-        exchange, symbols, timeframe, lookback, horizon, threshold_pct, labeling_method, take_profit_pct, stop_loss_pct
+        exchange, symbols, timeframe, lookback, horizon, threshold_pct, labeling_method, take_profit_pct, stop_loss_pct,
+        tie_neutral=tie_neutral, label_cost_pct=label_cost_pct,
     )
     if not frames:
         return (

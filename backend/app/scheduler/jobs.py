@@ -16,7 +16,7 @@ from app.ml.model_status import is_model_enabled
 from app.ml.online_model import DEFAULT_ONLINE_MODEL_PATH, OnlineSignalModel
 from app.ml.regime import DEFAULT_REGIME_MODEL_PATH
 from app.ml.train import (
-    _ENSEMBLE_LABELING,
+    ensemble_labeling,
     train_lstm_signal_model,
     train_meta_label_model,
     train_online_signal_model,
@@ -167,7 +167,7 @@ def job_auto_retrain() -> None:
             status.record(AUTO_RETRAIN_JOB_ID, ok=True, detail="atlandı: sembol bulunamadı")
             return
 
-        train_result = train_signal_model_validated(exchange, symbols, **_ENSEMBLE_LABELING)
+        train_result = train_signal_model_validated(exchange, symbols, **ensemble_labeling())
         detail = (
             f"XGBoost: {train_result.rows_used} satır, "
             f"oos_balanced_acc={train_result.out_of_sample.balanced_accuracy:.3f}"
@@ -191,7 +191,7 @@ def job_auto_retrain() -> None:
         elif DEFAULT_META_MODEL_PATH.exists():
             try:
                 primary_model = SignalModel.load_from()
-                _, meta_rows = train_meta_label_model(exchange, symbols, primary_model, **_ENSEMBLE_LABELING)
+                _, meta_rows = train_meta_label_model(exchange, symbols, primary_model, **ensemble_labeling())
                 detail += f"; meta-label: {meta_rows} satır"
             except ValueError as exc:
                 detail += f"; meta-label atlandı: {exc}"
@@ -243,7 +243,7 @@ def job_auto_retrain_lstm() -> None:
             status.record(AUTO_RETRAIN_LSTM_JOB_ID, ok=True, detail="atlandı: sembol bulunamadı")
             return
 
-        result = train_lstm_signal_model(exchange, symbols, **_ENSEMBLE_LABELING)
+        result = train_lstm_signal_model(exchange, symbols, **ensemble_labeling())
         status.record(
             AUTO_RETRAIN_LSTM_JOB_ID,
             ok=True,
@@ -271,7 +271,7 @@ def job_auto_retrain_online() -> None:
             status.record(AUTO_RETRAIN_ONLINE_JOB_ID, ok=True, detail="atlandı: sembol bulunamadı")
             return
 
-        _, report = train_online_signal_model(exchange, symbols, **_ENSEMBLE_LABELING)
+        _, report = train_online_signal_model(exchange, symbols, **ensemble_labeling())
         status.record(
             AUTO_RETRAIN_ONLINE_JOB_ID,
             ok=True,
@@ -298,7 +298,7 @@ def job_auto_retrain_regime() -> None:
             status.record(AUTO_RETRAIN_REGIME_JOB_ID, ok=True, detail="atlandı: sembol bulunamadı")
             return
 
-        _, results = train_signal_models_by_regime(exchange, symbols, **_ENSEMBLE_LABELING)
+        _, results = train_signal_models_by_regime(exchange, symbols, **ensemble_labeling())
         summary = "; ".join(
             f"rejim {r.regime}: {r.rows_used} satır" + (f" (hata: {r.error})" if r.error else "") for r in results
         )
