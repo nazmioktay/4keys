@@ -1,5 +1,6 @@
 from fastapi.testclient import TestClient
 
+from app.auth.tokens import create_token
 from app.main import app
 
 
@@ -15,7 +16,7 @@ def test_unhandled_exception_returns_json_with_cors_headers(monkeypatch):
 
     monkeypatch.setattr(dca_routes, "get_exchange", _boom)
 
-    client = TestClient(app, raise_server_exceptions=False)
+    client = TestClient(app, raise_server_exceptions=False, headers={"Authorization": f"Bearer {create_token('test')}"})
     response = client.post(
         "/dca/optimize",
         json={"symbol": "BTC/USDT:USDT", "balance": 500},

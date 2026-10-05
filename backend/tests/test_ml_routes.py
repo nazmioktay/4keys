@@ -11,6 +11,7 @@ import numpy as np
 import pandas as pd
 from fastapi.testclient import TestClient
 
+from app.auth.tokens import create_token
 from app.exchanges.base import Exchange
 from app.main import app
 
@@ -60,7 +61,7 @@ def test_train_meta_endpoint_returns_response_matching_its_schema(monkeypatch):
     monkeypatch.setattr(ml_routes, "_model_exists", lambda: True)
     monkeypatch.setattr(SignalModel, "load_from", classmethod(lambda cls, path=None: primary))
 
-    client = TestClient(app)
+    client = TestClient(app, headers={"Authorization": f"Bearer {create_token('test')}"})
     response = client.post("/ml/train-meta", json={"symbols": ["UPUSDT", "DOWNUSDT"], "horizon": 5, "threshold_pct": 0.5})
 
     assert response.status_code == 200
