@@ -338,12 +338,17 @@ def run_walk_forward_system_backtest(
     embargo_bars: int = 24,
     ohlcv: pd.DataFrame | None = None,
     frame: pd.DataFrame | None = None,
+    drop_features: list[str] | None = None,
 ) -> WalkForwardSystemReport:
     """`request`'in yürütme/boyutlandırma ayarlarıyla walk-forward sistem
     backtest'i (`prepare_walk_forward` + `evaluate_walk_forward`). Yalnızca
     birincil model (+ istenirse katman başına yeniden eğitilen meta-label)
     kullanılır; LSTM/online ensemble katman başına yeniden eğitilmediği için
-    dışarıda bırakılır (aksi halde geleceği görmüş modeller karışırdı)."""
+    dışarıda bırakılır (aksi halde geleceği görmüş modeller karışırdı).
+
+    `drop_features`: özellik sadeleştirme A/B denemesi (bkz. `_MaskedModel`,
+    `app.ml.feature_selection.redundant_features`). YALNIZCA bu raporu etkiler;
+    üretim eğitimine uygulanmaz."""
     if request.use_dynamic_exit:
         raise ValueError("Walk-forward backtest use_dynamic_exit ile desteklenmiyor (dinamik çıkış modeli katman başına eğitilmiyor).")
     prepared = prepare_walk_forward(
@@ -359,8 +364,15 @@ def run_walk_forward_system_backtest(
         embargo_bars=embargo_bars,
         ohlcv=ohlcv,
         frame=frame,
+        drop_features=drop_features,
     )
-    return evaluate_walk_forward(exchange, prepared, request)
+    report = evaluate_walk_forward(exchange, prepared, request)
+    if drop_features:
+        report.warnings.append(
+            f"Özellik sadeleştirme denemesi: {len(drop_features)} özellik modelden çıkarıldı ({', '.join(drop_features)}); "
+            "sonuç üretimdeki modele değil, sadeleştirilmiş katman modellerine aittir."
+        )
+    return report
 
 
 def _is_reliable(report: WalkForwardSystemReport, min_trades: int) -> bool:

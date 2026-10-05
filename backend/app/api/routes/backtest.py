@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from app.backtest.runner import run_backtest_report
@@ -25,12 +25,16 @@ from app.backtest.walk_forward import WalkForwardSystemReport, run_walk_forward_
 from app.core.config import settings
 from app.db import repository as db
 from app.exchanges import get_exchange
+from app.ml.dataset import build_training_dataset
 from app.ml.dynamic_exit import DEFAULT_DYNAMIC_EXIT_MODEL_PATH, DynamicExitModel
+from app.ml.feature_selection import correlated_feature_clusters, redundant_features
+from app.ml.features import ALL_FEATURE_COLUMNS
 from app.ml.meta_label import DEFAULT_META_MODEL_PATH, MetaLabelModel
 from app.ml.model import DEFAULT_MODEL_PATH, SignalModel
 from app.ml.model_paths import DEFAULT_LSTM_MODEL_PATH
 from app.ml.model_status import is_model_enabled
 from app.ml.online_model import DEFAULT_ONLINE_MODEL_PATH, OnlineSignalModel
+from app.ml.train import ensemble_labeling
 
 if TYPE_CHECKING:
     from app.ml.lstm_model import LSTMSignalModel
@@ -413,6 +417,50 @@ class WalkForwardRequest(BaseModel):
         description="True yalnızca nihai doğrulama için: ayrılmış son dilim de test edilir. Parametre ararken False bırakın.",
     )
     use_meta_label: bool = True
+    drop_features: list[str] | None = Field(
+        default=None,
+        description=(
+            "Özellik sadeleştirme A/B denemesi: listedeki özellikler katman modellerinden çıkarılır "
+            "(bkz. GET /backtest/system/suggest-drop-features). Yalnızca bu raporu etkiler; üretim eğitimine uygulanmaz."
+        ),
+    )
+
+
+class SuggestDropFeaturesResponse(BaseModel):
+    symbol: str
+    timeframe: str
+    threshold: float
+    rows: int
+    drop_features: list[str]
+    clusters: list[list[str]]
+
+
+@router.get("/system/suggest-drop-features", response_model=SuggestDropFeaturesResponse)
+def suggest_drop_features(
+    symbol: str | None = None,
+    timeframe: str | None = None,
+    candles: int = Query(default=5000, ge=500, le=50000),
+    threshold: float = Query(default=0.9, gt=0.5, le=1.0),
+) -> SuggestDropFeaturesResponse:
+    """SALT-OKUNUR: birincil sembolün eğitim özellik çerçevesinde |korelasyon| >=
+    `threshold` olan özellikleri kümeler ve her kümeden ilki dışındakileri
+    "düşürülebilir" diye önerir (bkz. `app.ml.feature_selection`). Hiçbir modeli
+    veya ayarı DEĞİŞTİRMEZ — öneriyi `POST /backtest/system/walk-forward`
+    `drop_features` ile sınayıp sonuca bakarak ayrıca karar verin."""
+    exchange = get_exchange(settings.exchange_id)
+    symbol = symbol or settings.ml_primary_symbol
+    timeframe = timeframe or settings.ml_train_timeframe
+    X, _y = build_training_dataset(exchange, [symbol], timeframe, candles, **ensemble_labeling())
+    if len(X) < 100:
+        raise HTTPException(status_code=422, detail=f"Özellik sadeleştirme önerisi için yeterli veri yok ({len(X)} satır).")
+    return SuggestDropFeaturesResponse(
+        symbol=symbol,
+        timeframe=timeframe,
+        threshold=threshold,
+        rows=len(X),
+        drop_features=redundant_features(X, threshold),
+        clusters=[c for c in correlated_feature_clusters(X, threshold) if len(c) > 1],
+    )
 
 
 @router.post("/system/walk-forward", response_model=WalkForwardSystemReport)
@@ -420,6 +468,9 @@ def run_walk_forward(payload: WalkForwardRequest) -> WalkForwardSystemReport:
     """Walk-forward sistem backtest'i (bkz. `app.backtest.walk_forward`):
     her katmanda model yalnızca o katmandan önceki verilerle yeniden eğitilir.
     Uzun sürer (katman başına bir model + meta-label eğitimi)."""
+    unknown = [name for name in payload.drop_features or [] if name not in ALL_FEATURE_COLUMNS]
+    if unknown:
+        raise HTTPException(status_code=422, detail=f"Bilinmeyen özellik(ler): {', '.join(unknown)}")
     exchange = get_exchange(settings.exchange_id)
     template = SignalModel.load_from() if DEFAULT_MODEL_PATH.exists() else None
     try:
@@ -432,6 +483,7 @@ def run_walk_forward(payload: WalkForwardRequest) -> WalkForwardSystemReport:
             final_test_frac=payload.final_test_frac,
             include_final_test=payload.include_final_test,
             use_meta_label=payload.use_meta_label,
+            drop_features=payload.drop_features,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
