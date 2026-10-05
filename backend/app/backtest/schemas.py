@@ -203,6 +203,23 @@ class SystemBacktestRequest(BaseModel):
         description="En iyi fiyattan bu kadar ATR geride trailing stop; null (varsayılan) ise trailing yok",
     )
 
+    # --- Plan Faz 3 seçenekleri (VARSAYILAN KAPALI — walk-forward A/B ile
+    # iyileştirdiği gösterilmeden açılmaz, bkz. README "Karlılık") ---
+    max_holding_bars: int | None = Field(
+        default=None,
+        ge=1,
+        description="Pozisyon bu kadar bar açık kaldıysa mum kapanışında kapatılır (zaman çıkışı — etiketin horizon'uyla aynı soruyu sorar). null: yok.",
+    )
+    breakeven_atr_mult: float | None = Field(
+        default=None,
+        gt=0,
+        description="Fiyat girişten (giriş ATR'si x bu çarpan) kadar lehe gidince stop girişe (+maliyet) çekilir. null: yok.",
+    )
+    trend_filter: Literal["off", "block"] = Field(
+        default="off",
+        description="'block': günlük (1d) EMA eğiliminin TERSİ yönde pozisyon açılmaz (htf_1d_ema_gap işareti).",
+    )
+
     # --- Kademeli kâr alma (opsiyonel, VARSAYILAN KAPALI) ---
     # Yukarıdaki "ilk denemede kâr-alma=1.5xATR + trailing=0.5xATR" dersinden
     # (PnL %88->%32) FARKLI bir mekanizma: pozisyonun TAMAMINI sabit bir

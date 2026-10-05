@@ -25,6 +25,11 @@ class PortfolioPosition:
     size_quote: float
     opened_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     stop_loss_price: float | None = None
+    # Başabaş stop için (bkz. `RiskRules.breakeven_atr_mult`): girişteki ATR,
+    # lehe görülen en iyi fiyat ve stop'un girişe çekilip çekilmediği.
+    entry_atr: float | None = None
+    best_price: float | None = None
+    breakeven_done: bool = False
 
     # --- Kademeli alım/satım durumu ---
     # Pozisyon açıldığı andaki kural ağırlıkları burada DONDURULUR — rules

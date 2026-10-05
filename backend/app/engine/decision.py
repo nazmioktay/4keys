@@ -8,7 +8,7 @@ import pandas as pd
 
 from app.db import repository as db
 from app.exchanges.base import Exchange
-from app.exchanges.cache import fetch_ohlcv_cached
+from app.exchanges.cache import fetch_ohlcv_cached, timeframe_minutes
 from app.ml.advanced_indicators import average_true_range
 from app.ml.features import latest_feature_vector
 from app.ml.macro_features import latest_macro_feature_row
@@ -317,13 +317,11 @@ class DecisionEngine:
             fill = position.stop_loss_price
         return Action(symbol, "close", f"stop-loss tetiklendi (seviye={position.stop_loss_price:.4f})", fill, 1.0)
 
-    def _bar_stop_fill(self, symbol: str, position) -> float | None:
-        """Pozisyon açıldıktan SONRA başlamış son kapanmış mum stop seviyesini
-        mum içinde geçtiyse (yoklamalar arasında kaçırılan tetikleme) dolum
-        fiyatını döner: normalde stop seviyesi, mum seviyenin ötesinde
-        açıldıysa (gap) açılış — backtest'in `intrabar_stops` kuralıyla aynı."""
+    def _bar_since_open(self, symbol: str, position) -> pd.Series | None:
+        """Son kapanmış mum, pozisyon açıldıktan SONRA başladıysa onu döner
+        (öncesindeki fiyat hareketi pozisyona ait değildir)."""
         bar = self._last_bar.get(symbol)
-        if bar is None or position.stop_loss_price is None:
+        if bar is None:
             return None
         bar_start = pd.Timestamp(bar["timestamp"])
         opened_at = pd.Timestamp(position.opened_at)
@@ -331,13 +329,63 @@ class DecisionEngine:
             opened_at = opened_at.tz_convert(None)
         if bar_start.tzinfo is not None:
             bar_start = bar_start.tz_convert(None)
-        if bar_start < opened_at:
+        return bar if bar_start >= opened_at else None
+
+    def _bar_stop_fill(self, symbol: str, position) -> float | None:
+        """Pozisyon açıldıktan SONRA başlamış son kapanmış mum stop seviyesini
+        mum içinde geçtiyse (yoklamalar arasında kaçırılan tetikleme) dolum
+        fiyatını döner: normalde stop seviyesi, mum seviyenin ötesinde
+        açıldıysa (gap) açılış — backtest'in `intrabar_stops` kuralıyla aynı."""
+        bar = self._bar_since_open(symbol, position)
+        if bar is None or position.stop_loss_price is None:
             return None
         stop = position.stop_loss_price
         if position.direction == "long" and float(bar["low"]) <= stop:
             return min(stop, float(bar["open"]))
         if position.direction == "short" and float(bar["high"]) >= stop:
             return max(stop, float(bar["open"]))
+        return None
+
+    def _apply_breakeven(self, symbol: str, position, observed_price: float) -> None:
+        """Backtest'teki `_apply_breakeven` ile aynı kural: lehe hareket giriş
+        ATR'sinin `breakeven_atr_mult` katına ulaşınca stop girişe (+maliyet)
+        çekilir, bir kez. En iyi fiyat canlı fiyat ve son kapanmış mumun
+        high/low'undan izlenir."""
+        rules = self.portfolio.rules
+        if rules.breakeven_atr_mult is None or position.breakeven_done or position.stop_loss_price is None or not position.entry_atr:
+            return
+        is_long = position.direction == "long"
+        candidates = [observed_price]
+        bar = self._bar_since_open(symbol, position)
+        if bar is not None:
+            candidates.append(float(bar["high"] if is_long else bar["low"]))
+        best = max(candidates) if is_long else min(candidates)
+        if position.best_price is None:
+            position.best_price = best
+        position.best_price = max(position.best_price, best) if is_long else min(position.best_price, best)
+
+        trigger = rules.breakeven_atr_mult * position.entry_atr
+        cost_pct = (rules.commission_pct + rules.slippage_pct) * 2
+        if is_long and position.best_price - position.entry_price >= trigger:
+            position.stop_loss_price = max(position.stop_loss_price, position.entry_price * (1 + cost_pct / 100))
+            position.breakeven_done = True
+        elif not is_long and position.entry_price - position.best_price >= trigger:
+            position.stop_loss_price = min(position.stop_loss_price, position.entry_price * (1 - cost_pct / 100))
+            position.breakeven_done = True
+        if position.breakeven_done:
+            self.portfolio.persist()
+
+    def _time_exit_reason(self, position) -> str | None:
+        max_bars = self.portfolio.rules.max_holding_bars
+        if max_bars is None:
+            return None
+        opened_at = pd.Timestamp(position.opened_at)
+        now = pd.Timestamp.now(tz="UTC")
+        if opened_at.tzinfo is None:
+            opened_at = opened_at.tz_localize("UTC")
+        held = now - opened_at
+        if held >= pd.Timedelta(minutes=timeframe_minutes(self.timeframe)) * max_bars:
+            return f"zaman çıkışı ({max_bars} mum doldu)"
         return None
 
     def evaluate(self, symbol: str) -> Action | None:
@@ -373,6 +421,12 @@ class DecisionEngine:
         if stop_guarded and live_price is None and position.stop_loss_breached(price):
             return self._stop_action(symbol, position, price)
 
+        if position is not None and self.portfolio is not None:
+            self._apply_breakeven(symbol, position, live_price if live_price is not None else price)
+            time_exit = self._time_exit_reason(position)
+            if time_exit is not None:
+                return Action(symbol, "close", time_exit, live_price if live_price is not None else price, 1.0)
+
         bar_ts = self._last_bar_ts.get(symbol)
         if self.signal_bar_memory is not None and bar_ts is not None:
             if self.signal_bar_memory.get(symbol) == bar_ts:
@@ -390,6 +444,11 @@ class DecisionEngine:
 
         if position is None:
             if prediction.direction in ("long", "short") and prediction.confidence >= self.open_confidence:
+                if self.portfolio is not None and self.portfolio.rules.trend_filter == "block":
+                    trend = feature_row.get("htf_1d_ema_gap", 0.0)
+                    trend = 0.0 if trend is None or pd.isna(trend) else float(trend)
+                    if (prediction.direction == "long" and trend < 0) or (prediction.direction == "short" and trend > 0):
+                        return Action(symbol, "hold", "trend filtresi: günlük eğilimin tersine açılmıyor", price, prediction.confidence)
                 if self.meta_model is not None:
                     meta_decision = self.meta_model.decide(
                         feature_row, prediction.confidence, act_threshold=self.meta_label_act_threshold
@@ -477,7 +536,10 @@ class DecisionEngine:
                 confidence or 0.0,
             )
 
-        self.portfolio.open(symbol, direction, price, decision.size_quote, stop_loss_price=stop_loss_price)
+        position = self.portfolio.open(symbol, direction, price, decision.size_quote, stop_loss_price=stop_loss_price)
+        position.entry_atr = atr_now
+        position.best_price = price
+        self.portfolio.persist()
         return None
 
     def apply(self, action: Action) -> Action:

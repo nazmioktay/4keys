@@ -1,0 +1,134 @@
+from datetime import datetime, timedelta, timezone
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from app.backtest.system_runner import run_system_backtest
+from app.ml.labeling import LONG, NEUTRAL, triple_barrier_labels
+from app.ml.multi_timeframe_features import compute_multi_timeframe_features
+from app.portfolio.manager import PortfolioManager
+from app.portfolio.schemas import RiskRules
+
+from tests.test_portfolio import _engine_with, _FixedModel, _TickerExchange
+from tests.test_system_backtest import _scenario_exchange, _scenario_request, _ScriptedModel
+
+
+# --- Etiketleme (3.1) ---
+
+def _bars(rows):
+    return pd.DataFrame(rows, columns=["open", "high", "low", "close"]).assign(volume=1.0)
+
+
+def test_same_bar_double_hit_is_neutral_with_tie_neutral():
+    ohlcv = _bars([[100, 100, 100, 100], [100, 103, 97, 100], [100, 100, 100, 100], [100, 100, 100, 100]])
+    legacy = triple_barrier_labels(ohlcv, 2.0, 2.0, max_horizon=2)
+    fixed = triple_barrier_labels(ohlcv, 2.0, 2.0, max_horizon=2, tie_neutral=True)
+    assert legacy.iloc[0] == LONG  # eski davranış: simetrik bariyerde hep long
+    assert fixed.iloc[0] == NEUTRAL
+
+
+def test_cost_aware_barriers_neutralize_moves_that_do_not_cover_costs():
+    ohlcv = _bars([[100, 100, 100, 100], [100, 102.05, 100, 102], [102, 102, 102, 102], [102, 102, 102, 102]])
+    assert triple_barrier_labels(ohlcv, 2.0, 2.0, max_horizon=2).iloc[0] == LONG
+    assert triple_barrier_labels(ohlcv, 2.0, 2.0, max_horizon=2, cost_pct=0.12).iloc[0] == NEUTRAL
+
+
+# --- Backtest seçenekleri (3.1 zaman çıkışı, 3.2 başabaş, 3.3 trend filtresi) ---
+
+def test_time_exit_closes_after_max_holding_bars():
+    exchange, s, flat = _scenario_exchange()
+    model = _ScriptedModel({exchange.full_df.loc[s, "timestamp"]: 1})
+
+    report = run_system_backtest(exchange, model, None, _scenario_request(max_holding_bars=5), persist=False)
+    without = run_system_backtest(exchange, model, None, _scenario_request(), persist=False)
+
+    assert report.trades_closed == 1
+    assert report.trades[0].exit_reason == "time_exit"
+    assert report.trades[0].duration_candles == 4  # giriş mumu dahil 5 mum
+    assert without.trades_closed == 0
+
+
+def test_breakeven_moves_stop_to_entry_after_favourable_move():
+    exchange, s, flat = _scenario_exchange()
+    df = exchange.full_df
+    df.loc[s + 3, "high"] = flat + 1000.0  # giriş ATR'sinin (~300) belirgin üstünde lehe hareket
+    model = _ScriptedModel({df.loc[s, "timestamp"]: 1})
+
+    with_be = run_system_backtest(exchange, model, None, _scenario_request(breakeven_atr_mult=1.0), persist=False)
+    without = run_system_backtest(exchange, model, None, _scenario_request(), persist=False)
+
+    # Sonraki mumların dibi (flat+5) girişin (+maliyet) altında: başabaş stop vurulur,
+    # açılış (flat+10) stop'un altında olduğu için açılıştan dolar.
+    assert with_be.trades_closed == 1
+    assert with_be.trades[0].exit_price == pytest.approx(flat + 10.0)
+    assert without.trades_closed == 0
+
+
+def test_trend_filter_blocks_trades_against_daily_trend():
+    # günlük üst-TF özelliği için >= 60 günlük mum gerekir
+    exchange, s, flat = _scenario_exchange(total=2000)
+    df = exchange.full_df
+    df.loc[s + 5, "low"] = flat - 1000.0  # long'u kapatacak fitil
+    df.loc[s + 5, "high"] = flat + 1000.0  # short'u kapatacak fitil
+    # backtest'in gördüğü AYNI pencere (son 1900 mum): günlük EMA50 ~80 günlük
+    # bar ile tam yakınsamadığından farklı bir pencerede işaret değişebilir
+    window = df.iloc[-1900:].reset_index(drop=True)
+    gap = compute_multi_timeframe_features(window).loc[s - (len(df) - 1900), "htf_1d_ema_gap"]
+    assert gap != 0 and not np.isnan(gap)
+    against = -1 if gap > 0 else 1
+    model = _ScriptedModel({df.loc[s, "timestamp"]: against})
+
+    blocked = run_system_backtest(exchange, model, None, _scenario_request(trend_filter="block", candles=1900), persist=False)
+    allowed = run_system_backtest(exchange, model, None, _scenario_request(candles=1900), persist=False)
+
+    assert blocked.trades_closed == 0
+    assert allowed.trades_closed == 1
+
+
+# --- Canlı karşılıkları ---
+
+def _portfolio(**rules) -> PortfolioManager:
+    return PortfolioManager(starting_equity=1000, rules=RiskRules(entry_tranche_weights=[1.0], **rules))
+
+
+def test_live_breakeven_moves_stop_once_price_runs_in_favour():
+    portfolio = _portfolio(breakeven_atr_mult=1.0)
+    position = portfolio.open("BTC/USDT", "long", entry_price=100, size_quote=100, stop_loss_price=95)
+    position.entry_atr = 2.0
+    engine = _engine_with(_TickerExchange(live_price=103.0), _FixedModel("long", 0.9), portfolio)
+
+    engine.evaluate("BTC/USDT")
+
+    assert position.breakeven_done is True
+    assert position.stop_loss_price == pytest.approx(100 * (1 + (portfolio.rules.commission_pct + portfolio.rules.slippage_pct) * 2 / 100))
+
+
+def test_live_time_exit_closes_old_position():
+    portfolio = _portfolio(max_holding_bars=3)
+    position = portfolio.open("BTC/USDT", "long", entry_price=110, size_quote=100, stop_loss_price=100)
+    position.opened_at = datetime.now(timezone.utc) - timedelta(hours=4 * 3 + 1)  # test motoru 4h mum kullanıyor
+    engine = _engine_with(_TickerExchange(live_price=111.0), _FixedModel("long", 0.9), portfolio)
+
+    action = engine.evaluate("BTC/USDT")
+
+    assert action.type == "close"
+    assert "zaman çıkışı" in action.reason
+
+
+def test_live_trend_filter_blocks_entry_against_daily_trend(monkeypatch):
+    portfolio = _portfolio(trend_filter="block", max_symbol_exposure_pct=100, max_total_exposure_pct=100)
+    engine = _engine_with(_TickerExchange(live_price=None), _FixedModel("short", 0.9), portfolio, {})
+    original = engine._predict
+
+    def predict_with_uptrend(symbol):
+        prediction, price, row = original(symbol)
+        row = row.copy()
+        row["htf_1d_ema_gap"] = 0.5
+        return prediction, price, row
+
+    monkeypatch.setattr(engine, "_predict", predict_with_uptrend)
+    action = engine.evaluate("BTC/USDT")
+
+    assert action.type == "hold"
+    assert "trend filtresi" in action.reason

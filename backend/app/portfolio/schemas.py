@@ -145,6 +145,15 @@ class RiskRules(BaseModel):
     # KONTROL EDİLMİYORDU. Artık her döngüde kontrol edilip aşılırsa
     # pozisyon zorla kapatılır (bkz. DecisionEngine.evaluate).
     stop_loss_enabled: bool = Field(True, description="Açık ise açılıştaki stop-loss seviyesi her döngüde kontrol edilir; aşılırsa pozisyon (modelin sinyalinden BAĞIMSIZ) zorla kapatılır.")
+    # --- Plan Faz 3 seçenekleri: `SystemBacktestRequest`'teki AYNI isimli
+    # alanların canlı karşılığı. Varsayılan KAPALI — walk-forward A/B ile
+    # iyileştirdiği gösterilmeden açılmaz; açılacaksa backtest'le birlikte.
+    max_holding_bars: int | None = Field(None, ge=1, description="Pozisyon bu kadar mum açık kaldıysa kapatılır (zaman çıkışı). null: yok.")
+    breakeven_atr_mult: float | None = Field(
+        None, gt=0, description="Fiyat girişten (giriş ATR'si x bu çarpan) kadar lehe gidince stop girişe (+maliyet) çekilir. null: yok."
+    )
+    trend_filter: Literal["off", "block"] = Field("off", description="'block': günlük EMA eğiliminin tersine pozisyon açılmaz.")
+
     # Paper modda borsada bekleyen bir STOP_MARKET emri varmış gibi davranır
     # (plan Faz 5): 5 dakikalık yoklama, fiyatın stop'u geçtiği anı kaçırıp
     # çok daha kötü bir fiyattan kapatıyordu; gerçek bir borsa stop'u seviyede

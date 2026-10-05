@@ -63,6 +63,8 @@ def _compute_labels(
     threshold_pct: float,
     take_profit_pct: float,
     stop_loss_pct: float,
+    tie_neutral: bool = False,
+    label_cost_pct: float = 0.0,
 ) -> pd.Series:
     if labeling_method == "atr_triple_barrier":
         # `take_profit_pct`/`stop_loss_pct` burada YÜZDE DEĞİL, ATR
@@ -77,9 +79,11 @@ def _compute_labels(
         atr_pct = (atr / ohlcv["close"]) * 100
         tp_pct = atr_pct * take_profit_pct
         sl_pct = atr_pct * stop_loss_pct
-        return triple_barrier_labels(ohlcv, tp_pct, sl_pct, max_horizon=horizon)
+        return triple_barrier_labels(ohlcv, tp_pct, sl_pct, max_horizon=horizon, tie_neutral=tie_neutral, cost_pct=label_cost_pct)
     if labeling_method == "triple_barrier":
-        return triple_barrier_labels(ohlcv, take_profit_pct, stop_loss_pct, max_horizon=horizon)
+        return triple_barrier_labels(
+            ohlcv, take_profit_pct, stop_loss_pct, max_horizon=horizon, tie_neutral=tie_neutral, cost_pct=label_cost_pct
+        )
     return label_future_direction(ohlcv["close"], horizon, threshold_pct)
 
 
@@ -94,6 +98,8 @@ def build_symbol_frame(
     take_profit_pct: float,
     stop_loss_pct: float,
     macro_history: pd.DataFrame | None = None,
+    tie_neutral: bool = False,
+    label_cost_pct: float = 0.0,
 ) -> pd.DataFrame:
     """Tek bir sembolün HAZIR `ohlcv`'sinden özellik + etiket çerçevesi
     (`label`, `symbol`, `time_frac`, `bar_timestamp` kolonlarıyla) üretir.
@@ -112,7 +118,9 @@ def build_symbol_frame(
     htf_features = compute_multi_timeframe_features(ohlcv)
     for col in MULTI_TIMEFRAME_FEATURE_COLUMNS:
         features[col] = htf_features[col].to_numpy()
-    labels = _compute_labels(ohlcv, labeling_method, horizon, threshold_pct, take_profit_pct, stop_loss_pct)
+    labels = _compute_labels(
+        ohlcv, labeling_method, horizon, threshold_pct, take_profit_pct, stop_loss_pct, tie_neutral, label_cost_pct
+    )
     frame = features.copy()
     frame["label"] = labels
     frame["symbol"] = symbol

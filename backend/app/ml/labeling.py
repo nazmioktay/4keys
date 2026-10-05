@@ -31,6 +31,8 @@ def triple_barrier_labels(
     take_profit_pct: float | pd.Series | np.ndarray = 2.0,
     stop_loss_pct: float | pd.Series | np.ndarray = 2.0,
     max_horizon: int = 10,
+    tie_neutral: bool = False,
+    cost_pct: float = 0.0,
 ) -> pd.Series:
     """"Triple-barrier" etiketleme (Lopez de Prado): sabit bir mum sayısı sonraki
     getiriye bakmak yerine, üç bariyerden hangisi ÖNCE tetiklenirse etiketi o belirler:
@@ -53,6 +55,15 @@ def triple_barrier_labels(
     stop/hedef mesafesiyle AYNI mantıkla etiketlenmiş olur (sabit yüzdelik
     etiketleme ile gerçek ATR tabanlı çıkış arasındaki uyumsuzluğu giderir).
 
+    `tie_neutral`: iki bariyer AYNI mumda dokunulduysa mum içindeki sıra
+    bilinemez. False (eski davranış): girişe yakın olan bariyer kazanır — eşit
+    (simetrik) bariyerlerde bu HER ZAMAN LONG demektir, etikete yapısal bir
+    long yanlılığı ekler. True: belirsiz satır NÖTR etiketlenir.
+
+    `cost_pct`: round-trip işlem maliyeti (%, kaldıraçsız). Her iki bariyer de
+    bu kadar uzaklaştırılır — maliyeti karşılamayan hareketler yön etiketi
+    almaz (zaman bariyerinde nötr kalır).
+
     Serinin son kısmı (max_horizon mum içinde veri sonuna gelen satırlar,
     hiçbir bariyere dokunmamışsa) NaN döner — bu satırlar için zaman
     bariyerine gerçekten ulaşılıp ulaşılmadığı bilinmiyor, etiketlenemez.
@@ -67,8 +78,8 @@ def triple_barrier_labels(
 
     for i in range(n):
         entry = close[i]
-        upper = entry * (1 + tp_pct[i] / 100)
-        lower = entry * (1 - sl_pct[i] / 100)
+        upper = entry * (1 + (tp_pct[i] + cost_pct) / 100)
+        lower = entry * (1 - (sl_pct[i] + cost_pct) / 100)
         window_end = min(i + 1 + max_horizon, n)
 
         label = None
@@ -76,6 +87,9 @@ def triple_barrier_labels(
             hit_up = high[j] >= upper
             hit_down = low[j] <= lower
             if hit_up and hit_down:
+                if tie_neutral:
+                    label = NEUTRAL
+                    break
                 # Aynı mumda ikisi de tetiklendi: hangi bariyer entry'ye daha
                 # yakınsa muhafazakâr varsayımla o gerçekleşmiş kabul edilir.
                 label = LONG if (upper - entry) <= (entry - lower) else SHORT

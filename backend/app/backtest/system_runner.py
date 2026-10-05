@@ -399,6 +399,7 @@ def run_system_backtest(
     directional_bars = 0
     max_directional_confidence = 0.0
     meta_label_vetoes = 0
+    trend_filter_blocks = 0
 
     def _funding_pct(direction: str, entry_fill_time: pd.Timestamp, exit_fill_time: pd.Timestamp) -> float:
         if request.funding_rate_pct_per_8h == 0:
@@ -507,6 +508,8 @@ def run_system_backtest(
             "partial_take_profit_price": partial_take_profit_price,
             "partial_tp_taken": False,
             "best_price": entry_price,
+            "entry_atr": atr_signal,
+            "breakeven_done": False,
             "size_quote": size_quote,
             "remaining_size_quote": size_quote,
             "size_explanation": size_explanation,
@@ -524,6 +527,23 @@ def run_system_backtest(
             if request.atr_trailing_mult is not None:
                 candidate = position["best_price"] + request.atr_trailing_mult * atr_now
                 position["trailing_stop_price"] = min(position["trailing_stop_price"], candidate)
+        _apply_breakeven()
+
+    def _apply_breakeven() -> None:
+        # Başabaş stop: lehe hareket giriş ATR'sinin `breakeven_atr_mult` katına
+        # ulaşınca stop girişe (+round-trip maliyet) çekilir. Bir kez uygulanır;
+        # trailing stop daha ilerideyse dokunulmaz. Canlıdaki karşılığı
+        # `DecisionEngine._apply_breakeven`.
+        if request.breakeven_atr_mult is None or position["breakeven_done"] or position["initial_stop_loss_price"] is None:
+            return
+        trigger = request.breakeven_atr_mult * position["entry_atr"]
+        entry = position["entry_price"]
+        if position["direction"] == "long" and position["best_price"] - entry >= trigger:
+            position["trailing_stop_price"] = max(position["trailing_stop_price"], entry * (1 + cost_pct_roundtrip / 100))
+            position["breakeven_done"] = True
+        elif position["direction"] == "short" and entry - position["best_price"] >= trigger:
+            position["trailing_stop_price"] = min(position["trailing_stop_price"], entry * (1 - cost_pct_roundtrip / 100))
+            position["breakeven_done"] = True
 
     for i in range(len(features)):
         row = features.iloc[i]
@@ -647,6 +667,13 @@ def run_system_backtest(
                         continue  # aynı barda yeniden pozisyon açılmaz
                     exit_price, exit_reason = price, "signal"
 
+            if (
+                exit_price is None
+                and request.max_holding_bars is not None
+                and i - position["entry_index"] + 1 >= request.max_holding_bars
+            ):
+                exit_price, exit_reason = price, "time_exit"
+
             if exit_price is not None:
                 _realize(position["remaining_size_quote"], exit_price, exit_fill_time, ts, i, exit_reason)
                 position = None
@@ -656,6 +683,11 @@ def run_system_backtest(
                 _update_trailing(bar_high, bar_low, atr_now)
 
         if position is None and direction in ("long", "short") and confidence >= request.open_confidence:
+            if request.trend_filter == "block":
+                trend = float(row.get("htf_1d_ema_gap", 0.0) or 0.0)
+                if (direction == "long" and trend < 0) or (direction == "short" and trend > 0):
+                    trend_filter_blocks += 1
+                    continue
             if meta_model is not None and request.use_meta_label:
                 decision = meta_model.decide(row, confidence, act_threshold=request.meta_label_act_threshold)
                 if not decision.act:

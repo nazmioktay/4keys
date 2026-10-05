@@ -162,6 +162,8 @@ def prepare_walk_forward(
             labeling.get("labeling_method", "atr_triple_barrier"),
             labeling.get("take_profit_pct", 1.0),
             labeling.get("stop_loss_pct", 1.0),
+            tie_neutral=bool(labeling.get("tie_neutral", False)),
+            label_cost_pct=float(labeling.get("label_cost_pct", 0.0)),
         )
 
     stamps = _naive_utc(ohlcv["timestamp"])
