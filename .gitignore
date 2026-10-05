@@ -7,3 +7,5 @@ venv/
 .env
 backend/app/ml/artifacts/
 .db_password
+backend/research/_cache/
+research/results/_smoke/
