@@ -10,6 +10,7 @@ import pandas as pd
 from app.core.config import settings
 from app.core.memory_probe import log_rss
 from app.exchanges.base import Exchange
+from app.exchanges.cache import timeframe_minutes
 
 from .dataset import LabelingMethod, build_training_dataset, build_training_dataset_with_time
 from .features import ALL_FEATURE_COLUMNS
@@ -41,6 +42,12 @@ if TYPE_CHECKING:
     from .patchtst_model import PatchTSTSignalModel, PatchTSTTrainingReport
 
 logger = logging.getLogger(__name__)
+
+
+def _report_window_bars(report, timeframe: str) -> int:
+    """Sistem backtest raporunun oynattığı pencerenin bar sayısı (period_start/period_end dahil)."""
+    span = pd.Timestamp(report.period_end) - pd.Timestamp(report.period_start)
+    return int(span / pd.Timedelta(minutes=timeframe_minutes(timeframe))) + 1
 
 
 def _champion_challenger_verdict(
@@ -96,12 +103,16 @@ def _champion_challenger_verdict(
             return True, None
     challenger_score, challenger_report = scores["challenger"]
     champion_score, champion_report = scores["champion"]
-    min_trades = settings.ml_champion_challenger_min_trades
-    if min(challenger_report.trades_closed, champion_report.trades_closed) < min_trades:
+    # "Çok kısa pencere" PENCERENİN bar sayısına göre ölçülür, işlem sayısına göre DEĞİL:
+    # işlem sayısına bakmak, az/hiç işlem yapan bir meydan okuyanı (kötü bir sonuç)
+    # "karşılaştırılamadı" diye otomatik kabul ettirirdi. Pencere yeterince uzunsa
+    # 0 işlem de normal skorla (PnL 0) değerlendirilir.
+    window_bars = _report_window_bars(challenger_report, request.timeframe)
+    if window_bars < settings.ml_champion_challenger_min_window_bars:
         logger.warning(
-            "champion/challenger: karşılaştırma penceresi (%s sonrası) çok kısa — challenger %d, champion %d işlem "
-            "(en az %d gerekli); karşılaştırma yapılamadı, challenger mutlak kalite kapısına göre kabul ediliyor.",
-            start.isoformat(), challenger_report.trades_closed, champion_report.trades_closed, min_trades,
+            "champion/challenger: karşılaştırma penceresi (%s sonrası) çok kısa — %d bar (en az %d gerekli, ~30 işlem "
+            "üretebilecek uzunluk); karşılaştırma yapılamadı, challenger mutlak kalite kapısına göre kabul ediliyor.",
+            start.isoformat(), window_bars, settings.ml_champion_challenger_min_window_bars,
         )
         return True, None
     logger.info(

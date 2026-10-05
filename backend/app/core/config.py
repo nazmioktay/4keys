@@ -40,10 +40,12 @@ class Settings(BaseSettings):
     # (champion - tolerans) kadar yapamazsa kaydedilmez.
     ml_champion_challenger_enabled: bool = True
     ml_champion_challenger_tolerance: float = 0.0
-    # Karşılaştırma penceresinde (şampiyonun eğitim bitişi / meydan okuyanın holdout
-    # başlangıcından sonrası) iki modelden biri bu kadar işlem üretemezse skorlar
-    # anlamsızdır: meydan okuyan REDDEDİLMEZ, mutlak kalite kapısına düşülür.
-    ml_champion_challenger_min_trades: int = 30
+    # Karşılaştırma penceresi (şampiyonun eğitim bitişi / meydan okuyanın holdout
+    # başlangıcından sonrası) bu kadar bardan KISAYSA skorlar anlamsızdır: meydan
+    # okuyan REDDEDİLMEZ, mutlak kalite kapısına düşülür. Eşik, pencerenin ~30 işlem
+    # üretebileceği uzunluktur (BTC 1h'de ~35-40 barda bir işlem gözlendi: 10.000
+    # barda 256 işlem). Pencere bundan uzunsa 0 işlem de normal (kötü) skorla değerlendirilir.
+    ml_champion_challenger_min_window_bars: int = 1000
     # Doğrulamadan sonra dağıtılacak modeli holdout dahil TÜM veriyle yeniden
     # eğit (plan 3.4). Varsayılan kapalı: açıkken holdout tabanlı sistem
     # backtest'i (/backtest/system/run) artık "görülmemiş veri" ölçmez —

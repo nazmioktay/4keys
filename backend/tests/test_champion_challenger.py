@@ -8,10 +8,16 @@ from app.ml.model import SignalModel
 
 
 class _Report:
-    def __init__(self, pnl, dd, trades=40):
+    """`window_bars`: karşılaştırma penceresinin bar sayısı (gerçek rapordaki
+    period_start/period_end'den türetilir; varsayılan: uzun pencere)."""
+
+    def __init__(self, pnl, dd, trades=40, window_bars=2000):
         self.total_pnl_pct = pnl
         self.max_drawdown_pct = dd
         self.trades_closed = trades
+        start = pd.Timestamp("2026-06-01")
+        self.period_start = start.isoformat()
+        self.period_end = (start + pd.Timedelta(hours=window_bars - 1)).isoformat()
 
 
 @pytest.fixture
@@ -225,12 +231,28 @@ def test_refit_champion_is_not_compared_on_data_it_was_trained_on(champion_on_di
     assert all(w[0] == fit_end for w in windows)  # max(şampiyonun eğitim bitişi, meydan okuyanın holdout başı)
 
 
-def test_challenger_is_not_rejected_when_comparison_window_is_too_short(champion_on_disk, monkeypatch):
-    windows = _scores(monkeypatch, champion_on_disk, _Report(pnl=2.0, dd=4.0, trades=5), _Report(pnl=6.0, dd=2.0, trades=5))
+def test_challenger_with_no_trades_is_rejected_when_window_is_long_enough(champion_on_disk, monkeypatch):
+    # Pencere uzun: 0 işlem "karşılaştırılamadı" DEĞİL, kötü skordur (PnL 0 < champion'ın skoru).
+    _scores(
+        monkeypatch, champion_on_disk,
+        _Report(pnl=0.0, dd=0.0, trades=0, window_bars=2000), _Report(pnl=6.0, dd=2.0, trades=100, window_bars=2000),
+    )
 
     ok, reason = train_module._champion_challenger_verdict(None, SignalModel(), pd.Timestamp("2026-06-01"))
 
-    assert (ok, reason) == (True, None)  # karşılaştırma yapılamadı -> mutlak kalite kapısına düşülür
+    assert ok is False
+    assert "champion/challenger" in reason
+
+
+def test_challenger_is_not_rejected_when_comparison_window_is_truly_short(champion_on_disk, monkeypatch):
+    windows = _scores(
+        monkeypatch, champion_on_disk,
+        _Report(pnl=2.0, dd=4.0, trades=3, window_bars=200), _Report(pnl=6.0, dd=2.0, trades=3, window_bars=200),
+    )
+
+    ok, reason = train_module._champion_challenger_verdict(None, SignalModel(), pd.Timestamp("2026-06-01"))
+
+    assert (ok, reason) == (True, None)  # pencere ~30 işlem üretemeyecek kadar kısa -> mutlak kalite kapısına düşülür
     assert windows  # backtest denendi
 
 
