@@ -582,7 +582,9 @@ def _engine_with(exchange, model, portfolio, memory=None):
 
 
 def test_stop_loss_uses_live_price_even_when_bar_close_is_above_stop():
-    portfolio = PortfolioManager(starting_equity=1000, rules=RiskRules(entry_tranche_weights=[1.0]))
+    portfolio = PortfolioManager(
+        starting_equity=1000, rules=RiskRules(entry_tranche_weights=[1.0], simulate_exchange_stop=False)
+    )
     portfolio.open("BTC/USDT", "long", entry_price=110, size_quote=100, stop_loss_price=105)
     engine = _engine_with(_TickerExchange(live_price=104.0), _FixedModel("long", 0.9), portfolio)
 
@@ -591,6 +593,59 @@ def test_stop_loss_uses_live_price_even_when_bar_close_is_above_stop():
     assert action.type == "close"
     assert "stop-loss" in action.reason
     assert action.price == pytest.approx(104.0)
+
+
+def test_simulated_exchange_stop_fills_at_stop_level_not_polled_price():
+    portfolio = PortfolioManager(starting_equity=1000, rules=RiskRules(entry_tranche_weights=[1.0]))
+    portfolio.open("BTC/USDT", "long", entry_price=110, size_quote=100, stop_loss_price=105)
+    engine = _engine_with(_TickerExchange(live_price=101.0), _FixedModel("long", 0.9), portfolio)
+
+    action = engine.evaluate("BTC/USDT")
+
+    assert action.type == "close"
+    assert action.price == pytest.approx(105.0)
+
+
+def _open_before_last_bar(portfolio, stop):
+    from datetime import datetime, timezone
+
+    position = portfolio.open("BTC/USDT", "long", entry_price=110, size_quote=100, stop_loss_price=stop)
+    position.opened_at = datetime(2024, 1, 1, tzinfo=timezone.utc)  # statik serinin son mumu bundan sonra başlıyor
+    return position
+
+
+def test_simulated_exchange_stop_triggers_on_bar_low_missed_between_polls():
+    # son mum: open=close=110, low=109; canlı fiyat stop'un üstüne geri dönmüş
+    portfolio = PortfolioManager(starting_equity=1000, rules=RiskRules(entry_tranche_weights=[1.0]))
+    _open_before_last_bar(portfolio, stop=109.5)
+    engine = _engine_with(_TickerExchange(live_price=112.0), _FixedModel("long", 0.9), portfolio)
+
+    action = engine.evaluate("BTC/USDT")
+
+    assert action.type == "close"
+    assert "mum içi" in action.reason
+    assert action.price == pytest.approx(109.5)
+
+
+def test_simulated_exchange_stop_fills_at_open_on_gap():
+    portfolio = PortfolioManager(starting_equity=1000, rules=RiskRules(entry_tranche_weights=[1.0]))
+    _open_before_last_bar(portfolio, stop=111.0)  # mum seviyenin altında (110) açıldı
+    engine = _engine_with(_TickerExchange(live_price=112.0), _FixedModel("long", 0.9), portfolio)
+
+    action = engine.evaluate("BTC/USDT")
+
+    assert action.type == "close"
+    assert action.price == pytest.approx(110.0)
+
+
+def test_bar_stop_check_disabled_without_simulation():
+    portfolio = PortfolioManager(
+        starting_equity=1000, rules=RiskRules(entry_tranche_weights=[1.0], simulate_exchange_stop=False)
+    )
+    _open_before_last_bar(portfolio, stop=109.5)
+    engine = _engine_with(_TickerExchange(live_price=112.0), _FixedModel("long", 0.9), portfolio)
+
+    assert engine.evaluate("BTC/USDT").type != "close"
 
 
 def test_stop_loss_not_triggered_when_live_price_is_above_stop():

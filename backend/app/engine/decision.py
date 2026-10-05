@@ -172,6 +172,7 @@ class DecisionEngine:
         self.online_model = online_model
         self._last_atr: dict[str, float] = {}  # sembol -> en son hesaplanan ATR (bkz. `_predict`/`_open`)
         self._last_bar_ts: dict[str, pd.Timestamp] = {}  # sembol -> `_predict`'in kullandığı son kapanmış mum
+        self._last_bar: dict[str, pd.Series] = {}  # sembol -> son kapanmış mumun OHLC'si (stop simülasyonu için)
         self.signal_bar_memory = signal_bar_memory
         # Ensemble birleştirmesi (`_combine_predictions`) her modelin KENDİ
         # doğrulanmış becerisine (bkz. `app.ml.model_status`'a EN SON eğitimde
@@ -243,6 +244,7 @@ class DecisionEngine:
             return None
         if len(ohlcv):
             self._last_bar_ts[symbol] = pd.Timestamp(ohlcv["timestamp"].iloc[-1])
+            self._last_bar[symbol] = ohlcv.iloc[-1]
         # Backtest'in ATR bazlı stop-loss'uyla (bkz. `_open`) AYNI formülle
         # (`average_true_range`, AYNI varsayılan `atr_period`) hesaplanır.
         atr_series = average_true_range(ohlcv, length=self.atr_period)
@@ -306,6 +308,38 @@ class DecisionEngine:
             return None
         return float(price)
 
+    def _stop_action(self, symbol: str, position, observed_price: float) -> Action:
+        """Stop tetiklendiğinde kapanış aksiyonu. `simulate_exchange_stop`
+        açıksa borsadaki bir stop emri gibi seviyeden dolar; kapalıysa
+        gözlenen fiyattan."""
+        fill = observed_price
+        if self.portfolio is not None and self.portfolio.rules.simulate_exchange_stop:
+            fill = position.stop_loss_price
+        return Action(symbol, "close", f"stop-loss tetiklendi (seviye={position.stop_loss_price:.4f})", fill, 1.0)
+
+    def _bar_stop_fill(self, symbol: str, position) -> float | None:
+        """Pozisyon açıldıktan SONRA başlamış son kapanmış mum stop seviyesini
+        mum içinde geçtiyse (yoklamalar arasında kaçırılan tetikleme) dolum
+        fiyatını döner: normalde stop seviyesi, mum seviyenin ötesinde
+        açıldıysa (gap) açılış — backtest'in `intrabar_stops` kuralıyla aynı."""
+        bar = self._last_bar.get(symbol)
+        if bar is None or position.stop_loss_price is None:
+            return None
+        bar_start = pd.Timestamp(bar["timestamp"])
+        opened_at = pd.Timestamp(position.opened_at)
+        if opened_at.tzinfo is not None:
+            opened_at = opened_at.tz_convert(None)
+        if bar_start.tzinfo is not None:
+            bar_start = bar_start.tz_convert(None)
+        if bar_start < opened_at:
+            return None
+        stop = position.stop_loss_price
+        if position.direction == "long" and float(bar["low"]) <= stop:
+            return min(stop, float(bar["open"]))
+        if position.direction == "short" and float(bar["high"]) >= stop:
+            return max(stop, float(bar["open"]))
+        return None
+
     def evaluate(self, symbol: str) -> Action | None:
         position = self.portfolio.get(symbol) if self.portfolio is not None else self.positions.get(symbol)
         stop_guarded = (
@@ -321,16 +355,23 @@ class DecisionEngine:
         # tetikleniyordu. Model hâlâ "tut" diyor olsa bile önceliklidir.
         live_price = self._live_price(symbol) if stop_guarded else None
         if stop_guarded and live_price is not None and position.stop_loss_breached(live_price):
-            return Action(symbol, "close", f"stop-loss tetiklendi (seviye={position.stop_loss_price:.4f})", live_price, 1.0)
+            return self._stop_action(symbol, position, live_price)
 
         result = self._predict(symbol)
         if result is None:
             return None
         prediction, price, feature_row = result
 
+        # Yoklamalar arasında kapanmış mumun high/low'u stop'u geçtiyse (borsa
+        # stop'u burada tetiklenirdi) — yalnızca stop simülasyonu açıkken.
+        if stop_guarded and self.portfolio.rules.simulate_exchange_stop:
+            bar_fill = self._bar_stop_fill(symbol, position)
+            if bar_fill is not None:
+                return Action(symbol, "close", f"stop-loss tetiklendi (seviye={position.stop_loss_price:.4f}, mum içi)", bar_fill, 1.0)
+
         # Canlı fiyat alınamadıysa son kapanmış mumla aynı kontrol (yedek yol).
         if stop_guarded and live_price is None and position.stop_loss_breached(price):
-            return Action(symbol, "close", f"stop-loss tetiklendi (seviye={position.stop_loss_price:.4f})", price, 1.0)
+            return self._stop_action(symbol, position, price)
 
         bar_ts = self._last_bar_ts.get(symbol)
         if self.signal_bar_memory is not None and bar_ts is not None:

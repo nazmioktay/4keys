@@ -145,6 +145,19 @@ class RiskRules(BaseModel):
     # KONTROL EDİLMİYORDU. Artık her döngüde kontrol edilip aşılırsa
     # pozisyon zorla kapatılır (bkz. DecisionEngine.evaluate).
     stop_loss_enabled: bool = Field(True, description="Açık ise açılıştaki stop-loss seviyesi her döngüde kontrol edilir; aşılırsa pozisyon (modelin sinyalinden BAĞIMSIZ) zorla kapatılır.")
+    # Paper modda borsada bekleyen bir STOP_MARKET emri varmış gibi davranır
+    # (plan Faz 5): 5 dakikalık yoklama, fiyatın stop'u geçtiği anı kaçırıp
+    # çok daha kötü bir fiyattan kapatıyordu; gerçek bir borsa stop'u seviyede
+    # dolardı. Canlı paraya geçildiğinde bunun yerine gerçek koşullu emir
+    # (`trading.executor` -> `place_conditional_order`) kullanılmalı.
+    simulate_exchange_stop: bool = Field(
+        True,
+        description=(
+            "Açık ise stop tetiklendiğinde dolum stop seviyesinden yapılır (gap varsa mumun açılışından) ve "
+            "yoklamalar arasında kapanmış mumun high/low'u stop'u geçtiyse de tetiklenir — borsadaki bir stop emrinin "
+            "davranışı. Kapalı ise yoklama anındaki fiyattan kapatılır."
+        ),
+    )
 
     @field_validator("entry_tranche_weights", "exit_tranche_weights")
     @classmethod
