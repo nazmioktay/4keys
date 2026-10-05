@@ -50,5 +50,5 @@ ACCEPTANCE = {
 }
 
 # Stablecoin / kaldıraçlı token / endeks sembolleri (evren dışı) — USDT-M perpetual için
-STABLE_BASES = {"USDC", "FDUSD", "TUSD", "BUSD", "USDP", "DAI", "USDD", "EUR", "AEUR", "USTC", "PAXG_STABLE"}
-INDEX_SYMBOLS = {"BTCDOMUSDT", "DEFIUSDT", "ALLUSDT", "ALTUSDT"}
+STABLE_BASES = {"USDC", "FDUSD", "TUSD", "BUSD", "USDP", "DAI", "USDD", "EUR", "AEUR", "USDE", "RLUSD"}
+INDEX_SYMBOLS = {"BTCDOMUSDT", "DEFIUSDT", "FOOTBALLUSDT", "BLUEBIRDUSDT"}  # Binance endeks perpetual'ları
