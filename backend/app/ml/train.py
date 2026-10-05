@@ -16,7 +16,7 @@ from .features import ALL_FEATURE_COLUMNS
 from .meta_label import MetaLabelModel, build_meta_dataset, build_meta_dataset_out_of_fold
 from .model import DEFAULT_MODEL_PATH, Algorithm, SignalModel
 from .model_paths import DEFAULT_LSTM_MODEL_PATH, DEFAULT_PATCHTST_MODEL_PATH
-from .model_status import write_model_status
+from .model_status import get_split_boundary, write_model_status
 from .online_model import (
     DEFAULT_ONLINE_MODEL_PATH,
     DEFAULT_ONLINE_PREHOLDOUT_MODEL_PATH,
@@ -99,6 +99,15 @@ def _champion_challenger_verdict(
             f"({champion_score:.3f}) altında — yeni model KAYDEDİLMEDİ, mevcut model korunuyor."
         )
     return True, None
+
+
+def _production_boundary() -> pd.Timestamp | None:
+    """Üretimdeki birincil modelin kayıtlı holdout sınırı (naive UTC) — yoksa `None`."""
+    boundary = get_split_boundary(DEFAULT_MODEL_PATH)
+    if boundary is None:
+        return None
+    stamp = pd.Timestamp(boundary)
+    return stamp.tz_convert(None) if stamp.tzinfo is not None else stamp
 
 
 @dataclass
@@ -965,11 +974,19 @@ def train_online_signal_model(
     bar_timestamp = pd.Series(pd.to_datetime(bar_timestamp).to_numpy()[order])
     symbol_col = symbol_col.iloc[order].reset_index(drop=True)
 
-    primary_holdout = (symbol_col == settings.ml_primary_symbol) & (time_frac > 1.0 - holdout_frac)
+    # Sınır ÜRETİMDEKİ birincil modelin kayıtlı holdout sınırıdır (taze veriden
+    # yeniden hesaplanırsa, şampiyon korunduğunda backtest'in "görülmemiş"
+    # saydığı dönem öğrenilmiş olur). Kayıt yoksa eski hesap yedek olarak kalır.
+    holdout_start = _production_boundary()
+    if holdout_start is None:
+        primary_holdout = (symbol_col == settings.ml_primary_symbol) & (time_frac > 1.0 - holdout_frac)
+        if primary_holdout.any():
+            holdout_start = bar_timestamp[primary_holdout].min()
     snapshot_at_row: int | None = None
-    if primary_holdout.any():
-        holdout_start = bar_timestamp[primary_holdout].min()
-        snapshot_at_row = int(np.argmax((bar_timestamp >= holdout_start).to_numpy()))
+    if holdout_start is not None:
+        after_boundary = (bar_timestamp >= holdout_start).to_numpy()
+        if after_boundary.any():
+            snapshot_at_row = int(np.argmax(after_boundary))
 
     snapshots: list[OnlineSignalModel] = []
     model, report = run_prequential_evaluation(
@@ -1049,7 +1066,7 @@ def train_meta_label_model(
 
     `primary_model` yalnızca hiperparametre kaynağı olarak kullanılır.
     """
-    X, y, time_frac, _bar_timestamp, _symbol_col = build_training_dataset_with_time(
+    X, y, time_frac, bar_timestamp, _symbol_col = build_training_dataset_with_time(
         exchange,
         symbols,
         timeframe or settings.ml_train_timeframe,
@@ -1066,9 +1083,27 @@ def train_meta_label_model(
             f"Meta-label eğitimi için yeterli veri yok ({len(X)} satır)."
         )
 
-    X_train, y_train, _X_holdout, _y_holdout = split_out_of_sample(X, y, time_frac, holdout_frac)
-    # `walk_forward_splits` 0..1 ekseni bekler — eğitim diliminin kendi içinde yeniden ölçeklenir.
-    train_time_frac = time_frac[X_train.index] / max(1.0 - holdout_frac, 1e-9)
+    boundary = _production_boundary()
+    if boundary is not None:
+        # Sınır ÜRETİMDEKİ birincil modelin kayıtlı holdout sınırıdır: taze veriden
+        # yeniden hesaplanırsa, şampiyon korunduğunda (meydan okuyan reddedildiğinde)
+        # backtest'in "görülmemiş" saydığı dönem meta modele öğretilmiş olur.
+        stamps = pd.to_datetime(bar_timestamp)
+        if stamps.dt.tz is not None:
+            stamps = stamps.dt.tz_convert(None)
+        pre_boundary = (stamps < boundary).to_numpy()
+        X_train, y_train = X[pre_boundary], y[pre_boundary]
+        if len(X_train) < 30:
+            raise ValueError(
+                f"Meta-label eğitimi için üretim modelinin holdout sınırından ({boundary.isoformat()}) önce "
+                f"yeterli veri yok ({len(X_train)} satır)."
+            )
+        train_frac = time_frac[pre_boundary]
+        train_time_frac = train_frac / max(float(train_frac.max()), 1e-9)
+    else:
+        X_train, y_train, _X_holdout, _y_holdout = split_out_of_sample(X, y, time_frac, holdout_frac)
+        # `walk_forward_splits` 0..1 ekseni bekler — eğitim diliminin kendi içinde yeniden ölçeklenir.
+        train_time_frac = time_frac[X_train.index] / max(1.0 - holdout_frac, 1e-9)
 
     def _primary_factory() -> SignalModel:
         return SignalModel(

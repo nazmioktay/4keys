@@ -94,6 +94,14 @@ def get_holdout_start_time(model_path: Path) -> str | None:
     return status.get("holdout_start_time")
 
 
+def get_split_boundary(model_path: Path) -> str | None:
+    """Üretimdeki birincil modelin kayıtlı train/holdout sınırı (ISO) — meta-label
+    ve online modelin eğitim sınırı HER ZAMAN buradan alınır; böylece backtest'in
+    "görülmemiş" saydığı dönemi bu modeller öğrenmiş olmaz. Kayıt yoksa `None`
+    (çağıran taraf `holdout_frac` yedeğine düşer)."""
+    return get_holdout_start_time(model_path)
+
+
 def read_model_status(model_path: Path) -> dict | None:
     status_file = _status_path(model_path)
     if not status_file.exists():

@@ -180,7 +180,15 @@ def job_auto_retrain() -> None:
         # KRİTİK: burada da `_ENSEMBLE_LABELING` geçilir — aksi halde
         # meta-label, birincilin ÖĞRENMEDİĞİ bir soruya göre "doğru/yanlış"
         # damgası vurur (bkz. `_ENSEMBLE_LABELING` "KRİTİK" notu).
-        if DEFAULT_META_MODEL_PATH.exists():
+        #
+        # Meydan okuyan REDDEDİLDİYSE (şampiyon korunuyor) meta-label yeniden
+        # eğitilmez: etiketleri birincil modelin out-of-fold tahminlerinden
+        # türer, yani yeni (kaydedilmeyen) birincille değil canlıdaki şampiyona
+        # ait kalmalı — `train_all_models` meta adımıyla AYNI kural. Online model
+        # birincile bağlı değil; sınırı zaten üretimdeki modelden alınır.
+        if not getattr(train_result, "accepted", True):
+            detail = f"REDDEDİLDİ: {train_result.rejection_reason} ({detail}); meta-label yeniden eğitilmedi"
+        elif DEFAULT_META_MODEL_PATH.exists():
             try:
                 primary_model = SignalModel.load_from()
                 _, meta_rows = train_meta_label_model(exchange, symbols, primary_model, **_ENSEMBLE_LABELING)
