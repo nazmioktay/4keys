@@ -75,6 +75,24 @@ class WalkForwardSystemReport(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class _MaskedModel:
+    """`drop_features` denemesi için: atılan özellikler hem eğitimde hem
+    tahminde sabit 0 verilir — ağaç modelleri sabit bir kolonu hiç kullanamaz,
+    yani özelliği modelden çıkarmakla eşdeğerdir (özellik listesini ve
+    kayıtlı model formatını değiştirmeden A/B yapılabilir)."""
+
+    def __init__(self, model: SignalModel, drop_features: list[str]) -> None:
+        self.model = model
+        self.drop_features = drop_features
+
+    def predict_batch(self, X: pd.DataFrame):
+        X = X.copy()
+        for column in self.drop_features:
+            if column in X.columns:
+                X[column] = 0.0
+        return self.model.predict_batch(X)
+
+
 @dataclass
 class PreparedFold:
     fold: int
@@ -131,6 +149,7 @@ def prepare_walk_forward(
     embargo_bars: int = 24,
     ohlcv: pd.DataFrame | None = None,
     frame: pd.DataFrame | None = None,
+    drop_features: list[str] | None = None,
 ) -> PreparedWalkForward:
     """Veriyi çeker, özellik/etiket çerçevesini kurar ve her katman için
     birincil modeli (+ istenirse out-of-fold meta-label'ı) YALNIZCA o
@@ -141,6 +160,7 @@ def prepare_walk_forward(
     `labeling`: eğitim etiketlemesi — varsayılan ensemble etiketlemesi
     (`app.ml.train._ENSEMBLE_LABELING`).
     `ohlcv`/`frame`: hazır veri/özellik çerçevesi (testler, tekrar kullanım).
+    `drop_features`: özellik sadeleştirme denemesi (bkz. `_MaskedModel`).
     """
     from app.ml.train import _ENSEMBLE_LABELING  # local import: train -> backtest döngüsünü önler
 
@@ -194,9 +214,13 @@ def prepare_walk_forward(
             folds.append(prepared)
             continue
         X_train = train_rows[ALL_FEATURE_COLUMNS].reset_index(drop=True)
+        if drop_features:
+            X_train[[c for c in drop_features if c in X_train.columns]] = 0.0
         y_train = train_rows["label"].reset_index(drop=True)
         prepared.model = _factory()
         prepared.model.fit(X_train, y_train)
+        if drop_features:
+            prepared.model = _MaskedModel(prepared.model, drop_features)
         if use_meta_label:
             time_frac = pd.Series(np.linspace(0.0, 1.0, len(X_train)))
             meta_X, meta_y = build_meta_dataset_out_of_fold(X_train, y_train, time_frac, _factory)

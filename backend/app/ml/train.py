@@ -43,6 +43,64 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _champion_challenger_verdict(
+    exchange: Exchange, challenger: SignalModel, holdout_start_time
+) -> tuple[bool, str | None]:
+    """Yeni modeli (challenger) diskteki üretim modeliyle (champion) AYNI
+    holdout penceresinde sistem backtest'iyle karşılaştırır (plan 3.4).
+    İkisi de o pencereyi eğitimde görmedi: challenger holdout'u hiç görmedi,
+    champion daha eski bir veriyle eğitildi. Skor: PnL / maks. drawdown.
+    Champion yoksa, yüklenemiyorsa veya özellik listesi eskiyse challenger kabul edilir.
+
+    Döner: (kabul mü, ret gerekçesi)."""
+    from app.backtest.schemas import SystemBacktestRequest  # local import: backtest -> ml döngüsünü önler
+    from app.backtest.system_runner import run_system_backtest
+    from app.backtest.walk_forward import score_result
+
+    if holdout_start_time is None or not DEFAULT_MODEL_PATH.exists():
+        return True, None
+    try:
+        champion = SignalModel.load_from(DEFAULT_MODEL_PATH)
+    except Exception as exc:  # noqa: BLE001 - bozuk/eski champion yeni modelin önünü kesmemeli
+        logger.warning("champion yüklenemedi, challenger kabul ediliyor: %s", exc)
+        return True, None
+
+    request = SystemBacktestRequest(
+        symbol=settings.ml_primary_symbol,
+        timeframe=settings.ml_train_timeframe,
+        open_confidence=settings.live_open_confidence,
+        close_confidence=settings.live_close_confidence,
+        use_ensemble=False,
+        use_meta_label=False,
+        restrict_to_holdout=False,
+    )
+    start = pd.Timestamp(holdout_start_time)
+    if start.tzinfo is not None:
+        start = start.tz_convert(None)
+    window = (start, pd.Timestamp.max)
+    scores = {}
+    for name, candidate in (("challenger", challenger), ("champion", champion)):
+        try:
+            report = run_system_backtest(exchange, candidate, None, request, persist=False, eval_window=window)
+            scores[name] = (score_result(report.total_pnl_pct, report.max_drawdown_pct), report)
+        except Exception as exc:  # noqa: BLE001 - ör. champion'ın özellik listesi eskimiş; karşılaştırma yapılamazsa yeni model engellenmez
+            logger.warning("champion/challenger: %s değerlendirilemedi, yeni model kabul ediliyor: %s", name, exc)
+            return True, None
+    challenger_score, challenger_report = scores["challenger"]
+    champion_score, champion_report = scores["champion"]
+    logger.info(
+        "champion/challenger: challenger skor=%.3f (PnL %%%.2f, DD %%%.2f, %d işlem) vs champion skor=%.3f (PnL %%%.2f, DD %%%.2f, %d işlem)",
+        challenger_score, challenger_report.total_pnl_pct, challenger_report.max_drawdown_pct, challenger_report.trades_closed,
+        champion_score, champion_report.total_pnl_pct, champion_report.max_drawdown_pct, champion_report.trades_closed,
+    )
+    if challenger_score + settings.ml_champion_challenger_tolerance < champion_score:
+        return False, (
+            f"champion/challenger: yeni modelin holdout sistem skoru ({challenger_score:.3f}) üretimdeki modelin "
+            f"({champion_score:.3f}) altında — yeni model KAYDEDİLMEDİ, mevcut model korunuyor."
+        )
+    return True, None
+
+
 @dataclass
 class TrainingResult:
     model: SignalModel
@@ -197,7 +255,22 @@ def train_signal_model_validated(
         logger.warning("model rejected (algorithm=%s): %s", algorithm, rejection_reason)
         if persist:
             write_model_status(DEFAULT_MODEL_PATH, enabled=False, balanced_accuracy=oos_report.balanced_accuracy, reason=rejection_reason)
+    elif persist and settings.ml_champion_challenger_enabled and not (
+        verdict := _champion_challenger_verdict(exchange, model, holdout_start_time)
+    )[0]:
+        # Champion korunur: durum kaydı (enabled/holdout) DEĞİŞTİRİLMEZ.
+        accepted = False
+        rejection_reason = verdict[1]
+        logger.warning("model rejected (algorithm=%s): %s", algorithm, rejection_reason)
     elif persist:
+        if settings.ml_refit_on_full_data and len(X_holdout) > 0:
+            # Plan 3.4: doğrulama bittikten sonra dağıtılan model en yeni %20'yi
+            # de görerek yeniden eğitilir. Bu durumda holdout artık "görülmemiş"
+            # değildir — kayıt silinir, /backtest/system/run bunu uyarıyla
+            # bildirir; dürüst ölçüm için walk-forward backtest kullanılmalı.
+            model = _factory()
+            model.fit(X, y)
+            holdout_start_time = None
         model.save()
         write_model_status(
             DEFAULT_MODEL_PATH,

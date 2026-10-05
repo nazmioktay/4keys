@@ -35,6 +35,16 @@ class Settings(BaseSettings):
     # sayısını (çoklu-sembolün kattığı ek satırlar) BTC'nin KENDİ geçmişini
     # derinleştirerek dengelemek için.
     ml_train_lookback: int = 30000
+    # Şampiyon/meydan okuyan (plan 3.4): yeni birincil model, üretimdeki
+    # modeli aynı holdout'taki sistem backtest skorunda (PnL / maks. DD) en az
+    # (champion - tolerans) kadar yapamazsa kaydedilmez.
+    ml_champion_challenger_enabled: bool = True
+    ml_champion_challenger_tolerance: float = 0.0
+    # Doğrulamadan sonra dağıtılacak modeli holdout dahil TÜM veriyle yeniden
+    # eğit (plan 3.4). Varsayılan kapalı: açıkken holdout tabanlı sistem
+    # backtest'i (/backtest/system/run) artık "görülmemiş veri" ölçmez —
+    # karar walk-forward backtest'le verilmeli.
+    ml_refit_on_full_data: bool = False
     # Canlı karar döngüsünün her sembol için çektiği/özelliklerini hesapladığı
     # mum sayısı. Önceden `ml_train_lookback` (30.000) kullanılıyordu: tek
     # sembolde ~16 sn çekme + ~60-80 sn özellik hesabı, 5 dakikalık döngü
