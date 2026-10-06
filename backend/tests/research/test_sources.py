@@ -349,3 +349,27 @@ def test_cache_key_changes_when_a_db_or_network_source_data_signature_changes(tm
     live = get_source("sentiment_fng")  # canlı API: günün/12 saatlik dilimin imzası
     assert live.data_signature() != "" and get_source("sentiment_fng", fetcher=lambda: []).data_signature() == ""
     assert get_source("macro").data_signature() != "" and get_source("macro", fetcher=lambda s_, e_: {}).data_signature() == ""
+
+
+def test_merge_sources_handles_mixed_timestamp_precision():
+    """Gerçek veride bulundu: funding `available_at` [ms], karar zamanı [us] -> merge_asof MergeError. Hassasiyet farkı
+    birleştirmeyi bozmamalı ve noktasal-zamanlı eşleşme doğru kalmalı."""
+    import pandas as pd
+
+    from research.sources.base import Source
+    from research.sources.pit import decision_frame, merge_sources
+
+    class _Toy(Source):
+        name = "toy"
+
+        def fetch(self, start, end, symbols=None): ...
+        def to_panel(self, universe, dates): ...
+
+    dates = pd.date_range("2024-01-01", periods=3, freq="D")
+    decisions = decision_frame(dates, symbols=["BTCUSDT"])
+    decisions["decision_time"] = decisions["decision_time"].astype("datetime64[us]")
+    panel = pd.DataFrame({"date": dates, "symbol": "BTCUSDT", "toy__x": [1.0, 2.0, 3.0],
+                          "available_at": (dates + pd.Timedelta(hours=16)).astype("datetime64[ms]")})
+    out = merge_sources(decisions, [(_Toy(), panel)])
+    assert out["toy__x"].tolist() == [1.0, 2.0, 3.0]  # her karar (date+1 gün) aynı günün 16:00 değerini görür
+    assert out["toy__missing"].tolist() == [0, 0, 0]

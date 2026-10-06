@@ -52,8 +52,11 @@ içinde tek yerde durur ve bu belgeyle birebir aynı olmalıdır.
 - Her çalıştırma `docs/research/deneyler.md`'ye (özet) ve `research/results/<deney_id>/` altına
   (`config.yaml`, `metrics.json`, günlük getiri parquet) yazılır.
 - Veri anlık görüntüsünün hash'i ve git commit'i de kaydedilir.
-- Deflated Sharpe için GLOBAL bir deneme sayacı tutulur (`research/results/_registry.json`):
-  her varyant bir denemedir.
+- Deflated Sharpe için GLOBAL bir deneme sayacı tutulur (`research/results/_registry.json`, git'te izlenir):
+  her varyant bir denemedir. Deney koşturduktan sonra sayaç değişikliği deneyle birlikte commit edilir (unutulursa sayaç
+  geriler). Deneyler tek makinede koşturulur; git çakışmasında ASLA bir taraf seçilmez: `experiments` listelerinin
+  birleşimi alınır, `total_trials` birleşimdeki varyant sayısına göre yeniden hesaplanır (aksi halde Deflated Sharpe
+  iyimser olur).
 - `python -m research.smoke` yalnızca altyapı kontrolüdür; deney sayılmaz, sayaç artmaz, kayıt yazmaz.
 
 ## 7. Yasaklar
