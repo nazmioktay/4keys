@@ -36,7 +36,7 @@ motoru → sızıntı testleri → kayıt (sayaç, Deflated Sharpe, deneyler.md)
 6. **Kaynak kontrol listesi (testler)**: kayıt+bilinmeyen ad hatası; `validate_panel` sözleşmesi; bilinen değerle özellik hesabı;
    `available_at` doğru; **gelecek bozulunca geçmiş özellik değişmiyor**; boş/eksik veri davranışı; önbellek anahtarı (version/params).
    Örnekler: `tests/research/test_sources.py`, `test_forward_sources.py`.
-7. Kapsam raporu: `research.sources.coverage.source_coverage(...)` → `docs/research/kaynak_kapsami.md`'ye ekleyin.
+7. Kapsam raporu: yeni kaynak otomatik dahil olur; `cd backend && python -m research.coverage_report` ile `docs/research/kaynak_kapsami.md`'yi yeniden üretin.
 
 ## 2) Yeni model
 1. `docs/research/sablonlar/model_sablonu.py` → `backend/research/models/<ad>.py`; `BaseModel`'den türetin, `@register_model("ad")`.

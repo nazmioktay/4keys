@@ -34,11 +34,21 @@ def decision_frame(dates: pd.DatetimeIndex, universe_membership: pd.DataFrame | 
     return rows.sort_values(["date", "symbol"]).reset_index(drop=True)
 
 
+def _as_ns(values) -> pd.Series:
+    """Zaman damgalarını tek tipe getirir: UTC-naive, nanosaniye. Parquet/kaynaklar farklı hassasiyet (ms/us/ns) döndürebilir;
+    `merge_asof` anahtarların AYNI tipte olmasını ister (funding [ms] ile karar zamanı [us] eşleşmiyordu)."""
+    s = pd.to_datetime(pd.Series(values))
+    if getattr(s.dt, "tz", None) is not None:
+        s = s.dt.tz_convert(None)
+    return s.astype("datetime64[ns]")
+
+
 def merge_sources(decisions: pd.DataFrame, sources: list[tuple[Source, pd.DataFrame]]) -> pd.DataFrame:
     """`decisions` ([date, symbol, decision_time]) satırlarına her kaynağın özelliklerini PIT ekler.
     Dönen çerçevenin satır sırası/indeksi `decisions` ile aynıdır."""
     out = decisions.copy()
     left_base = decisions[["symbol", "decision_time"]].copy()
+    left_base["decision_time"] = _as_ns(left_base["decision_time"]).to_numpy()
     left_base["_row"] = decisions.index
     left_base = left_base.sort_values("decision_time", kind="stable")
 
@@ -50,7 +60,7 @@ def merge_sources(decisions: pd.DataFrame, sources: list[tuple[Source, pd.DataFr
             out[f"{source.name}{AVAILABLE_SUFFIX}"] = pd.NaT
             out[f"{source.name}{MISSING_SUFFIX}"] = np.int8(1)
             continue
-        panel = panel.assign(available_at=pd.to_datetime(panel["available_at"]))
+        panel = panel.assign(available_at=_as_ns(panel["available_at"]).to_numpy())
         feats = source.feature_columns(panel)
         right = panel[["symbol", "available_at", *feats]].dropna(subset=["available_at"]).sort_values("available_at", kind="stable")
         avail_col = f"{source.name}{AVAILABLE_SUFFIX}"
