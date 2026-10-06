@@ -80,7 +80,6 @@ class DemoExchange(Exchange):
         low = np.minimum(open_, close) * (1 - intrabar_noise)
         volume = rng.uniform(10, 5000, size=n)
 
-        end_ms = since if since is not None else 0
         period_ms = minutes * 60_000
         if since is not None:
             timestamps = since + np.arange(n) * period_ms

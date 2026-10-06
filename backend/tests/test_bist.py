@@ -4,7 +4,7 @@ import pytest
 
 from app.bist import service as bist_service
 from app.bist.schemas import BistOrderRequest
-from app.bist.service import BistTradingDisabled, login, login_verify, place_bist_order
+from app.bist.service import BistTradingDisabled, login, place_bist_order
 from app.core.config import settings
 from app.exchanges.algolab import AlgoLabExchange
 from app.security import kill_switch

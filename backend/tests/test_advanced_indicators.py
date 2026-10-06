@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-import pytest
 
 from app.ml.advanced_indicators import (
     dynamic_support_resistance,

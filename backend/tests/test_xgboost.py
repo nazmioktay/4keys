@@ -118,7 +118,7 @@ def test_shap_values_only_supported_for_xgboost():
     mlp_model.fit(X, y)
     try:
         mlp_model.shap_values(X)
-        assert False, "MLP için SHAP hata vermeliydi"
+        raise AssertionError("MLP için SHAP hata vermeliydi")
     except ValueError:
         pass
 

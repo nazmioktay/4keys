@@ -25,7 +25,6 @@ pahalı) olmalıdır.
 from dataclasses import dataclass
 
 import numpy as np
-import pandas as pd
 from app.exchanges.base import Exchange
 
 from app.ml.features import build_features

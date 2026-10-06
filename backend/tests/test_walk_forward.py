@@ -36,7 +36,7 @@ def test_walk_forward_trains_only_on_past_and_keeps_final_slice_untouched(monkey
     assert len(report.folds) == 3
     assert all(f.error is None for f in report.folds), [f.error for f in report.folds]
     reserved = pd.Timestamp(report.final_test_reserved_from)
-    for (start, end), fold in zip(windows, report.folds):
+    for (_start, end), fold in zip(windows, report.folds):
         assert end <= reserved  # ayrılmış son dilim hiçbir katmanda test edilmez
         # katman modeli yalnızca test başlangıcından (etiket ufku + embargo kadar) önceki satırları gördü
         assert fold.train_rows > 0

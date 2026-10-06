@@ -3,7 +3,6 @@
 Casus (spy) testleri: asıl veri/etiket üretimi sahtelenir, yalnızca iki seçeneğin
 her eğitim yolunda AYNI değerlerle veri kurucuya ulaştığı doğrulanır."""
 
-import numpy as np
 import pandas as pd
 import pytest
 

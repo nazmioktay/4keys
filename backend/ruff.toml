@@ -1,0 +1,9 @@
+target-version = "py311"
+extend-exclude = ["tests/__pycache__"]
+
+[lint]
+# Yalnızca gerçek hata sınıfları: sözdizimi/çalışma zamanı (E9), pyflakes (F),
+# olası hatalar (B). Stil ve satır uzunluğu kuralları bilerek kapalı.
+select = ["E9", "F", "B"]
+# B008: FastAPI `Depends(...)` kalıbı bilinçli; B905: zip(strict=) stil tercihi.
+ignore = ["B008", "B905"]
