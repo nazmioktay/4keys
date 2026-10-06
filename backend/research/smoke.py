@@ -11,7 +11,7 @@ import sys
 
 import pandas as pd
 
-from . import config, engine, stats
+from . import config, engine
 from .data import store
 from .registry import current_trial_count
 from .report import render_report
