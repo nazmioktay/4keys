@@ -27,6 +27,8 @@ class Source(ABC):
     forward_only: ClassVar[bool] = False  # geçmişi yok, yalnızca bugünden itibaren toplanabilir
     publication_lag: ClassVar[pd.Timedelta] = pd.Timedelta(0)  # verinin gerçekte ne kadar gecikmeyle yayımlandığı
     max_staleness: ClassVar[pd.Timedelta] = pd.Timedelta(days=3)  # birleştirmede geriye bakma toleransı
+    # Önekli özellik adları (boş panelde bile kolonların var olması için; yalnızca boş olabilen kaynaklarda zorunlu)
+    feature_names: ClassVar[tuple[str, ...]] = ()
 
     def __init__(self, **params: Any) -> None:
         self.params = params

@@ -23,6 +23,8 @@ from app.ml.train import (
     train_signal_model_validated,
     train_signal_models_by_regime,
 )
+from app.forwardcollect.depth import collect_depth
+from app.forwardcollect.oi_detail import collect_oi_detail
 from app.openinterest.service import refresh_all_configured_symbols as refresh_open_interest_symbols
 from app.orderbook.service import refresh_all_configured_symbols
 from app.portfolio.shared import get_portfolio
@@ -38,6 +40,8 @@ ENGINE_CYCLE_JOB_ID = "engine_cycle"
 MACRO_REFRESH_JOB_ID = "macro_refresh"
 ORDERBOOK_REFRESH_JOB_ID = "orderbook_refresh"
 OPEN_INTEREST_REFRESH_JOB_ID = "open_interest_refresh"
+FORWARD_DEPTH_JOB_ID = "forward_depth"
+FORWARD_OI_DETAIL_JOB_ID = "forward_oi_detail"
 AUTO_RETRAIN_JOB_ID = "auto_retrain"
 AUTO_RETRAIN_LSTM_JOB_ID = "auto_retrain_lstm"
 AUTO_RETRAIN_ONLINE_JOB_ID = "auto_retrain_online"
@@ -138,6 +142,29 @@ def job_refresh_open_interest() -> None:
     except Exception as exc:  # noqa: BLE001 - zamanlayıcı thread'i asla çökmemeli
         logger.exception("open interest refresh job failed")
         status.record(OPEN_INTEREST_REFRESH_JOB_ID, ok=False, detail=str(exc))
+
+
+def job_collect_depth_bands() -> None:
+    """İleriye dönük toplayıcı (varsayılan KAPALI, bkz. `Settings.forward_collectors_enabled`): emir defteri derinlik
+    bantlarının anlık görüntüsünü `depth_band_snapshots`'a yazar. Geçmişi yoktur; araştırma 12 ay birikmeden kullanmaz."""
+    try:
+        results = collect_depth(settings.forward_collector_symbols_list)
+        missing = [s for s, v in results.items() if v is None]
+        status.record(FORWARD_DEPTH_JOB_ID, ok=True, detail="tüm semboller alındı" if not missing else f"eksik semboller: {', '.join(missing)}")
+    except Exception as exc:  # noqa: BLE001 - zamanlayıcı thread'i asla çökmemeli
+        logger.exception("forward depth job failed")
+        status.record(FORWARD_DEPTH_JOB_ID, ok=False, detail=str(exc))
+
+
+def job_collect_oi_detail() -> None:
+    """İleriye dönük toplayıcı: ayrıntılı açık pozisyon (OI + top-trader/global long-short + taker) anlık görüntüsü."""
+    try:
+        results = collect_oi_detail(settings.forward_collector_symbols_list)
+        missing = [s for s, v in results.items() if v is None]
+        status.record(FORWARD_OI_DETAIL_JOB_ID, ok=True, detail="tüm semboller alındı" if not missing else f"eksik semboller: {', '.join(missing)}")
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("forward oi detail job failed")
+        status.record(FORWARD_OI_DETAIL_JOB_ID, ok=False, detail=str(exc))
 
 
 def job_auto_retrain() -> None:

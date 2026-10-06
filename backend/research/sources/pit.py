@@ -9,6 +9,7 @@ yaratmıştı. Denetim için `<kaynak>__available_at` kolonu taşınır (modele 
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
 from .base import MARKET, Source
@@ -42,6 +43,14 @@ def merge_sources(decisions: pd.DataFrame, sources: list[tuple[Source, pd.DataFr
     left_base = left_base.sort_values("decision_time", kind="stable")
 
     for source, panel in sources:
+        if panel.empty:  # hiç veri yok (ör. henüz veri toplanmamış forward_only kaynak): NaN + eksik bayrağı, 0 DEĞİL
+            feats = list(source.feature_names)
+            for c in feats:
+                out[c] = np.nan
+            out[f"{source.name}{AVAILABLE_SUFFIX}"] = pd.NaT
+            out[f"{source.name}{MISSING_SUFFIX}"] = np.int8(1)
+            continue
+        panel = panel.assign(available_at=pd.to_datetime(panel["available_at"]))
         feats = source.feature_columns(panel)
         right = panel[["symbol", "available_at", *feats]].dropna(subset=["available_at"]).sort_values("available_at", kind="stable")
         avail_col = f"{source.name}{AVAILABLE_SUFFIX}"

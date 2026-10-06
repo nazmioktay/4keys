@@ -190,6 +190,20 @@ class Settings(BaseSettings):
     orderbook_refresh_seconds: int = 1800  # 30 dakika — emir defterinin ANLIK görüntüsü, geçmişi yoktur (bkz. app.orderbook)
     open_interest_refresh_seconds: int = 1800  # 30 dakika — open interest'in ANLIK görüntüsü, geçmişi yoktur (bkz. app.openinterest)
 
+    # --- İleriye dönük (forward-only) veri toplayıcıları (bkz. app.forwardcollect) — VARSAYILAN KAPALI ---
+    # Geçmişi olmayan veriler (zorunlu tasfiye akışı, emir defteri derinliği, ayrıntılı açık pozisyon) yalnızca bugünden
+    # itibaren toplanabilir; araştırma tarafı 12 ay birikmeden bunları kullanmaz. Yeni tablolar + yeni job'lar; mevcut
+    # trading davranışını DEĞİŞTİRMEZ. Açmak için: FOURKEYS_FORWARD_COLLECTORS_ENABLED=true.
+    forward_collectors_enabled: bool = False
+    forward_collector_symbols: str = "BTCUSDT,ETHUSDT"  # Binance yerel sembol (WebSocket/REST)
+    forward_depth_seconds: int = 300
+    forward_oi_detail_seconds: int = 300
+    forward_liquidation_flush_seconds: int = 30
+
+    @property
+    def forward_collector_symbols_list(self) -> list[str]:
+        return [s.strip().upper() for s in self.forward_collector_symbols.split(",") if s.strip()]
+
     # --- Otomatik yeniden eğitim (bkz. app.scheduler.jobs) ---
     # Aralık, sabit bir takvim süresi yerine HESAPLANIR (bkz.
     # `app.scheduler.jobs.compute_auto_retrain_interval_seconds`): eğitim

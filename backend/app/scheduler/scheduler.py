@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from app.core.config import settings
+from app.forwardcollect.liquidations import start_liquidation_collector, stop_liquidation_collector
 
 from . import persistence
 from .jobs import (
@@ -12,6 +13,8 @@ from .jobs import (
     AUTO_RETRAIN_ONLINE_JOB_ID,
     AUTO_RETRAIN_REGIME_JOB_ID,
     ENGINE_CYCLE_JOB_ID,
+    FORWARD_DEPTH_JOB_ID,
+    FORWARD_OI_DETAIL_JOB_ID,
     MACRO_REFRESH_JOB_ID,
     OPEN_INTEREST_REFRESH_JOB_ID,
     ORDERBOOK_REFRESH_JOB_ID,
@@ -22,6 +25,8 @@ from .jobs import (
     job_auto_retrain_lstm,
     job_auto_retrain_online,
     job_auto_retrain_regime,
+    job_collect_depth_bands,
+    job_collect_oi_detail,
     job_periodic_optimization,
     job_refresh_macro,
     job_refresh_open_interest,
@@ -126,6 +131,25 @@ def start_scheduler(enabled: bool | None = None) -> BackgroundScheduler | None:
             max_instances=1,
             coalesce=True,
         )
+        if settings.forward_collectors_enabled:
+            # İleriye dönük toplayıcılar (VARSAYILAN KAPALI): yeni tablolar + yeni job'lar, mevcut trading akışını etkilemez.
+            scheduler.add_job(
+                job_collect_depth_bands,
+                "interval",
+                seconds=settings.forward_depth_seconds,
+                id=FORWARD_DEPTH_JOB_ID,
+                max_instances=1,
+                coalesce=True,
+            )
+            scheduler.add_job(
+                job_collect_oi_detail,
+                "interval",
+                seconds=settings.forward_oi_detail_seconds,
+                id=FORWARD_OI_DETAIL_JOB_ID,
+                max_instances=1,
+                coalesce=True,
+            )
+            start_liquidation_collector(settings.forward_collector_symbols_list, settings.forward_liquidation_flush_seconds)
         _catch_up_jobs: list[tuple[str, datetime]] = []
         if settings.ml_auto_retrain_enabled:
             # Aynı hesaplanmış aralık (bkz. `compute_auto_retrain_interval_seconds`)
@@ -216,6 +240,7 @@ def start_scheduler(enabled: bool | None = None) -> BackgroundScheduler | None:
 
 def stop_scheduler() -> None:
     global _scheduler
+    stop_liquidation_collector()  # çalışmıyorsa no-op
     if _scheduler is not None:
         _scheduler.shutdown(wait=False)
         _scheduler = None
