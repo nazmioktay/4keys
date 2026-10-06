@@ -27,3 +27,6 @@ Küçük işlerde (yorum, yazım düzeltmesi, tek satırlık config) reviewer at
 
 ## Onay gerektirenler
 `git push`, `deploy/*.sh`, `docker compose up/down/restart` ve veritabanı işlemleri için kullanıcıya sor.
+
+## Araştırma işleri
+Araştırma işlerinde önce docs/research/KURALLAR.md ve deneyler.md'yi oku. Araştırma kodu (`backend/research/`) canlı/paper koduna (`backend/app/**`) dokunmaz (istisna: opt-in, varsayılan KAPALI `app/forwardcollect`). Araştırma testleri için `backend/research/Dockerfile` imajı gerekir (bkz. docs/research/EKLENTI_REHBERI.md).
