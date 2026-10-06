@@ -169,7 +169,12 @@ def test_forward_jobs_record_status_and_never_raise(monkeypatch):
 def _quiet_scheduler(monkeypatch):
     monkeypatch.setattr(jobs, "refresh_screener", lambda: [])
     monkeypatch.setattr(jobs, "run_cycle_once", lambda: [])
-    monkeypatch.setattr(jobs, "job_refresh_macro", lambda: None, raising=False)
+    # scheduler.py iş fonksiyonlarını `from .jobs import ...` ile alır: sarmalayıcıyı (job_refresh_macro) yamalamak
+    # etkisizdir; ağa çıkan ALT çağrılar `jobs` içinde yamalanır (start_scheduler makro/orderbook/OI'yi hemen koşturur).
+    monkeypatch.setattr(jobs, "get_exchange", lambda *_a, **_k: object())
+    monkeypatch.setattr(jobs, "refresh_and_record_macro_snapshot", lambda exchange: {})
+    monkeypatch.setattr(jobs, "refresh_all_configured_symbols", lambda exchange, symbols: {})
+    monkeypatch.setattr(jobs, "refresh_open_interest_symbols", lambda exchange, symbols: {})
     started = []
     monkeypatch.setattr(scheduler_module, "start_liquidation_collector", lambda symbols, flush: started.append((symbols, flush)))
     monkeypatch.setattr(jobs, "collect_depth", lambda symbols: {})
@@ -177,7 +182,13 @@ def _quiet_scheduler(monkeypatch):
     status.reset()
     stop_scheduler()
     yield started
-    stop_scheduler()
+    # Çalışan iş thread'leri BİTMEDEN `_sqlite_db` teardown'ı bellek içi SQLite'ı kapatırsa süreç çöker (segfault):
+    # önce thread'leri bekle, sonra durdur.
+    sched = get_scheduler()
+    if sched is not None:
+        sched.shutdown(wait=True)
+        scheduler_module._scheduler = None  # ikinci shutdown SchedulerNotRunningError verir
+    stop_scheduler()  # tasfiye toplayıcısını da durdurur
 
 
 def test_forward_collectors_are_off_by_default(_quiet_scheduler):
