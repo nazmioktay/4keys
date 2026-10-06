@@ -14,7 +14,7 @@ from app.exchanges.cache import timeframe_minutes
 
 from .dataset import LabelingMethod, build_training_dataset, build_training_dataset_with_time
 from .features import ALL_FEATURE_COLUMNS
-from .meta_label import MetaLabelModel, build_meta_dataset, build_meta_dataset_out_of_fold
+from .meta_label import MetaLabelModel, build_meta_dataset_out_of_fold
 from .model import DEFAULT_MODEL_PATH, Algorithm, SignalModel
 from .model_paths import DEFAULT_LSTM_MODEL_PATH, DEFAULT_PATCHTST_MODEL_PATH
 from .model_status import get_champion_fit_end, get_split_boundary, write_model_status
@@ -444,7 +444,7 @@ def _train_sequence_model(
 
     model.feature_columns = resolved_columns
     training_report = model.fit(X_fit, y_fit, epochs=epochs, X_val=X_val, y_val=y_val, patience=patience, seed=seed)
-    X_train, y_train = X_train_full, y_train_full
+    X_train = X_train_full
 
     if len(X_holdout) > 0:
         pred, _ = model.predict_batch(X_holdout)

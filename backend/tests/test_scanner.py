@@ -1,6 +1,5 @@
 import numpy as np
 import pandas as pd
-import pytest
 
 from app.exchanges.base import Exchange
 from app.screener.scanner import _select_candidate_symbols, scan_market
