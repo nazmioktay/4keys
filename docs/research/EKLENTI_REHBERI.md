@@ -18,7 +18,7 @@ cd backend && python -m research.runner research/configs/ornek_vol.yaml         
 python -m research.runner research/configs/ornek_vol.yaml --smoke                 # her config'i smoke olarak koştur
 python -m research.ablation research/configs/ornek_vol.yaml [--smoke]              # her kaynak tek tek çıkarılır (varsayılan: her biri KAYITLI deneme)
 ```
-Tek YAML: `id, question, sources, universe{n}, period{start,end}, target{name,h}, models[], cv{n_splits,embargo_days,min_train_days},
+Tek YAML: `id, question, zone (main|forward; varsayılan main, bkz. KURALLAR §10), sources, universe{n}, period{start,end}, target{name,h}, models[], cv{n_splits,embargo_days,min_train_days},
 signal{adapter,params}, arm, seed, checks{...}` (bkz. `research/configs/ornek_vol.yaml`). Akış: noktasal-zamanlı evren → kaynak
 özellikleri (PIT birleştirme) → hedef → purge+embargo'lu walk-forward → OOF → tahmin metrikleri → sinyal adaptörü → Aşama 0
 motoru → sızıntı testleri → kayıt (sayaç, Deflated Sharpe, deneyler.md) → rapor.
@@ -73,7 +73,8 @@ Her varyant (model) bir deneme sayılır (Deflated Sharpe için global sayaç). 
 ## İleriye dönük toplayıcılar (canlı koda dokunan tek istisna)
 Tasfiye akışı, emir defteri derinlik bantları ve ayrıntılı açık pozisyon `backend/app/forwardcollect/` ile toplanır; **varsayılan KAPALI**
 (`FOURKEYS_FORWARD_COLLECTORS_ENABLED=true` ile açılır; semboller `FOURKEYS_FORWARD_COLLECTOR_SYMBOLS`). Yeni tablolar: `liquidation_events`,
-`depth_band_snapshots`, `oi_detail_snapshots` (mevcut tabloları değiştirmez). 12 ay birikmeden bu kaynaklarla deney yapılamaz. WebSocket
+`depth_band_snapshots`, `oi_detail_snapshots` (mevcut tabloları değiştirmez). 12 ay birikmeden bu kaynaklarla deney yapılamaz; yapılınca da yalnızca `zone: forward` deneyde ve forward keşif aralığında
+[2026-11-01, 2027-11-01) (KURALLAR.md §10). Evren ilk ~90 gün boş kalır: etkin keşif ~9 ay, `cv.min_train_days`'i buna göre seçin. WebSocket
 bağlantısı birim testlerinde sahte akışla sınanır; **gerçek bağlantı elle doğrulanmalıdır** (açıp `docker logs` ve `liquidation_events` satırlarına bakın).
 
 ## Yeniden üretilebilirlik notu (önbellek veri imzası)

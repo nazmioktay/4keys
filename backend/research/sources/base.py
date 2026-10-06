@@ -81,7 +81,7 @@ def validate_panel(source: Source, panel: pd.DataFrame) -> None:
     for col in RESERVED_COLUMNS:
         if col not in panel.columns:
             raise ValueError(f"{source.name}: panelde '{col}' kolonu yok")
-    if not pd.api.types.is_datetime64_any_dtype(panel["available_at"]):
+    if len(panel) and not pd.api.types.is_datetime64_any_dtype(panel["available_at"]):  # boş panelin tipi önemsiz (pit boşu ele alır)
         raise ValueError(f"{source.name}: available_at datetime olmalı")
     feats = [c for c in panel.columns if c not in RESERVED_COLUMNS]
     bad = [c for c in feats if not c.startswith(f"{source.name}__")]

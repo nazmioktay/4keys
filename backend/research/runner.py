@@ -18,7 +18,7 @@ import pandas as pd
 import yaml
 
 from . import checks as chk
-from . import config, engine, pred_metrics, signals, stats
+from . import config, engine, guard, pred_metrics, signals, stats
 from .data import store
 from .data.universe import universe_membership
 from .oof import build_folds, run_oof
@@ -66,6 +66,9 @@ def load_config(source) -> dict:
         cfg["question"] = normalize_question(cfg["question"])  # 'q' / 'Q ' tek bütçe
     except ValueError as exc:
         raise ConfigError(str(exc)) from exc
+    cfg.setdefault("zone", "main")
+    if cfg["zone"] not in config.ZONES:
+        raise ConfigError(f"zone '{cfg['zone']}' geçersiz (geçerli: {', '.join(config.ZONES)}; KURALLAR.md §10)")
     cfg.setdefault("universe", {"n": 20})
     cfg.setdefault("arm", "arm")
     cfg.setdefault("seed", 0)
@@ -87,6 +90,11 @@ def load_config(source) -> dict:
     if cv["embargo_days"] < h:
         raise ConfigError(f"cv.embargo_days ({cv['embargo_days']}) hedef ufkundan (h={h}) küçük olamaz")
     cfg["cv"] = cv
+    period_days = (pd.Timestamp(cfg["period"]["end"]) - pd.Timestamp(cfg["period"]["start"])).days + 1
+    usable_days = period_days - (90 if cfg["zone"] == "forward" else 0)  # forward: evren ilk ~90 gün boş (KURALLAR.md §10)
+    if cv["min_train_days"] >= usable_days:
+        hint = " Forward bölgesinde evren ilk ~90 gün boştur (KURALLAR.md §10): etkin keşif ~9 ay." if cfg["zone"] == "forward" else ""
+        raise ConfigError(f"cv.min_train_days ({cv['min_train_days']}) dönem uzunluğundan ({period_days} gün) küçük olmalı (kullanılabilir: {usable_days} gün).{hint}")
     cfg["signal"].setdefault("params", {})
     if not re_id(cfg["id"]):
         raise ConfigError("id yalnızca harf/rakam/_.- içerebilir")
@@ -155,7 +163,20 @@ def run_experiment(
     panel: Panel | None = None,
     extra_question_cost: int = 1,
 ) -> ExperimentResult:
+    """Deneyi config'teki bölgede (`zone`) koşturur: yükleyici/motor/rapor o bölgenin kilidine uyar (KURALLAR.md §10)."""
     cfg = load_config(source)
+    with guard.zone(cfg["zone"]):
+        return _run_experiment(cfg, smoke, results_dir, log_path, registry_file, panel, extra_question_cost)
+
+
+def check_panel_zone(panel: Panel, cfg: dict) -> None:
+    if panel.zone != cfg["zone"]:
+        raise ConfigError(f"panel '{panel.zone}' bölgesinde kurulmuş, config '{cfg['zone']}' bölgesini istiyor")
+
+
+def _run_experiment(cfg, smoke, results_dir, log_path, registry_file, panel, extra_question_cost) -> ExperimentResult:
+    if panel is not None:
+        check_panel_zone(panel, cfg)
     if smoke is not None:
         cfg["smoke"] = smoke
     smoke = bool(cfg["smoke"])
@@ -237,7 +258,7 @@ def run_experiment(
         positive_year_fraction=pos_years, stress_sharpe=stats.sharpe(stress), plateau_ratio=float("nan"), is_portfolio=(cfg["arm"] == "portfolio"),
     )
     metrics = {
-        "id": cfg["id"], "question": cfg["question"], "primary": primary, "sharpe": p["sharpe"], "max_drawdown": p["max_drawdown"],
+        "id": cfg["id"], "question": cfg["question"], "zone": cfg["zone"], "primary": primary, "sharpe": p["sharpe"], "max_drawdown": p["max_drawdown"],
         "variants": variants, "pbo": pbo, "stress_sharpe": stats.sharpe(stress), "delay1_sharpe": stats.sharpe(delayed),
         "btc_calmar": btc_calmar, "acceptance": acceptance, "acceptance_not_evaluated": ["plateau (parametre taraması gerekir)"],
         "valid": report.valid, "check_results": report.results, "check_failures": report.failures, "check_warnings": report.warnings,

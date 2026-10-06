@@ -9,11 +9,16 @@ from typing import Callable
 import pandas as pd
 
 from .. import config
+from ..guard import current_zone
 from .base import Source
 
 
 def cache_key(source: Source, data_hash: str, universe: list[str], dates: pd.DatetimeIndex) -> str:
-    blob = "|".join([source.param_hash(), data_hash, source.data_signature(), ",".join(sorted(universe)), str(dates.min()), str(dates.max()), str(len(dates))])
+    parts = [source.param_hash(), data_hash, source.data_signature(), ",".join(sorted(universe)), str(dates.min()), str(dates.max()), str(len(dates))]
+    zone = current_zone()
+    if zone != "main":  # bölge kesimi panel içeriğini değiştirir; "main" eklenmez -> mevcut önbellek anahtarları geçerli kalır
+        parts.append(f"zone={zone}")
+    blob = "|".join(parts)
     return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
 

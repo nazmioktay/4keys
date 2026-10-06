@@ -10,11 +10,11 @@ import argparse
 import numpy as np
 import pandas as pd
 
-from . import pred_metrics, signals, stats
+from . import guard, pred_metrics, signals, stats
 from .oof import build_folds, run_oof
 from .panel import Panel
 from .registry import assert_budget, record_smoke_run, register_experiment
-from .runner import _portfolio, _trim, load_config
+from .runner import _portfolio, _trim, check_panel_zone, load_config
 
 
 def _primary_returns(panel: Panel, cfg: dict, X: pd.DataFrame, folds, seed: int):
@@ -55,6 +55,12 @@ def run_ablation(
     VARSAYILAN `register=True`: her ablasyon ayrı bir config/deneme olarak kaydedilir (`<id>__abl_<kaynak>`; sayaç + bütçe).
     Kayıtsız çalıştırmak yalnızca `smoke=True` ile mümkündür (smoke soru başına sınırlıdır; sonuç karar için kullanılamaz)."""
     cfg = load_config(cfg_source)
+    check_panel_zone(panel, cfg)
+    with guard.zone(cfg["zone"]):  # motor/funding yükleyicisi deneyin bölgesinde (KURALLAR.md §10)
+        return _run_ablation(cfg, panel, n_boot, mean_block, seed, register, smoke, results_dir, log_path, registry_file)
+
+
+def _run_ablation(cfg, panel, n_boot, mean_block, seed, register, smoke, results_dir, log_path, registry_file) -> pd.DataFrame:
     if not register and not smoke:
         raise ValueError("Kayıtsız ablasyon yalnızca smoke=True ile yapılabilir (deneme/bütçe kaçağını önlemek için)")
     if smoke:

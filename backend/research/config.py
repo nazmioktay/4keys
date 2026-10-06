@@ -17,9 +17,17 @@ RESULTS_DIR = REPO_ROOT / "research" / "results"
 REGISTRY_FILE = RESULTS_DIR / "_registry.json"
 CACHE_DIR = BACKEND_ROOT / "research" / "_cache"
 
-# --- Nihai test penceresi (KURALLAR.md §1) ---
+# --- Nihai test penceresi (KURALLAR.md §1): [FINAL_TEST_START, FORWARD_EXPLORE_START) ---
 FINAL_TEST_START = pd.Timestamp("2025-10-01")
 FINAL_TEST_MARKER = "FINAL-TEST-ACILDI"
+
+# --- İleriye dönük doğrulama bölgesi (KURALLAR.md §10, 2026-10-07'de önceden kayıtlı) ---
+# Yalnızca forward_only kaynak kullanan deneyler (`zone: forward`) bu bölgeye girer; ana araştırma girmez.
+FORWARD_EXPLORE_START = pd.Timestamp("2026-11-01")  # T0: keşif [T0, FORWARD_TEST_START)
+FORWARD_TEST_START = pd.Timestamp("2027-11-01")  # kilitli forward test: [FORWARD_TEST_START, ...)
+FORWARD_TEST_MIN_OPEN = pd.Timestamp("2028-05-01")  # forward test en erken bu gün açılabilir (>= 6 ay test verisi)
+FORWARD_TEST_MARKER = "FORWARD-TEST-ACILDI"
+ZONES = ("main", "forward")
 
 # --- Maliyet varsayılanları (KURALLAR.md §3), oran olarak (0,0005 = %0,05) ---
 FUTURES_TAKER_FEE = 0.0005
