@@ -18,7 +18,7 @@ from ..guard import cut_final_test
 
 KLINE_COLUMNS = ["open", "high", "low", "close", "volume", "quote_volume", "trades", "taker_buy_base", "taker_buy_quote"]
 _MANIFEST_LOCK = threading.Lock()
-KINDS = ("um_1d", "um_1h", "spot_1d", "um_funding", "delivery_um_1d", "delivery_cm_1d")
+KINDS = ("um_1d", "um_1h", "spot_1d", "um_funding", "delivery_um_1d", "delivery_cm_1d", "um_metrics_1d")
 
 
 def cache_dir() -> Path:

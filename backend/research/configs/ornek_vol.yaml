@@ -1,0 +1,43 @@
+# Çerçeve kontrolü (strateji sonucu DEĞİL): ohlcv_core özellikleriyle ertesi gün volatilitesi tahmini.
+# Çalıştırma:  cd backend && python -m research.runner research/configs/ornek_vol.yaml
+# `smoke: true` -> deneme sayacına SAYILMAZ, deneyler.md/registry kaydı yazılmaz; çıktı research/results/_smoke/<id>/ altına gider.
+id: ornek_vol_001
+question: vol_tahmini
+smoke: true
+hypothesis: "Çerçeve kontrolü: HAR-RV ve LightGBM ile next_rv(1) tahmini"
+
+sources: [ohlcv_core]
+
+universe:
+  n: 20                 # noktasal-zamanlı ilk-N perpetual (hacim)
+
+period:
+  start: 2021-01-01
+  end: 2025-09-30       # nihai test penceresi (>= 2025-10-01) YASAK
+
+target:
+  name: next_rv
+  h: 1
+
+models:
+  - har_rv
+  - lightgbm_reg
+
+cv:
+  n_splits: 5
+  embargo_days: 1       # >= hedef ufku (h) zorunlu
+  min_train_days: 365
+
+signal:
+  adapter: vol_target   # vol tahmini -> volatilite hedefleme (long-only, eşit risk)
+  params:
+    target_vol_annual: 0.40
+    cap: 1.0
+
+arm: arm                # eşikler: kol (portfolio için 'portfolio')
+seed: 0
+checks:
+  shuffled_target: true
+  availability: true
+  extra_lag: true
+  reproducibility: true

@@ -328,3 +328,81 @@ class AppStateRow(Base):
     key: Mapped[str] = mapped_column(String, primary_key=True)
     state_json: Mapped[str] = mapped_column(String)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, onupdate=_utcnow)
+
+
+class LiquidationEvent(Base):
+    """Binance futures zorunlu tasfiye (`!forceOrder@arr` WebSocket) olayı — GEÇMİŞİ YOKTUR (REST'te kalıcı geçmiş
+    sunulmuyor), yalnızca toplamaya BAŞLADIĞIMIZ andan itibaren birikir (bkz. `app.forwardcollect.liquidations`; araştırma
+    tarafı `research.sources.forward` 12 aylık birikim olmadan kullanmaz). `side`: tasfiye emrinin yönü — SELL = uzun
+    pozisyon tasfiye edildi, BUY = kısa pozisyon tasfiye edildi."""
+
+    __tablename__ = "liquidation_events"
+    __table_args__ = (UniqueConstraint("time", "symbol", "side", "price", "quantity", name="uq_liquidation_event"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    time: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    symbol: Mapped[str] = mapped_column(String, index=True)
+    side: Mapped[str] = mapped_column(String)
+    price: Mapped[float] = mapped_column(Float)
+    avg_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    quantity: Mapped[float] = mapped_column(Float)
+    quote_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    status: Mapped[str | None] = mapped_column(String, nullable=True)
+
+
+DEPTH_BANDS_BP = (10, 25, 50, 100, 200, 500)
+DEPTH_BAND_COLUMNS = [f"{side}_{bp}bp" for bp in DEPTH_BANDS_BP for side in ("bid", "ask")]
+
+
+class DepthBandSnapshot(Base):
+    """Emir defteri DERİNLİĞİNİN anlık görüntüsü: orta fiyattan ±N baz puan bantlarında bid/ask NOTIONAL (USDT). Borsa
+    sınırlı seviye döndürdüğü için kapsanan mesafe `depth_coverage_bp`'de tutulur; kapsanmayan bantlar NULL'dur (eksik
+    veri, sıfır DEĞİL). Geçmişi yoktur (forward-only)."""
+
+    __tablename__ = "depth_band_snapshots"
+    __table_args__ = (UniqueConstraint("time", "symbol", name="uq_depth_band_snapshot_time_symbol"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    time: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
+    symbol: Mapped[str] = mapped_column(String, index=True)
+    mid_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    spread_bps: Mapped[float | None] = mapped_column(Float, nullable=True)
+    depth_coverage_bp: Mapped[float | None] = mapped_column(Float, nullable=True)
+    bid_10bp: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ask_10bp: Mapped[float | None] = mapped_column(Float, nullable=True)
+    bid_25bp: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ask_25bp: Mapped[float | None] = mapped_column(Float, nullable=True)
+    bid_50bp: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ask_50bp: Mapped[float | None] = mapped_column(Float, nullable=True)
+    bid_100bp: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ask_100bp: Mapped[float | None] = mapped_column(Float, nullable=True)
+    bid_200bp: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ask_200bp: Mapped[float | None] = mapped_column(Float, nullable=True)
+    bid_500bp: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ask_500bp: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+
+OI_DETAIL_COLUMNS = [
+    "open_interest", "open_interest_value", "top_ls_account", "top_ls_position", "global_ls_account",
+    "taker_buy_sell_ratio", "taker_buy_vol", "taker_sell_vol",
+]
+
+
+class OIDetailSnapshot(Base):
+    """AYRINTILI açık pozisyon anlık görüntüsü: OI + top-trader / global long-short oranları + taker alış/satış (5 dk).
+    `open_interest_snapshots`'tan (yalnızca OI) farklı olarak pozisyonlanma oranlarını da taşır. Forward-only."""
+
+    __tablename__ = "oi_detail_snapshots"
+    __table_args__ = (UniqueConstraint("time", "symbol", name="uq_oi_detail_snapshot_time_symbol"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    time: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow, index=True)
+    symbol: Mapped[str] = mapped_column(String, index=True)
+    open_interest: Mapped[float | None] = mapped_column(Float, nullable=True)
+    open_interest_value: Mapped[float | None] = mapped_column(Float, nullable=True)
+    top_ls_account: Mapped[float | None] = mapped_column(Float, nullable=True)
+    top_ls_position: Mapped[float | None] = mapped_column(Float, nullable=True)
+    global_ls_account: Mapped[float | None] = mapped_column(Float, nullable=True)
+    taker_buy_sell_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
+    taker_buy_vol: Mapped[float | None] = mapped_column(Float, nullable=True)
+    taker_sell_vol: Mapped[float | None] = mapped_column(Float, nullable=True)

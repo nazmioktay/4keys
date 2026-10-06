@@ -267,3 +267,13 @@ def test_limits_are_cached_and_unknown_symbols_reported(tmp_cache):
     assert len(calls) == 2
     min_notional, step, unknown = limits.engine_limits(out)
     assert min_notional["BTCUSDT"] == 100.0 and unknown == ["DEADUSDT"]
+
+
+def test_final_test_marker_requires_exact_experiment_id_not_a_prefix(tmp_path):
+    log = tmp_path / "deneyler.md"
+    log.write_text("# günlük\nFINAL-TEST-ACILDI e1\n", encoding="utf-8")
+    assert guard.final_test_is_open("e1", log) is True
+    assert guard.final_test_is_open("e10", log) is False  # 'e1' kaydı 'e10'u AÇMAZ
+    assert guard.final_test_is_open("e", log) is False
+    with pytest.raises(guard.FinalTestError):
+        guard.cut_final_test(_frame("2025-09-20", 30), True, "e10", log_path=log)

@@ -299,7 +299,7 @@ def check_acceptance(
 ) -> dict[str, bool]:
     """KURALLAR.md §5 eşiklerine karşı geçti/kaldı (eşikler `research.config.ACCEPTANCE`)."""
     a = ACCEPTANCE
-    ok = lambda cond: bool(cond) if cond == cond else False  # NaN -> False  # noqa: E731
+    ok = lambda cond: bool(cond) if cond == cond else False  # NaN -> False
     return {
         "net_sharpe": ok(sharpe_net >= (a["sharpe_portfolio"] if is_portfolio else a["sharpe_arm"])),
         "deflated_sharpe": ok(deflated >= a["deflated_sharpe"]),

@@ -10,15 +10,20 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from app.ml.features import FEATURE_COLUMNS
 
 from .models import (
+    DEPTH_BAND_COLUMNS,
+    OI_DETAIL_COLUMNS,
+    AppStateRow,
     BacktestRun,
     BacktestTradeRow,
+    DepthBandSnapshot,
     FeatureSnapshot,
+    LiquidationEvent,
     MacroSnapshot,
     OHLCVRaw,
+    OIDetailSnapshot,
     OpenInterestSnapshot,
     OptimizationRun,
     OrderbookSnapshot,
-    AppStateRow,
     SignalRecord,
     TradeRecord,
 )
@@ -842,3 +847,79 @@ def save_portfolio_state(state: dict) -> None:
 
 def load_portfolio_state() -> dict | None:
     return load_app_state("portfolio")
+
+
+# ---------------------------------------------------------------- ileriye dönük toplayıcılar (forward-only)
+def record_liquidation_events(rows: list[dict], raise_on_error: bool = False) -> int:
+    """Tasfiye olaylarını toplu yazar (aynı olay tekrar gelirse yok sayılır). Döner: gönderilen satır sayısı (DB kapalıysa 0).
+    `raise_on_error=True`: DB hatasında istisnayı YUTMAZ (toplayıcı satırları geri koyup yeniden denesin)."""
+    if not is_enabled() or not rows:
+        return 0
+    try:
+        with session_scope() as db:
+            dialect = db.bind.dialect.name if db.bind is not None else ""
+            if dialect in ("postgresql", "sqlite"):
+                if dialect == "postgresql":
+                    from sqlalchemy.dialects.postgresql import insert as _insert
+                else:
+                    from sqlalchemy.dialects.sqlite import insert as _insert
+                db.execute(_insert(LiquidationEvent.__table__).values(rows).on_conflict_do_nothing())
+            else:
+                for row in rows:
+                    db.add(LiquidationEvent(**row))
+        return len(rows)
+    except SQLAlchemyError:
+        logger.exception("liquidation events persist failed")
+        if raise_on_error:
+            raise
+        return 0
+
+
+def _record_snapshot(model, symbol: str, values: dict, columns: list[str], what: str) -> None:
+    if not is_enabled():
+        return
+    try:
+        with session_scope() as db:
+            db.add(model(symbol=symbol, **{col: values.get(col) for col in columns}))
+    except IntegrityError:
+        pass  # aynı (time, symbol) tekrar yazılmaya çalışıldı
+    except SQLAlchemyError:
+        logger.exception("%s persist failed for %s", what, symbol)
+
+
+def record_depth_band_snapshot(symbol: str, values: dict) -> None:
+    _record_snapshot(DepthBandSnapshot, symbol, values, ["mid_price", "spread_bps", "depth_coverage_bp", *DEPTH_BAND_COLUMNS], "depth band snapshot")
+
+
+def record_oi_detail_snapshot(symbol: str, values: dict) -> None:
+    _record_snapshot(OIDetailSnapshot, symbol, values, OI_DETAIL_COLUMNS, "oi detail snapshot")
+
+
+def _read_frame(model, symbols: list[str] | None, since: datetime | None) -> pd.DataFrame:
+    if not is_enabled():
+        return pd.DataFrame()
+    try:
+        with session_scope() as db:
+            query = select(model).order_by(model.time)
+            if symbols:
+                query = query.where(model.symbol.in_(symbols))
+            if since is not None:
+                query = query.where(model.time >= since)
+            rows = db.execute(query).scalars().all()
+            cols = [c.name for c in model.__table__.columns if c.name != "id"]
+            return pd.DataFrame([{c: getattr(r, c) for c in cols} for r in rows], columns=cols)
+    except SQLAlchemyError:
+        logger.exception("forward data read failed (%s)", model.__tablename__)
+        return pd.DataFrame()
+
+
+def get_liquidation_events(symbols: list[str] | None = None, since: datetime | None = None) -> pd.DataFrame:
+    return _read_frame(LiquidationEvent, symbols, since)
+
+
+def get_depth_band_snapshots(symbols: list[str] | None = None, since: datetime | None = None) -> pd.DataFrame:
+    return _read_frame(DepthBandSnapshot, symbols, since)
+
+
+def get_oi_detail_snapshots(symbols: list[str] | None = None, since: datetime | None = None) -> pd.DataFrame:
+    return _read_frame(OIDetailSnapshot, symbols, since)
