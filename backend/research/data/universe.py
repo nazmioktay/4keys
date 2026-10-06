@@ -83,3 +83,27 @@ def ever_in_top_n(quote_volume: pd.DataFrame, n: int, step_days: int = 30, **kwa
 def slippage_tier_symbols(date, quote_volume: pd.DataFrame, top: int = 20) -> set[str]:
     """O günkü ilk `top` sembol (kayma kademesi; noktasal-zamanlı)."""
     return set(universe_at(date, top, quote_volume))
+
+
+def universe_membership(
+    quote_volume: pd.DataFrame, n: int, window_days: int = 30, min_history_days: int = 90, min_window_obs: int = 10
+) -> pd.DataFrame:
+    """`universe_at`'in VEKTÖREL karşılığı: tarih × sembol boolean üyelik. Her tarih d için yalnızca `< d` verisi
+    (`shift(1)` + geriye doğru rolling) kullanılır; sonuç her tarihte `universe_at(d, n, ...)` ile AYNIDIR (testle doğrulanır).
+    `quote_volume` günlük sürekli olmalı (eksik günler NaN) — gerekirse burada tam takvime yeniden indekslenir."""
+    qv = quote_volume.sort_index()
+    full = pd.date_range(qv.index.min(), qv.index.max(), freq="D")
+    qv = qv.reindex(full)
+    mean_vol = qv.shift(1).rolling(window_days, min_periods=min_window_obs).mean()
+    first_seen = qv.apply(lambda col: col.first_valid_index())
+    names = {s for s in qv.columns if is_basic_eligible(s)} - _leveraged_tokens(set(qv.columns))
+    eligible = pd.Series({s: s in names for s in qv.columns})
+    age_ok = pd.DataFrame(
+        {s: ((full - first_seen[s]).days >= min_history_days) if pd.notna(first_seen[s]) else False for s in qv.columns}, index=full
+    )
+    score = mean_vol.where(age_ok & eligible.reindex(qv.columns).to_numpy()[None, :])
+    # satır başına ilk n (eşitlikte sembol adına göre): sıralamayı sembol adıyla kararlı kıl
+    cols = sorted(score.columns)
+    score = score[cols]
+    ranks = score.rank(axis=1, method="first", ascending=False)
+    return ranks.le(n) & score.notna()

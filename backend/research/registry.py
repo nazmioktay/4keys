@@ -41,6 +41,11 @@ def _read_registry(path: Path) -> dict:
         return {"total_trials": 0, "experiments": []}
 
 
+def is_registered(experiment_id: str, registry_file: Path | None = None, results_dir: Path | None = None) -> bool:
+    reg = _read_registry(Path(registry_file or config.REGISTRY_FILE))
+    return any(e["id"] == experiment_id for e in reg["experiments"]) or (Path(results_dir or config.RESULTS_DIR) / experiment_id / "metrics.json").exists()
+
+
 def current_trial_count(registry_file: Path | None = None) -> int:
     return int(_read_registry(Path(registry_file or config.REGISTRY_FILE))["total_trials"])
 
@@ -67,6 +72,7 @@ def register_experiment(
     hypothesis: str = "",
     decision: str = "",
     smoke: bool = False,
+    question: str | None = None,
     results_dir: Path | None = None,
     log_path: Path | None = None,
     registry_file: Path | None = None,
@@ -88,9 +94,9 @@ def register_experiment(
 
     with _LOCK:
         out_dir = results_dir / experiment_id
-        if out_dir.exists():
-            raise ExperimentExistsError(f"{experiment_id} zaten kayıtlı (kayıtlar değiştirilmez)")
         registry = _read_registry(registry_file)
+        if (out_dir / "metrics.json").exists() or any(e["id"] == experiment_id for e in registry["experiments"]):
+            raise ExperimentExistsError(f"{experiment_id} zaten kayıtlı (kayıtlar değiştirilmez)")
         before = int(registry["total_trials"])
         after = before + n_variants
 
@@ -103,7 +109,7 @@ def register_experiment(
         full_metrics.update({"trials_before": before, "trials_after": after, "n_variants": n_variants,
                              "data_snapshot_hash": data_hash, "git_commit": commit})
 
-        out_dir.mkdir(parents=True)
+        out_dir.mkdir(parents=True, exist_ok=True)  # koşucu oof.parquet'i önceden yazmış olabilir
         (out_dir / "config.yaml").write_text(yaml.safe_dump(experiment_config, allow_unicode=True, sort_keys=True), encoding="utf-8")
         (out_dir / "metrics.json").write_text(json.dumps(full_metrics, indent=1, default=str), encoding="utf-8")
         frame = daily_returns.to_frame("return") if isinstance(daily_returns, pd.Series) else daily_returns
@@ -111,7 +117,7 @@ def register_experiment(
 
         registry["total_trials"] = after
         registry["experiments"].append(
-            {"id": experiment_id, "n_variants": n_variants, "trials_before": before, "trials_after": after,
+            {"id": experiment_id, "question": question, "n_variants": n_variants, "trials_before": before, "trials_after": after,
              "date": datetime.now(timezone.utc).isoformat(timespec="seconds"), "git_commit": commit, "data_hash": data_hash}
         )
         registry_file.parent.mkdir(parents=True, exist_ok=True)

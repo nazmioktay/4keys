@@ -36,6 +36,10 @@ class Source(ABC):
         """Kaynağın en erken tarihi (bilinmiyorsa None)."""
         return None
 
+    def accumulated_days(self) -> float | None:
+        """forward_only kaynaklar için şimdiye dek BİRİKEN veri süresi (gün); koşucu 365 günden azını reddeder."""
+        return None
+
     @abstractmethod
     def fetch(self, start: pd.Timestamp, end: pd.Timestamp, symbols: list[str] | None = None) -> Any:
         """Ham veriyi döner (ağ/dosya/DB). `symbols` sembol-bazlı kaynaklar için istenen evren."""
