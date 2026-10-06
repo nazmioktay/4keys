@@ -11,6 +11,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from ..guard import cut_final_test
 from .base import Source
 from .registry import register_source
 
@@ -56,6 +57,9 @@ class _ForwardSource(Source):
         df = self._read()
         if symbols is not None and len(df):
             df = df[df["symbol"].isin(symbols)]
+        if len(df):  # kilitli pencereler (etkin bölge) KESİLİR: T0 öncesi satır diff()/ısınma için bile kullanılmaz (KURALLAR §10)
+            t = pd.DatetimeIndex(pd.to_datetime(df["time"], utc=True)).tz_convert(None)
+            df = cut_final_test(df.set_index(t)).reset_index(drop=True)
         return df
 
 

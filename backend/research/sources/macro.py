@@ -14,6 +14,7 @@ from typing import Callable
 import numpy as np
 import pandas as pd
 
+from ..guard import cut_final_test
 from .base import MARKET, Source
 from .registry import register_source
 
@@ -74,6 +75,7 @@ class Macro(Source):
         )
 
         raw = self.fetch(dates.min() - pd.Timedelta(days=60), dates.max())
+        raw = {k: v for k, v in ((k, cut_final_test(v)) for k, v in (raw or {}).items()) if len(v)}  # kilitli pencereler (etkin bölge) KESİLİR
         if not raw:
             return pd.DataFrame(columns=["date", "symbol", "available_at"])
         idx = sorted(set().union(*[set(s.index) for s in raw.values()]))

@@ -14,6 +14,7 @@ import pandas as pd
 import requests
 
 from .. import config
+from ..guard import cut_final_test
 from .base import MARKET, Source
 from .registry import register_source
 
@@ -67,6 +68,7 @@ class SentimentFng(Source):
         df = pd.DataFrame(self.fetch(dates.min(), dates.max()))
         df["date"] = pd.to_datetime(pd.to_numeric(df["timestamp"]), unit="s", utc=True).dt.tz_convert(None).dt.floor("D")
         df["value"] = pd.to_numeric(df["value"]) / 100.0
+        df = cut_final_test(df.set_index("date")).reset_index()  # kilitli pencereler (etkin bölge) KESİLİR
         df = df.drop_duplicates("date").sort_values("date").reset_index(drop=True)
         panel = pd.DataFrame(
             {"date": df["date"], "symbol": MARKET, "fng": df["value"], "fng_chg_7": df["value"].diff(7),

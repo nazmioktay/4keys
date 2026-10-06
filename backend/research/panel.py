@@ -1,6 +1,7 @@
 """Deney paneli: noktasal-zamanlı evren + kaynak özellikleri + hedef -> (date, symbol) indeksli X, y.
 
-Nihai pencere (>= 2025-10-01) yükleyicilerde kesilir; ek olarak `period.end` ihlali burada reddedilir."""
+Kilitli pencereler yükleyicilerde ETKİN bölgeye göre kesilir (bkz. `guard`); ek olarak `period` ihlali burada reddedilir.
+Panel, config'teki bölgede (`zone`: main | forward) kurulur ve hangi bölgede kurulduğunu taşır."""
 
 from __future__ import annotations
 
@@ -10,6 +11,7 @@ import pandas as pd
 
 from .data import store
 from .data.universe import universe_membership
+from . import guard
 from .guard import assert_no_final_test
 from .sources import cache as source_cache
 from .sources.base import Source, validate_panel
@@ -25,7 +27,11 @@ class ForwardOnlyTooShortError(RuntimeError):
 
 
 class ForwardOnlyNoOverlapError(RuntimeError):
-    """forward_only kaynak verisi, deney döneminde (period.end < nihai pencere) hiç satır üretmiyor."""
+    """forward_only kaynak verisi, deney döneminde hiç satır üretmiyor."""
+
+
+class ZoneMismatchError(ValueError):
+    """forward_only kaynak <-> `zone: forward` tutarsızlığı (KURALLAR.md §10)."""
 
 
 @dataclass
@@ -41,6 +47,7 @@ class Panel:
     candidates: list[str] = field(default_factory=list)
     data_hash: str = ""
     qv_all: pd.DataFrame | None = None
+    zone: str = "main"
 
 
 def _resolve_sources(specs: list) -> list[Source]:
@@ -63,11 +70,32 @@ def check_forward_only(sources: list[Source], min_days: int = 365) -> None:
                 )
 
 
+def check_zone(sources: list[Source], zone: str) -> None:
+    """forward_only kaynak YALNIZCA `zone: forward` deneyde; forward bölgesi YALNIZCA forward_only kaynak içeren deneyde
+    kullanılır (aksi halde ana araştırma forward bölgesini ek veri olarak kullanırdı)."""
+    fwd = [s.name for s in sources if s.forward_only]
+    if fwd and zone != "forward":
+        raise ZoneMismatchError(
+            f"forward_only kaynak(lar) {fwd} yalnızca `zone: forward` deneylerde kullanılabilir (KURALLAR.md §10)."
+        )
+    if zone == "forward" and not fwd:
+        raise ZoneMismatchError(
+            "`zone: forward` yalnızca en az bir forward_only kaynak içeren deneyler içindir; ana araştırma forward bölgesine giremez "
+            "(KURALLAR.md §10)."
+        )
+
+
 def build_panel(cfg: dict) -> Panel:
     """`cfg`: doğrulanmış deney yapılandırması (bkz. runner.load_config)."""
+    with guard.zone(cfg.get("zone", "main")) as zone:
+        return _build_panel(cfg, zone)
+
+
+def _build_panel(cfg: dict, zone: str) -> Panel:
     start, end = pd.Timestamp(cfg["period"]["start"]), pd.Timestamp(cfg["period"]["end"])
-    assert_no_final_test(pd.DatetimeIndex([end]))
+    assert_no_final_test(pd.DatetimeIndex([start, end]))  # dönem ETKİN bölgenin izinli aralığında olmalı
     sources = _resolve_sources(cfg["sources"])
+    check_zone(sources, zone)
     check_forward_only(sources)
     target = get_target(cfg["target"]["name"], **{k: v for k, v in cfg["target"].items() if k != "name"})
 
@@ -95,9 +123,8 @@ def build_panel(cfg: dict) -> Panel:
         if src.forward_only and (panel.empty or not panel["date"].isin(dates).any()):
             raise ForwardOnlyNoOverlapError(
                 f"'{src.name}' forward_only kaynağı deney döneminde ({dates.min():%Y-%m-%d} .. {dates.max():%Y-%m-%d}) hiç veri üretmiyor: "
-                "forward_only veri yalnızca toplamaya başlandığı andan itibaren (nihai test penceresinden SONRA) birikir. "
-                "Bu kaynaklar ancak nihai pencere açıldığında (Aşama 5) veya KURALLAR.md'ye eklenecek ayrı bir 'ileriye dönük doğrulama' "
-                "kuralıyla kullanılabilir (bkz. KURALLAR.md §9, açık karar)."
+                "forward_only veri yalnızca toplamaya başlandığı andan itibaren birikir; dönem, toplanan verinin bulunduğu "
+                "forward keşif aralığında olmalı (KURALLAR.md §10)."
             )
     merged = merge_sources(decisions, [(s, panels[s.name]) for s in sources])
 
@@ -108,4 +135,4 @@ def build_panel(cfg: dict) -> Panel:
     y_long.index = y_long.index.set_names(["date", "symbol"])
     y = y_long.reindex(idx)
     return Panel(X=X, y=y, merged=merged.set_index(idx), membership=membership, prices={k: v for k, v in prices.items()}, sources=sources,
-                 panels=panels, target=target, candidates=candidates, data_hash=data_hash, qv_all=qv_all)
+                 panels=panels, target=target, candidates=candidates, data_hash=data_hash, qv_all=qv_all, zone=zone)

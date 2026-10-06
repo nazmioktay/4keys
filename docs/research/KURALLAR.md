@@ -8,8 +8,9 @@ Kod: `backend/research/`. Sonuçlar: `research/results/<deney_id>/`. Özet günl
 Canlı/paper koduna (`backend/app/**`) araştırma amacıyla dokunulmaz.
 
 ## 1. Nihai test penceresi
-- **2025-10-01 ve sonrası.** Hiçbir deney, parametre seçimi ya da grafik bu dönemi kullanamaz.
-  Yalnızca Aşama 5'te BİR KEZ açılır.
+- **2025-10-01 ve sonrası** (2026-10-07 itibarıyla üst sınırı **2026-11-01**; o tarihten sonrası §10'daki ayrı ileriye dönük
+  bölgedir). Hiçbir deney, parametre seçimi ya da grafik bu dönemi kullanamaz. Yalnızca Aşama 5'te BİR KEZ açılır; açıldığında da
+  2026-11-01 ve sonrasını GÖSTERMEZ.
 - Kodla zorlanır (`research.config.FINAL_TEST_START`, `research.data.store`):
   veri yükleyici varsayılan olarak bu tarihten sonrasını KESER. Açmak için
   `allow_final_test=True` + `final_test_experiment_id=<id>` gerekir ve `docs/research/deneyler.md`
@@ -79,11 +80,41 @@ içinde tek yerde durur ve bu belgeyle birebir aynı olmalıdır.
   (varsayılan: her ablasyon kayıtlı bir config). Bütçe, kayıt anında **kilit altında** zorlanır (eşzamanlı koşular 40'ı aşamaz).
 - **`question` normalize edilir** (`strip` + küçük harf; yalnızca `a-z0-9_.-`): "Vol_Tahmini " ile "vol_tahmini" aynı bütçedir.
 - **`final_test` kayıt satırı tam eşleşir:** `FINAL-TEST-ACILDI e1` satırı `e10`'u AÇMAZ.
-- **AÇIK KARAR (kullanıcıya):** `forward_only` veri nihai test penceresinden (>= 2025-10-01) SONRA birikir, oysa deney dönemi
-  (`period.end`) bu pencereye giremez. Sonuç: bu kaynaklar mevcut kurallarla hiçbir deneyde kullanılamaz — koşucu bunu sessizce boş
-  özellik üretmek yerine `ForwardOnlyNoOverlapError` ile REDDEDER. Seçenekler: (a) forward_only verileri yalnızca nihai pencere açıldığında
-  (Aşama 5) kullanmak; (b) KURALLAR'a ayrı, önceden kayıtlı bir "ileriye dönük doğrulama" penceresi eklemek (ör. toplama başlangıcından itibaren
-  ilk 12 ay yalnızca keşif, sonrası kilitli test). Nihai pencere kilidini bu karar verilmeden gevşetmiyoruz.
+- **forward_only ile nihai pencere çakışması — KARAR VERİLDİ (2026-10-07, seçenek b):** forward_only veri nihai pencereden sonra
+  biriktiği için ayrı, önceden kayıtlı bir ileriye dönük doğrulama bölgesi tanımlandı. Ayrıntılar §10'da.
 - **Kod sınırı notu:** araştırma kodu `app/`'e yalnızca iki yerden bağlanır: `app/forwardcollect` (toplayıcı, opt-in) ve
   `research/sources/forward.py` (onun tablolarını `app.db.repository` üzerinden okur). Başka araştırma modülü `app/`'e dokunmaz.
 
+## 10. İleriye dönük doğrulama bölgesi (forward_only veri) — 2026-10-07'de önceden kayıtlı
+Bu bölüm, forward_only verinin (tasfiye akışı, emir defteri derinlik bantları, ayrıntılı açık pozisyon) hiçbir sonuç görülmeden
+ÖNCE kayda geçirilmiş kullanım kuralıdır; §5 gibi sonuç görüldükten sonra DEĞİŞTİRİLEMEZ.
+
+Takvim (`research/config.py` ile birebir aynı):
+| Dönem | Aralık | Kullanım |
+|---|---|---|
+| Ana araştırma | < 2025-10-01 | tüm deneyler (`zone: main`, varsayılan) |
+| Nihai test penceresi | [2025-10-01, 2026-11-01) | kilitli; yalnızca Aşama 5'te bir kez (§1) |
+| Forward keşif (T0 = 2026-11-01) | [2026-11-01, 2027-11-01) | yalnızca `zone: forward` deneyler |
+| Forward test | 2027-11-01 ve sonrası | kilitli; en erken **2028-05-01**'de bir kez açılır (>= 6 ay test verisi) |
+
+Kurallar:
+- **Bölge seçimi:** her deney config'te `zone: main | forward` taşır. forward_only kaynak YALNIZCA `zone: forward` deneyde kullanılabilir;
+  `zone: forward` YALNIZCA en az bir forward_only kaynak içeren deneyde kullanılabilir. Ana araştırma (forward_only kaynak içermeyen)
+  forward bölgesini ek veri olarak KULLANAMAZ (`ZoneMismatchError`).
+- **Sıkı kesim:** forward bölgesindeki deney YALNIZCA [T0, forward test başlangıcı) verisini görür — fiyat, funding, türev metrikleri,
+  makro ve duygu dahil. T0 öncesi (nihai pencere) özellik ısınması için bile kullanılamaz; uzun pencereli özellikler keşif döneminin
+  başında NaN kalır (ısınma keşif döneminden yenir). Ana bölge forward bölgesini, forward bölgesi nihai pencereyi göremez.
+  Bu kesim forward_only DB kaynaklarına da uygulanır (T0 öncesi toplanan satırlar kullanılmaz).
+- **Etkin keşif süresi (bilinen sonuç):** noktasal-zamanlı evren bir sembolü en az 90 günlük geçmişten sonra alır; forward bölgesinde
+  geçmiş T0'da başladığı için evren ~2027-01-30'a kadar boştur. Etkin keşif ~[2027-01-30, 2027-11-01) (~9 ay) olur; `cv.min_train_days`
+  buna göre küçültülmelidir (koşucu, dönemden uzun `min_train_days`'i reddeder). Bu, sıkı kesimin bilinçli bedelidir.
+- **12 ay kuralı (§9) sürer:** forward_only kaynak 365 gün birikmeden deney koşmaz. T0 ile toplama başlangıcı aynı değilse T0
+  KAYDIRILMAZ (önceden kayıtlı); keşif dönemi daha az veriyle yapılır.
+- **Forward testi açmak:** `allow_final_test=True` + `final_test_experiment_id=<id>` + `deneyler.md` içinde tam eşleşen
+  `FORWARD-TEST-ACILDI <id>` satırı + bugün >= 2028-05-01. Bir kez açılır; açılınca [T0, ..) görünür. Kilit (`research.guard`) bunu
+  zorlar; ancak nihai testte olduğu gibi bu açılışı uçtan uca yapan bir koşucu HENÜZ YOK (deney koşucusu her zaman kilitli modda
+  çalışır) — Aşama 5 / forward test koşucusu ayrıca yazılacak.
+- **Bütçe ve sayaç:** forward deneyleri de §9 bütçesine (soru başına 40 config) ve global deneme sayacına (Deflated Sharpe) tabidir.
+- **Kabul eşikleri** §5'tekiyle aynıdır.
+- **Uygulama:** `research.guard` (bölge bağlamı `guard.zone(...)`, `zone_bounds`, `cut_final_test`, `assert_no_final_test`); koşucu ve
+  ablasyon deneyi config'teki bölgede çalıştırır; yükleyiciler, motor, rapor ve kaynaklar etkin bölgenin sınırına uyar.

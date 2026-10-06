@@ -157,7 +157,7 @@ def test_run_rejects_final_test_window_and_forward_only_sources_without_history(
 
     try:
         with pytest.raises(ForwardOnlyTooShortError, match="forward_only"):
-            build_panel(runner.load_config(_cfg(sources=["fwd_toy"])))
+            build_panel(runner.load_config(_cfg(sources=["fwd_toy"], zone="forward", period={"start": "2026-11-01", "end": "2027-10-31"})))
     finally:
         from research.sources.registry import SOURCE_REGISTRY
 
@@ -170,16 +170,16 @@ def test_example_config_is_valid_and_smoke(tmp_path):
     assert yaml.safe_load((config.BACKEND_ROOT / "research" / "configs" / "ornek_vol.yaml").read_text(encoding="utf-8"))["period"]["end"] is not None
 
 
-def test_forward_only_source_without_overlap_with_the_research_period_fails_loudly(market, monkeypatch):
-    """Çelişki (denetim bulgusu): forward_only veri nihai pencereden SONRA birikir; period.end < 2025-10-01 ile hiç kesişmez.
-    Sessizce boş/NaN özellik üretmek yerine YÜKSEK SESLE reddedilmeli."""
+def test_forward_only_source_in_the_main_zone_fails_loudly(market, monkeypatch):
+    """forward_only veri nihai pencereden SONRA birikir; ana bölgede (period < 2025-10-01) kullanılamaz. Sessizce boş/NaN özellik
+    üretmek yerine YÜKSEK SESLE reddedilmeli: KURALLAR.md §10 -> yalnızca `zone: forward` deneylerde."""
     from datetime import datetime, timezone
 
     from app.core.config import settings
     from app.db import repository as dbrepo
     from app.db.models import OIDetailSnapshot
     from app.db.session import init_db, reset_for_tests, session_scope
-    from research.panel import ForwardOnlyNoOverlapError
+    from research.panel import ZoneMismatchError
 
     monkeypatch.setattr(settings, "database_url", "sqlite:///:memory:")
     reset_for_tests()
@@ -191,7 +191,7 @@ def test_forward_only_source_without_overlap_with_the_research_period_fails_loud
             rows = sess.query(OIDetailSnapshot).order_by(OIDetailSnapshot.id).all()
             rows[0].time = datetime(2025, 10, 5, tzinfo=timezone.utc)
             rows[1].time = datetime(2026, 10, 5, tzinfo=timezone.utc)  # 12 ayı aşkın birikim -> ForwardOnlyTooShort geçer
-        with pytest.raises(ForwardOnlyNoOverlapError, match="nihai test penceresinden SONRA"):
+        with pytest.raises(ZoneMismatchError, match="zone: forward"):
             build_panel(runner.load_config(_cfg(sources=["ohlcv_core", "oi_detail"])))
     finally:
         reset_for_tests()
