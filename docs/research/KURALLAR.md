@@ -65,3 +65,13 @@ içinde tek yerde durur ve bu belgeyle birebir aynı olmalıdır.
 `research/data/` veri (indirme, parquet, nihai pencere kilidi, noktasal-zamanlı evren, kalite raporu, sembol limitleri) ·
 `research/engine.py` vektörel portföy motoru · `research/stats.py` istatistik araç kutusu ·
 `research/registry.py` deney kaydı · `research/report.py` rapor · `research/smoke.py` altyapı kontrolü.
+
+## 9. Deney bütçesi, ileriye dönük veri ve geçersizlik (Aşama 1 çerçevesi)
+- **Deneme bütçesi:** soru (`question`, ör. "vol_tahmini") başına en fazla **40 config** (ablasyonlar dahil). Bütçe dolunca yeni deneme
+  YAPILMAZ; mevcut sonuçlardan karar verilir (`research.budget`, `BudgetExceededError`). `smoke` deneyler sayılmaz.
+- **forward_only veri:** geçmişi olmayan kaynaklar (tasfiye akışı, emir defteri derinliği, ayrıntılı açık pozisyon) **12 aylık veri
+  birikmeden** hiçbir deneyde kullanılamaz (`research.panel.check_forward_only`).
+- **Sızıntı testleri:** karıştırılmış hedef, `available_at` denetimi veya tekrarlanabilirlik testinden biri başarısızsa deney **GEÇERSİZ**
+  sayılır (yine kaydedilir, sayaç artar, karar "GEÇERSİZ: ..."); +1 gün gecikme testi yalnızca UYARIDIR (kalıcı hedeflerde güçsüzdür).
+- **Eşikler yine önceden kayıtlıdır (§5);** çerçeve yalnızca ölçer, sonuç görüldükten sonra değiştirilemez.
+
