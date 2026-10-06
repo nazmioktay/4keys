@@ -91,6 +91,16 @@ def test_parse_kline_zip_handles_microsecond_timestamps_without_header():
     assert df.index[0] == pd.Timestamp("2021-01-01")
 
 
+def test_timestamp_unit_is_detected_per_value_and_impossible_dates_are_rejected():
+    sec = int(pd.Timestamp("2023-01-02").timestamp())
+    ms = sec * 1000
+    us = ms * 1000
+    idx = download._to_naive_utc(pd.Series([str(sec), str(ms), str(us)]))
+    assert list(idx) == [pd.Timestamp("2023-01-02")] * 3  # saniye / ms / µs karışık dosya (KLAYUSDT spot)
+    with pytest.raises(ValueError):
+        download._to_naive_utc(pd.Series(["1000"]))  # 1970 -> olanaksız
+
+
 def test_parse_funding_zip_reads_rate_and_interval():
     csv = "calc_time,funding_interval_hours,last_funding_rate\n1609459200000,8,0.0001\n1609488000000,8,-0.00005"
     df = download.parse_funding_zip(_zip(csv))

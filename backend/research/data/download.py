@@ -22,6 +22,7 @@ from datetime import datetime, timezone
 from typing import Iterator
 from xml.etree import ElementTree
 
+import numpy as np
 import pandas as pd
 import requests
 
@@ -109,9 +110,15 @@ def list_symbol_dirs(http: Http, market_path: str) -> list[str]:
 
 # ------------------------------------------------------------------ ayrıştırma
 def _to_naive_utc(series: pd.Series) -> pd.DatetimeIndex:
-    vals = pd.to_numeric(series, errors="coerce")
-    unit = "us" if vals.dropna().abs().max() > 1e14 else "ms"  # 2025 sonrası spot dosyaları mikrosaniye
-    return pd.DatetimeIndex(pd.to_datetime(vals, unit=unit, utc=True).dt.tz_convert(None))
+    """Zaman damgası birimini DEĞER BAZINDA tespit eder: saniye (< 1e11), milisaniye, mikrosaniye (> 1e14;
+    2025 sonrası spot dosyaları). Arşivde aynı dosyada karışık birimler görüldü (KLAYUSDT spot)."""
+    vals = pd.to_numeric(series, errors="coerce").to_numpy(dtype=float)
+    ms = np.where(vals > 1e14, vals / 1000.0, np.where(vals < 1e11, vals * 1000.0, vals))
+    idx = pd.DatetimeIndex(pd.to_datetime(ms, unit="ms", utc=True).tz_convert(None))
+    valid = idx[~pd.isna(idx)]
+    if len(valid) and (valid.min() < pd.Timestamp("2015-01-01") or valid.max() > pd.Timestamp.now() + pd.Timedelta(days=3)):
+        raise ValueError(f"olanaksız zaman damgası aralığı: {valid.min()} .. {valid.max()}")
+    return idx
 
 
 def _read_zip_csv(content: bytes) -> pd.DataFrame:
@@ -363,9 +370,11 @@ def run(args: argparse.Namespace, http: Http | None = None) -> dict:
             "snapshot_hash": store.snapshot_hash(),
         }
     )
-    out = store.cache_dir() / "download_meta.json"
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(meta, indent=1, default=str), encoding="utf-8")
+    out_dir = store.cache_dir()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    # Her çalıştırma ayrı dosyaya yazılır (sonraki küçük indirmeler tam indirmenin kaydını ezmesin).
+    stamp = started.strftime("%Y%m%dT%H%M%S")
+    (out_dir / f"download_meta_{stamp}.json").write_text(json.dumps(meta, indent=1, default=str), encoding="utf-8")
     return meta
 
 
