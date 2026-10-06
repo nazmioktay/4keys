@@ -1,5 +1,5 @@
-"""Zorunlu tasfiye akışı (`wss://fstream.binance.com/ws/!forceOrder@arr`): arka plan thread'inde asyncio döngüsü, belirli
-aralıklarla toplu DB yazımı, üstel geri çekilmeli yeniden bağlanma, kapanış bayrağı.
+"""Zorunlu tasfiye akışı (`wss://fstream.binance.com/market/ws/!forceOrder@arr`): arka plan thread'inde asyncio döngüsü, belirli
+aralıklarla toplu DB yazımı, üstel geri çekilmeli yeniden bağlanma, sessizlik bekçisi, kapanış bayrağı.
 
 Test edilebilirlik: bağlantı fabrikası (`connect`) ve yazıcı (`flush_fn`) enjekte edilir; `process_stream` bir mesaj
 akışını thread/ağ olmadan işler."""
@@ -20,7 +20,13 @@ from app.db import repository as db
 
 logger = logging.getLogger(__name__)
 
-URL = "wss://fstream.binance.com/ws/!forceOrder@arr"
+# Binance USDⓈ-M piyasa akışları `/market/` yoluna taşındı: eski `/ws/...` yolu bağlantıyı AÇAR ama hiç mesaj göndermez
+# (2026-10-07'de doğrulandı: eski yolda btcusdt@aggTrade bile 0 mesaj, `/market/ws/` yolunda tasfiye mesajları geliyor).
+URL = "wss://fstream.binance.com/market/ws/!forceOrder@arr"
+
+
+class StaleStreamError(RuntimeError):
+    """Bağlantı açık ama `idle_timeout` boyunca hiç mesaj gelmedi (ör. akış adresi değişti): yeniden bağlanılır."""
 
 
 def parse_force_order(message: str | bytes | dict) -> dict | None:
@@ -59,6 +65,7 @@ class LiquidationCollector:
         max_backoff: float = 60.0,
         poll_seconds: float = 1.0,
         max_buffer: int = 100_000,
+        idle_timeout: float | None = 900.0,
     ) -> None:
         self.symbols = {s.upper() for s in symbols} if symbols else None  # None = tüm semboller
         self.flush_seconds = flush_seconds
@@ -67,13 +74,15 @@ class LiquidationCollector:
         self._flush_fn = flush_fn or (lambda rows: db.record_liquidation_events(rows, raise_on_error=True))
         self._poll_seconds = poll_seconds
         self._max_buffer = max_buffer
+        # Tüm piyasa akışında 15 dk hiç tasfiye olmaması pratikte olmaz: sessizlik = kopuk/yanlış akış (sessizce boş kalmasın).
+        self.idle_timeout = idle_timeout
         self._sleep = sleep or asyncio.sleep
         self.max_backoff = max_backoff
         self._buffer: list[dict] = []
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
-        self.stats = {"messages": 0, "parsed": 0, "flushed": 0, "reconnects": 0, "dropped": 0}
+        self.stats = {"messages": 0, "parsed": 0, "flushed": 0, "reconnects": 0, "dropped": 0, "stale": 0}
 
     # ---- çekirdek (test edilebilir) --------------------------------------------------------
     def ingest(self, message) -> bool:
@@ -112,9 +121,10 @@ class LiquidationCollector:
 
     async def process_stream(self, ws) -> None:
         """Bir bağlantının mesajlarını bitene (veya `stop()`'a) kadar işler. Okuma `poll_seconds` zaman aşımıyla beklenir:
-        mesaj gelmese de durdurma bayrağı ve zaman bazlı flush kontrol edilir; durdurulursa bağlantı kapatılır."""
+        mesaj gelmese de durdurma bayrağı ve zaman bazlı flush kontrol edilir; durdurulursa bağlantı kapatılır.
+        `idle_timeout` boyunca hiç mesaj gelmezse `StaleStreamError` (uyarı loglanır, `run_forever` yeniden bağlanır)."""
         it = ws.__aiter__()
-        last_flush = time.monotonic()
+        last_flush = last_message = time.monotonic()
         pending = None
         try:
             while not self._stop.is_set():
@@ -128,7 +138,11 @@ class LiquidationCollector:
                         pending = None
                         break
                     pending = None
+                    last_message = time.monotonic()
                     self.ingest(message)
+                elif self.idle_timeout is not None and time.monotonic() - last_message >= self.idle_timeout:
+                    self.stats["stale"] += 1
+                    raise StaleStreamError(f"tasfiye akışı {self.idle_timeout:.0f} sn boyunca hiç mesaj göndermedi")
                 if time.monotonic() - last_flush >= self.flush_seconds:
                     self.flush()
                     last_flush = time.monotonic()
@@ -174,7 +188,8 @@ class LiquidationCollector:
     def _default_connect(self):
         import websockets
 
-        return websockets.connect(URL, ping_interval=20, ping_timeout=20)
+        # close_timeout: kapanış el sıkışması varsayılan 10 sn'ye kadar bekler; stop() (5 sn) içinde bitsin ki son tampon yazılsın.
+        return websockets.connect(URL, ping_interval=20, ping_timeout=20, close_timeout=2)
 
     def start(self) -> None:
         if self._thread is not None and self._thread.is_alive():

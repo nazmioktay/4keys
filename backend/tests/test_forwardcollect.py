@@ -306,3 +306,85 @@ def test_forward_collectors_are_not_started_when_the_database_is_not_configured(
     sched = start_scheduler(enabled=True)
     assert sched.get_job(jobs.FORWARD_DEPTH_JOB_ID) is None and sched.get_job(jobs.FORWARD_OI_DETAIL_JOB_ID) is None
     assert _quiet_scheduler == []  # DB yokken veri yazılamaz: akış da açılmaz
+
+
+# ---------------------------------------------------------------- sessizlik bekçisi (akış adresi değişince sessizce boş kalmasın)
+class _SilentWS:
+    """Bağlantıyı açar ama hiç mesaj göndermez (Binance'in eski `/ws/` yolunun davranışı)."""
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    def __aiter__(self):
+        return self._gen()
+
+    async def _gen(self):
+        while True:
+            await asyncio.sleep(3600)
+            yield _msg()
+
+
+def test_silent_stream_raises_stale_error_after_idle_timeout():
+    c = liquidations.LiquidationCollector(flush_fn=lambda rows: len(rows), poll_seconds=0.02, idle_timeout=0.15)
+    with pytest.raises(liquidations.StaleStreamError, match="hiç mesaj göndermedi"):
+        asyncio.run(asyncio.wait_for(c.process_stream(_SilentWS()), timeout=5))
+    assert c.stats["stale"] == 1
+
+
+def test_messages_keep_the_stream_alive_and_idle_timeout_none_disables_the_watchdog():
+    async def stream():
+        for i in range(6):
+            await asyncio.sleep(0.05)  # her mesaj idle_timeout'tan (0.15 sn) önce geliyor
+            yield _msg(t=1_700_000_000_000 + i * 1000)
+
+    c = liquidations.LiquidationCollector(flush_fn=lambda rows: len(rows), poll_seconds=0.02, idle_timeout=0.15)
+    asyncio.run(c.process_stream(stream()))  # toplam 0.3 sn > idle_timeout ama mesajlar akıyor: hata YOK
+    assert c.stats["stale"] == 0 and c.stats["messages"] == 6
+
+    off = liquidations.LiquidationCollector(flush_fn=lambda rows: len(rows), poll_seconds=0.02, idle_timeout=None)
+    with pytest.raises(asyncio.TimeoutError):  # bekçi kapalı: sessiz akış sonsuza dek bekler (yalnızca dış zaman aşımı keser)
+        asyncio.run(asyncio.wait_for(off.process_stream(_SilentWS()), timeout=0.4))
+    assert off.stats["stale"] == 0
+
+
+def test_run_forever_reconnects_after_a_stale_stream_and_logs_a_warning(caplog):
+    connections = []
+
+    def connect():
+        connections.append(1)
+        if len(connections) >= 2:
+            c._stop.set()  # ikinci bağlantı denemesinde dur: yeniden bağlanmanın olduğunu kanıtlamak yeterli
+        return _SilentWS()
+
+    async def no_sleep(_):
+        return None
+
+    c = liquidations.LiquidationCollector(connect=connect, flush_fn=lambda rows: len(rows), poll_seconds=0.02, idle_timeout=0.1, sleep=no_sleep)
+    c._stop.clear()
+    with caplog.at_level("WARNING"):
+        asyncio.run(asyncio.wait_for(c.run_forever(), timeout=5))
+    assert len(connections) == 2 and c.stats["stale"] >= 1 and c.stats["reconnects"] >= 1
+    assert "tasfiye akışı koptu" in caplog.text
+
+
+def test_default_url_uses_the_market_route():
+    assert liquidations.URL == "wss://fstream.binance.com/market/ws/!forceOrder@arr"
+
+
+def test_buffered_rows_are_flushed_when_the_stream_goes_stale():
+    """Bekçi bağlantıyı keserken tamponda bekleyen satırlar KAYBOLMAZ (process_stream'in finally'si yazar)."""
+    written = []
+
+    class _OneThenSilent(_SilentWS):
+        async def _gen(self):
+            yield _msg()
+            await asyncio.sleep(3600)
+
+    c = liquidations.LiquidationCollector(flush_fn=lambda rows: written.extend(rows) or len(rows), flush_seconds=999,
+                                          poll_seconds=0.02, idle_timeout=0.15)
+    with pytest.raises(liquidations.StaleStreamError):
+        asyncio.run(asyncio.wait_for(c.process_stream(_OneThenSilent()), timeout=5))
+    assert len(written) == 1 and c.stats["flushed"] == 1

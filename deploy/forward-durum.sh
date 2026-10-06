@@ -23,19 +23,19 @@ docker exec "$CONTAINER" env | grep FORWARD || echo "   FORWARD ayarı yok -> to
 echo
 echo "==> Tablolar:"
 docker exec -i "$CONTAINER" python - <<'PY'
-from app.db import repository as r
+# Tabloları belleğe YÜKLEMEZ: yalnızca count(*) ve max(time) (canlı backend konteynerinde bellek/DB yükü olmasın).
+from sqlalchemy import func
 
-tables = [
-    ("tasfiye  ", r.get_liquidation_events),
-    ("derinlik ", r.get_depth_band_snapshots),
-    ("açık poz.", r.get_oi_detail_snapshots),
-]
-for label, reader in tables:
-    df = reader()
-    last = df["time"].max() if len(df) else "-"
-    print(f"   {label}  satır: {len(df):>7}   son kayıt (UTC): {last}")
+from app.db.models import DepthBandSnapshot, LiquidationEvent, OIDetailSnapshot
+from app.db.session import session_scope
+
+with session_scope() as s:
+    for label, model in [("tasfiye  ", LiquidationEvent), ("derinlik ", DepthBandSnapshot), ("açık poz.", OIDetailSnapshot)]:
+        n, last = s.query(func.count(), func.max(model.time)).select_from(model).one()
+        print(f"   {label}  satır: {n:>7}   son kayıt (UTC): {last or '-'}")
 PY
 
 echo
 echo "Not: derinlik ve açık pozisyon her 5 dakikada sembol başına 1 satır artar."
-echo "     Tasfiye piyasaya bağlıdır; sakin dönemde saatlerce 0 kalabilir."
+echo "     Tasfiye yalnızca seçili semboller (BTC/ETH) için yazılır; bu ikisinde sakin dönemde saatlerce"
+echo "     yeni satır gelmeyebilir. Akışın kendisi çalışıyor mu: bash deploy/forward-tani.sh"
