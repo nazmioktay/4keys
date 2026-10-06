@@ -75,3 +75,9 @@ Tasfiye akışı, emir defteri derinlik bantları ve ayrıntılı açık pozisyo
 (`FOURKEYS_FORWARD_COLLECTORS_ENABLED=true` ile açılır; semboller `FOURKEYS_FORWARD_COLLECTOR_SYMBOLS`). Yeni tablolar: `liquidation_events`,
 `depth_band_snapshots`, `oi_detail_snapshots` (mevcut tabloları değiştirmez). 12 ay birikmeden bu kaynaklarla deney yapılamaz. WebSocket
 bağlantısı birim testlerinde sahte akışla sınanır; **gerçek bağlantı elle doğrulanmalıdır** (açıp `docker logs` ve `liquidation_events` satırlarına bakın).
+
+## Yeniden üretilebilirlik notu (önbellek veri imzası)
+DB/ağ kaynaklarının (forward_only, `sentiment_fng`, `macro`) önbellek anahtarı veri imzasını içerir: `sentiment_fng` için 12 saatlik dilim,
+`macro` için UTC günü. Bu yüzden bir deney bu sınırları aşan bir sürede yeniden koşulursa önbellek yeniden inşa edilir (beklenen). Tam
+yeniden üretilebilirlik için veri anlık görüntüsünü (parquet/DB) sabitleyin; deney kaydındaki `data_snapshot_hash` yalnızca dosya tabanlı veriyi kapsar.
+

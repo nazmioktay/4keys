@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 from apscheduler.schedulers.background import BackgroundScheduler
 
 from app.core.config import settings
+from app.db.session import is_enabled as db_is_enabled
 from app.forwardcollect.liquidations import start_liquidation_collector, stop_liquidation_collector
 
 from . import persistence
@@ -131,7 +132,9 @@ def start_scheduler(enabled: bool | None = None) -> BackgroundScheduler | None:
             max_instances=1,
             coalesce=True,
         )
-        if settings.forward_collectors_enabled:
+        if settings.forward_collectors_enabled and not db_is_enabled():
+            logger.warning("forward_collectors_enabled=true ama veritabanı yapılandırılmamış: toplayıcılar BAŞLATILMADI (veri yazılamaz)")
+        elif settings.forward_collectors_enabled:
             # İleriye dönük toplayıcılar (VARSAYILAN KAPALI): yeni tablolar + yeni job'lar, mevcut trading akışını etkilemez.
             scheduler.add_job(
                 job_collect_depth_bands,

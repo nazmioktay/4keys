@@ -7,6 +7,7 @@ Her varyant bir denemedir; Deflated Sharpe bu sayıyla hesaplanır. `smoke=True`
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import threading
@@ -27,6 +28,10 @@ MAX_SMOKE_PER_QUESTION = 10  # smoke sayılmaz AMA sınırsız deneme-yanılma k
 
 class BudgetExceededError(RuntimeError):
     pass
+
+
+class RegistryCorruptError(RuntimeError):
+    """`_registry.json` var ama okunamıyor: SESSİZCE boş sayıp üzerine yazmak sayaç/geçmişi silerdi."""
 
 
 def normalize_question(question: str | None) -> str:
@@ -50,14 +55,29 @@ def git_commit() -> str:
 
 
 def _read_registry(path: Path) -> dict:
+    if not path.exists():
+        return {"total_trials": 0, "experiments": [], "smoke_runs": {}}
     try:
         return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return {"total_trials": 0, "experiments": [], "smoke_runs": {}}
+    except (OSError, ValueError) as exc:  # dosya VAR ama bozuk: hata ver, üzerine yazma
+        raise RegistryCorruptError(f"{path} okunamadı ({exc}); elle onarın veya yedekten geri yükleyin (üzerine yazılmadı)") from exc
+
+
+def _write_registry(path: Path, registry: dict) -> None:
+    """Atomik yazma: geçici dosya + os.replace (yarım yazılmış/bozuk kayıt dosyası oluşmaz)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(registry, indent=1), encoding="utf-8")
+    os.replace(tmp, path)
+
+
+def _loose_question(question) -> str:
+    """ESKİ kayıtlar için TOLERANSLI normalizasyon (eski load_config question'ı doğrulamıyordu): hata fırlatmaz."""
+    return (str(question).strip().lower() if question else "") or "genel"
 
 
 def _configs_in(registry: dict, question: str) -> int:
-    return sum(1 for e in registry["experiments"] if normalize_question(e.get("question")) == question)
+    return sum(1 for e in registry["experiments"] if _loose_question(e.get("question")) == question)
 
 
 def configs_used(question: str, registry_file: Path | None = None) -> int:
@@ -93,8 +113,7 @@ def record_smoke_run(question: str, registry_file: Path | None = None, limit: in
                 "gerçek (kayıtlı) deneme yapın veya soruyu değiştirmeyin."
             )
         runs[q] = runs.get(q, 0) + 1
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(reg, indent=1), encoding="utf-8")
+        _write_registry(path, reg)
         return runs[q]
 
 
@@ -183,8 +202,7 @@ def register_experiment(
             {"id": experiment_id, "question": question, "n_variants": n_variants, "trials_before": before, "trials_after": after,
              "date": datetime.now(timezone.utc).isoformat(timespec="seconds"), "git_commit": commit, "data_hash": data_hash}
         )
-        registry_file.parent.mkdir(parents=True, exist_ok=True)
-        registry_file.write_text(json.dumps(registry, indent=1), encoding="utf-8")
+        _write_registry(registry_file, registry)
 
         sharpe = full_metrics.get("sharpe", float("nan"))
         mdd = full_metrics.get("max_drawdown", float("nan"))

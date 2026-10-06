@@ -96,7 +96,7 @@ def test_run_forever_reconnects_with_exponential_backoff_then_succeeds():
 
     c = liquidations.LiquidationCollector(connect=lambda: _WS(True), flush_seconds=999, sleep=fake_sleep)
     asyncio.run(c.run_forever())
-    assert sleeps == [1.0, 2.0]  # iki başarısız bağlantı: 1 sn, 2 sn
+    assert sum(sleeps) == pytest.approx(3.0) and max(sleeps) <= 0.5  # iki başarısız bağlantı: 1 sn + 2 sn, 0,5 sn'lik dilimlerle
     assert c.stats["reconnects"] == 2 and len(db.get_liquidation_events()) == 1
 
 
@@ -267,3 +267,31 @@ def test_buffer_is_capped_dropping_the_oldest_rows_and_counting_them():
         c.flush()
     assert len(c._buffer) == 3 and c.stats["dropped"] == 2
     assert min(r["time"] for r in c._buffer).timestamp() == pytest.approx(1_700_000_002.0)  # en eskiler atıldı
+
+
+def test_stop_interrupts_a_long_reconnect_backoff_quickly():
+    import time
+
+    class _AlwaysFails:
+        async def __aenter__(self):
+            raise ConnectionError("koptu")
+
+        async def __aexit__(self, *a):
+            return False
+
+    c = liquidations.LiquidationCollector(connect=lambda: _AlwaysFails(), max_backoff=60.0)
+    c._stop.clear()
+    c.start()
+    time.sleep(1.8)  # ilk bağlantı denemesi başarısız, 1 sn + 2 sn'lik geri çekilme içinde
+    started = time.monotonic()
+    assert c.stop(timeout=3.0) is True  # önceden: tek parça asyncio.sleep -> geri çekilme bitene kadar durmazdı
+    assert time.monotonic() - started < 2.0 and not c._thread.is_alive()
+
+
+def test_forward_collectors_are_not_started_when_the_database_is_not_configured(_quiet_scheduler, monkeypatch):
+    monkeypatch.setattr(settings, "forward_collectors_enabled", True)
+    monkeypatch.setattr(settings, "database_url", "")
+    reset_for_tests()
+    sched = start_scheduler(enabled=True)
+    assert sched.get_job(jobs.FORWARD_DEPTH_JOB_ID) is None and sched.get_job(jobs.FORWARD_OI_DETAIL_JOB_ID) is None
+    assert _quiet_scheduler == []  # DB yokken veri yazılamaz: akış da açılmaz

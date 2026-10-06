@@ -146,6 +146,14 @@ class LiquidationCollector:
                             await result
             self.flush()
 
+    async def _interruptible_sleep(self, seconds: float, slice_seconds: float = 0.5) -> None:
+        """Geri çekilme beklemesi kısa dilimlerle yapılır: `stop()` uzun bir beklemenin (60 sn'ye kadar) bitmesini BEKLEMEZ."""
+        remaining = seconds
+        while remaining > 0 and not self._stop.is_set():
+            step = min(slice_seconds, remaining)
+            await self._sleep(step)
+            remaining -= step
+
     async def run_forever(self) -> None:
         backoff = 1.0
         while not self._stop.is_set():
@@ -158,7 +166,7 @@ class LiquidationCollector:
             if self._stop.is_set():
                 break
             self.stats["reconnects"] += 1
-            await self._sleep(backoff)
+            await self._interruptible_sleep(backoff)
             backoff = min(backoff * 2, self.max_backoff)
         self.flush()
 

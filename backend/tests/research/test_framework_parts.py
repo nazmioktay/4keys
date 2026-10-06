@@ -148,3 +148,27 @@ def test_budget_counts_configs_per_question_and_blocks_at_the_limit(tmp_path):
     with pytest.raises(budget.BudgetExceededError, match="bütçesi dolu"):
         budget.assert_budget("vol_tahmini", 2, reg, limit=4)
     assert budget.MAX_CONFIGS_PER_QUESTION == 40
+
+
+def test_registry_tolerates_legacy_records_and_refuses_to_overwrite_a_corrupt_file(tmp_path):
+    import json
+
+    reg = tmp_path / "_registry.json"
+    reg.write_text(json.dumps({"total_trials": 2, "experiments": [
+        {"id": "eski1", "question": None}, {"id": "eski2", "question": " Garip Soru!  "}]}), encoding="utf-8")  # smoke_runs anahtarı YOK
+    assert budget.configs_used("genel", reg) == 1  # question=None -> "genel"
+    assert budget.configs_used("baska_soru", reg) == 0  # regex'e uymayan ESKİ kayıt (' Garip Soru!  ') sayımı/bütçeyi BOZMAZ (toleranslı)
+    assert budget.assert_budget("baska_soru", 1, reg) == 39
+    assert registry.record_smoke_run("genel", reg) == 1
+    reg.write_text("{bozuk json", encoding="utf-8")
+    with pytest.raises(registry.RegistryCorruptError, match="üzerine yazılmadı"):
+        registry.record_smoke_run("genel", reg)
+    assert reg.read_text(encoding="utf-8") == "{bozuk json"  # bozuk dosya SİLİNMEDİ/ezilmedi
+    with pytest.raises(registry.RegistryCorruptError):
+        registry.current_trial_count(reg)
+
+
+def test_registry_write_is_atomic_no_tmp_file_left_behind(tmp_path):
+    reg = tmp_path / "_registry.json"
+    registry.record_smoke_run("q", reg)
+    assert reg.exists() and not (tmp_path / "_registry.json.tmp").exists()
