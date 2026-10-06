@@ -10,7 +10,8 @@ from app.core.config import settings
 from app.db import repository as db
 from app.db.session import init_db, reset_for_tests
 from app.forwardcollect import depth, liquidations, oi_detail
-from app.scheduler import jobs, scheduler as scheduler_module, status
+from app.scheduler import jobs, status
+from app.scheduler import scheduler as scheduler_module
 from app.scheduler.scheduler import get_scheduler, start_scheduler, stop_scheduler
 
 
@@ -193,3 +194,76 @@ def test_forward_collectors_register_jobs_and_start_the_stream_when_enabled(_qui
     assert sched.get_job(jobs.FORWARD_DEPTH_JOB_ID) is not None and sched.get_job(jobs.FORWARD_OI_DETAIL_JOB_ID) is not None
     assert _quiet_scheduler == [(["BTCUSDT", "ETHUSDT"], settings.forward_liquidation_flush_seconds)]
     assert get_scheduler() is sched
+
+
+# ---------------------------------------------------------------- denetim bulguları: durdurma ve veri kaybı
+def test_stop_really_stops_the_websocket_thread_and_flushes():
+    import time
+
+    written = []
+
+    class _SlowWS:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        def __aiter__(self):
+            return self._gen()
+
+        async def _gen(self):
+            i = 0
+            while True:  # bitmeyen akış: yalnızca stop() durdurabilir
+                await asyncio.sleep(0.02)
+                i += 1
+                yield _msg(t=1_700_000_000_000 + i * 1000, price=str(60000 + i))
+
+    c = liquidations.LiquidationCollector(
+        connect=lambda: _SlowWS(), flush_seconds=0.1, poll_seconds=0.05, flush_fn=lambda rows: written.append(len(rows)) or len(rows)
+    )
+    c.start()
+    time.sleep(0.6)
+    thread = c._thread
+    assert thread.is_alive()
+    assert c.stop(timeout=3.0) is True  # önceden: async for _stop'a bakmadığı için durmuyordu
+    assert not thread.is_alive()
+    assert sum(written) > 0 and c.stats["flushed"] == sum(written)
+
+
+def test_flush_keeps_rows_when_the_db_write_raises_or_writes_nothing():
+    calls = {"n": 0}
+
+    def failing_db(rows):
+        calls["n"] += 1
+        raise RuntimeError("geçici DB hatası")
+
+    c = liquidations.LiquidationCollector(flush_seconds=999, flush_fn=failing_db)
+    c.ingest(_msg())
+    assert c.flush() == 0 and len(c._buffer) == 1 and c.stats["flushed"] == 0  # istisna: satır kaybolmadı, 'flushed' şişmedi
+    c2 = liquidations.LiquidationCollector(flush_seconds=999, flush_fn=lambda rows: 0)  # DB kapalı gibi: 0 yazıldı
+    c2.ingest(_msg())
+    assert c2.flush() == 0 and len(c2._buffer) == 1 and c2.stats["flushed"] == 0
+
+
+def test_default_writer_does_not_swallow_db_errors(monkeypatch):
+    from sqlalchemy.exc import OperationalError
+
+    def boom(*a, **k):
+        raise OperationalError("insert", {}, Exception("db yok"))
+
+    c = liquidations.LiquidationCollector(flush_seconds=999)  # varsayılan yazıcı: raise_on_error=True
+    c.ingest(_msg())
+    with monkeypatch.context() as m:  # yalnızca bu yama geri alınır (SQLite fixture'ı kalır)
+        m.setattr(db, "session_scope", boom)
+        assert c.flush() == 0 and len(c._buffer) == 1  # repository hatayı yutmadı -> satır geri kondu
+    assert c.flush() == 1 and len(db.get_liquidation_events()) == 1  # DB döndü: yeniden deneme yazdı
+
+
+def test_buffer_is_capped_dropping_the_oldest_rows_and_counting_them():
+    c = liquidations.LiquidationCollector(flush_seconds=999, flush_fn=lambda rows: 0, max_buffer=3)
+    for i in range(5):
+        c.ingest(_msg(t=1_700_000_000_000 + i * 1000))
+        c.flush()
+    assert len(c._buffer) == 3 and c.stats["dropped"] == 2
+    assert min(r["time"] for r in c._buffer).timestamp() == pytest.approx(1_700_000_002.0)  # en eskiler atıldı

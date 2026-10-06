@@ -24,8 +24,11 @@ def final_test_is_open(experiment_id: str | None, log_path=EXPERIMENT_LOG) -> bo
         text = log_path.read_text(encoding="utf-8")
     except OSError:
         return False
-    needle = f"{FINAL_TEST_MARKER} {experiment_id}"
-    return any(line.strip().startswith(needle) for line in text.splitlines())
+    for line in text.splitlines():
+        tokens = line.strip().split()
+        if len(tokens) >= 2 and tokens[0] == FINAL_TEST_MARKER and tokens[1] == experiment_id:  # tam eşleşme ('e1' 'e10'u AÇMAZ)
+            return True
+    return False
 
 
 def ensure_final_test_open(allow_final_test: bool, experiment_id: str | None, log_path=EXPERIMENT_LOG) -> bool:

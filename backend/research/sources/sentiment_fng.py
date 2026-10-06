@@ -39,6 +39,12 @@ class SentimentFng(Source):
         super().__init__(max_age_hours=max_age_hours, **params)
         self._fetcher = fetcher
 
+    def data_signature(self) -> str:
+        if self._fetcher is not None:
+            return ""
+        now = pd.Timestamp.now(tz="UTC")
+        return f"{now:%Y-%m-%d}-{now.hour // 12}"  # canlı API: 12 saatlik dilim (dosya önbelleğiyle aynı ömür)
+
     @property
     def history_start(self):
         return pd.Timestamp("2018-02-01")

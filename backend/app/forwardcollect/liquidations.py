@@ -7,12 +7,14 @@ akışını thread/ağ olmadan işler."""
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import inspect
 import json
 import logging
 import threading
 import time
 from datetime import datetime, timezone
-from typing import Any, AsyncIterator, Callable
+from typing import Any, Callable
 
 from app.db import repository as db
 
@@ -52,21 +54,26 @@ class LiquidationCollector:
         symbols: list[str] | None = None,
         flush_seconds: float = 30.0,
         connect: Callable[[], Any] | None = None,
-        flush_fn: Callable[[list[dict]], int] = db.record_liquidation_events,
+        flush_fn: Callable[[list[dict]], int] | None = None,
         sleep: Callable[[float], Any] | None = None,
         max_backoff: float = 60.0,
+        poll_seconds: float = 1.0,
+        max_buffer: int = 100_000,
     ) -> None:
         self.symbols = {s.upper() for s in symbols} if symbols else None  # None = tüm semboller
         self.flush_seconds = flush_seconds
         self._connect = connect
-        self._flush_fn = flush_fn
+        # Varsayılan yazıcı HATADA İSTİSNA fırlatır (yutmaz): flush satırları geri koyup yeniden dener; geçmişi olmayan veri kaybolmasın.
+        self._flush_fn = flush_fn or (lambda rows: db.record_liquidation_events(rows, raise_on_error=True))
+        self._poll_seconds = poll_seconds
+        self._max_buffer = max_buffer
         self._sleep = sleep or asyncio.sleep
         self.max_backoff = max_backoff
         self._buffer: list[dict] = []
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
-        self.stats = {"messages": 0, "parsed": 0, "flushed": 0, "reconnects": 0}
+        self.stats = {"messages": 0, "parsed": 0, "flushed": 0, "reconnects": 0, "dropped": 0}
 
     # ---- çekirdek (test edilebilir) --------------------------------------------------------
     def ingest(self, message) -> bool:
@@ -80,29 +87,64 @@ class LiquidationCollector:
         return True
 
     def flush(self) -> int:
+        """Tamponu yazar. Yazıcı istisna fırlatırsa VEYA hiç satır yazamazsa (`<= 0`; ör. DB kapalı) satırlar geri konur ve
+        sonra yeniden denenir; tampon `max_buffer`'ı aşarsa EN ESKİ satırlar atılır (sayılır, loglanır)."""
         with self._lock:
             rows, self._buffer = self._buffer, []
         if not rows:
             return 0
         try:
-            self._flush_fn(rows)
-        except Exception:  # noqa: BLE001 - yazım hatası toplayıcıyı durdurmamalı; satırlar geri konur
+            written = self._flush_fn(rows)
+        except Exception:
             logger.exception("liquidation flush başarısız; %d satır yeniden denenecek", len(rows))
+            written = 0
+        if not written or written <= 0:
             with self._lock:
                 self._buffer = rows + self._buffer
+                overflow = len(self._buffer) - self._max_buffer
+                if overflow > 0:
+                    self._buffer = self._buffer[overflow:]
+                    self.stats["dropped"] += overflow
+                    logger.error("liquidation tamponu doldu: en eski %d satır atıldı", overflow)
             return 0
         self.stats["flushed"] += len(rows)
         return len(rows)
 
-    async def process_stream(self, ws: AsyncIterator) -> None:
-        """Bir bağlantının mesajlarını bitene kadar işler; her `flush_seconds`'ta tamponu yazar."""
+    async def process_stream(self, ws) -> None:
+        """Bir bağlantının mesajlarını bitene (veya `stop()`'a) kadar işler. Okuma `poll_seconds` zaman aşımıyla beklenir:
+        mesaj gelmese de durdurma bayrağı ve zaman bazlı flush kontrol edilir; durdurulursa bağlantı kapatılır."""
+        it = ws.__aiter__()
         last_flush = time.monotonic()
-        async for message in ws:
-            self.ingest(message)
-            if time.monotonic() - last_flush >= self.flush_seconds:
-                self.flush()
-                last_flush = time.monotonic()
-        self.flush()
+        pending = None
+        try:
+            while not self._stop.is_set():
+                if pending is None:
+                    pending = asyncio.ensure_future(it.__anext__())
+                done, _ = await asyncio.wait({pending}, timeout=self._poll_seconds)
+                if done:
+                    try:
+                        message = pending.result()
+                    except StopAsyncIteration:
+                        pending = None
+                        break
+                    pending = None
+                    self.ingest(message)
+                if time.monotonic() - last_flush >= self.flush_seconds:
+                    self.flush()
+                    last_flush = time.monotonic()
+        finally:
+            if pending is not None:
+                pending.cancel()
+                with contextlib.suppress(asyncio.CancelledError, StopAsyncIteration, Exception):
+                    await pending
+            if self._stop.is_set():
+                close = getattr(ws, "close", None)
+                if close is not None:
+                    with contextlib.suppress(Exception):
+                        result = close()
+                        if inspect.isawaitable(result):
+                            await result
+            self.flush()
 
     async def run_forever(self) -> None:
         backoff = 1.0
@@ -111,7 +153,7 @@ class LiquidationCollector:
                 async with self._connect() as ws:
                     backoff = 1.0
                     await self.process_stream(ws)
-            except Exception:  # noqa: BLE001 - ağ kopması vb.: geri çekilmeyle yeniden bağlan
+            except Exception:
                 logger.warning("tasfiye akışı koptu; %.0f sn sonra yeniden bağlanılacak", backoff, exc_info=True)
             if self._stop.is_set():
                 break
@@ -139,11 +181,16 @@ class LiquidationCollector:
         self._thread = threading.Thread(target=_run, name="liquidation-collector", daemon=True)
         self._thread.start()
 
-    def stop(self, timeout: float = 5.0) -> None:
+    def stop(self, timeout: float = 5.0) -> bool:
+        """Durdurur ve thread'in GERÇEKTEN bittiğini doğrular. Döner: durdu mu."""
         self._stop.set()
         if self._thread is not None:
             self._thread.join(timeout=timeout)
+            if self._thread.is_alive():
+                logger.warning("tasfiye toplayıcı thread'i %.0f sn içinde durmadı", timeout)
+                return False
         self.flush()
+        return True
 
 
 _collector: LiquidationCollector | None = None
@@ -159,6 +206,5 @@ def start_liquidation_collector(symbols: list[str], flush_seconds: float) -> Liq
 
 def stop_liquidation_collector() -> None:
     global _collector
-    if _collector is not None:
-        _collector.stop()
+    if _collector is not None and _collector.stop():  # thread durmadıysa referans korunur (çift toplayıcı açılmaz)
         _collector = None

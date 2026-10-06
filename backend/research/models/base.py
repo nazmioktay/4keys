@@ -21,7 +21,7 @@ class _Imputer:
     def __init__(self) -> None:
         self.median_: pd.Series | None = None
 
-    def fit(self, X: pd.DataFrame) -> "_Imputer":
+    def fit(self, X: pd.DataFrame) -> _Imputer:
         self.median_ = X.median(numeric_only=True).fillna(0.0)
         return self
 
@@ -42,7 +42,7 @@ class BaseModel(ABC):
 
     # ---- arayüz -----------------------------------------------------------------
     @abstractmethod
-    def fit(self, X: pd.DataFrame, y: pd.Series, dates: pd.Series | pd.Index, sample_weight: np.ndarray | None = None) -> "BaseModel":
+    def fit(self, X: pd.DataFrame, y: pd.Series, dates: pd.Series | pd.Index, sample_weight: np.ndarray | None = None) -> BaseModel:
         ...
 
     @abstractmethod

@@ -16,7 +16,9 @@ from .registry import register_source
 
 
 def _repo():
-    from app.db import repository  # DB opsiyoneldir; yalnızca bu kaynaklar kullanılırken içe aktarılır
+    from app.db import (
+        repository,  # DB opsiyoneldir; yalnızca bu kaynaklar kullanılırken içe aktarılır
+    )
 
     return repository
 
@@ -33,6 +35,10 @@ class _ForwardSource(Source):
 
     def _read(self) -> pd.DataFrame:
         return getattr(_repo(), self._reader)()
+
+    def data_signature(self) -> str:
+        df = self._read()
+        return f"{len(df)}:{df['time'].max() if len(df) else ''}"  # yeni satır gelince önbellek geçersiz
 
     def accumulated_days(self) -> float | None:
         df = self._read()

@@ -21,6 +21,21 @@ from .data import store
 
 _LOCK = threading.Lock()
 
+MAX_CONFIGS_PER_QUESTION = 40  # KURALLAR.md §9: soru başına en fazla 40 config (ablasyonlar dahil)
+MAX_SMOKE_PER_QUESTION = 10  # smoke sayılmaz AMA sınırsız deneme-yanılma kaçağı olmasın: soru başına en fazla 10 smoke koşusu
+
+
+class BudgetExceededError(RuntimeError):
+    pass
+
+
+def normalize_question(question: str | None) -> str:
+    """'q', 'q ', 'Q' tek bir bütçe sayılsın: strip + lower; yalnızca harf/rakam/_.- ."""
+    q = (question or "genel").strip().lower()
+    if not re.fullmatch(r"[a-z0-9_.-]+", q):
+        raise ValueError(f"question yalnızca harf/rakam/_.- içerebilir: {question!r}")
+    return q
+
 
 class ExperimentExistsError(RuntimeError):
     pass
@@ -30,7 +45,7 @@ def git_commit() -> str:
     try:
         out = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=config.REPO_ROOT, capture_output=True, text=True, timeout=10)
         return out.stdout.strip() or "unknown"
-    except Exception:  # noqa: BLE001
+    except Exception:
         return "unknown"
 
 
@@ -38,7 +53,49 @@ def _read_registry(path: Path) -> dict:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
-        return {"total_trials": 0, "experiments": []}
+        return {"total_trials": 0, "experiments": [], "smoke_runs": {}}
+
+
+def _configs_in(registry: dict, question: str) -> int:
+    return sum(1 for e in registry["experiments"] if normalize_question(e.get("question")) == question)
+
+
+def configs_used(question: str, registry_file: Path | None = None) -> int:
+    return _configs_in(_read_registry(Path(registry_file or config.REGISTRY_FILE)), normalize_question(question))
+
+
+def assert_budget(question: str, n_new: int = 1, registry_file: Path | None = None, limit: int | None = None) -> int:
+    """Yeni `n_new` config sığıyor mu? Sığmıyorsa `BudgetExceededError`. Döner: kalan bütçe. (Erken/hızlı başarısızlık için;
+    asıl zorlama `register_experiment` içinde KİLİT ALTINDADIR.)"""
+    q = normalize_question(question)
+    limit = MAX_CONFIGS_PER_QUESTION if limit is None else limit
+    used = configs_used(q, registry_file)
+    if used + n_new > limit:
+        raise BudgetExceededError(
+            f"'{q}' sorusu için deneme bütçesi dolu ({used}/{limit} config; {n_new} yeni istendi). "
+            "Yeni deneme yapılmaz: mevcut sonuçlardan karar verin (docs/research/deneyler.md)."
+        )
+    return limit - used - n_new
+
+
+def record_smoke_run(question: str, registry_file: Path | None = None, limit: int | None = None) -> int:
+    """Smoke koşusunu SAYAR (deneme sayacına DEĞİL, ayrı `smoke_runs` tablosuna); soru başına sınırı aşarsa reddeder.
+    Smoke sonuçları karar için kullanılamaz (yalnızca çerçeve kontrolü)."""
+    q = normalize_question(question)
+    path = Path(registry_file or config.REGISTRY_FILE)
+    limit = MAX_SMOKE_PER_QUESTION if limit is None else limit
+    with _LOCK:
+        reg = _read_registry(path)
+        runs = reg.setdefault("smoke_runs", {})
+        if runs.get(q, 0) + 1 > limit:
+            raise BudgetExceededError(
+                f"'{q}' sorusu için smoke koşu sınırı doldu ({runs.get(q, 0)}/{limit}). Smoke çıktıları karar için kullanılamaz; "
+                "gerçek (kayıtlı) deneme yapın veya soruyu değiştirmeyin."
+            )
+        runs[q] = runs.get(q, 0) + 1
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(reg, indent=1), encoding="utf-8")
+        return runs[q]
 
 
 def is_registered(experiment_id: str, registry_file: Path | None = None, results_dir: Path | None = None) -> bool:
@@ -87,6 +144,7 @@ def register_experiment(
     results_dir = Path(results_dir or config.RESULTS_DIR)
     log_path = Path(log_path or config.EXPERIMENT_LOG)
     registry_file = Path(registry_file or config.REGISTRY_FILE)
+    question = normalize_question(question) if question is not None else None
     if n_variants < 1:
         raise ValueError("n_variants >= 1 olmalı")
     if not re.fullmatch(r"[A-Za-z0-9_.-]+", experiment_id):
@@ -97,6 +155,11 @@ def register_experiment(
         registry = _read_registry(registry_file)
         if (out_dir / "metrics.json").exists() or any(e["id"] == experiment_id for e in registry["experiments"]):
             raise ExperimentExistsError(f"{experiment_id} zaten kayıtlı (kayıtlar değiştirilmez)")
+        if question is not None and _configs_in(registry, question) + 1 > MAX_CONFIGS_PER_QUESTION:  # eşzamanlı koşular dahil: KİLİT ALTINDA
+            raise BudgetExceededError(
+                f"'{question}' sorusu için deneme bütçesi dolu ({_configs_in(registry, question)}/{MAX_CONFIGS_PER_QUESTION} config). "
+                "Yeni deneme yapılmaz: mevcut sonuçlardan karar verin."
+            )
         before = int(registry["total_trials"])
         after = before + n_variants
 

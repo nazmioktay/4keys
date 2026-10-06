@@ -17,7 +17,7 @@ import numpy as np
 import pandas as pd
 
 from . import pred_metrics
-from .oof import OofResult, run_oof
+from .oof import run_oof
 from .panel import Panel
 from .sources.pit import audit_available_at
 
@@ -66,16 +66,19 @@ def check_shuffled_target(panel: Panel, models_cfg, cv, seed, horizon, folds, re
     report.add("shuffled_target", not bad, {"per_model": {m: {"ic_mean": s["ic_mean"], "ic_t": s["ic_t"]} for m, s in stats_.items()}, "limit_t": SHUFFLE_T_LIMIT})
 
 
-def check_availability(panel: Panel, folds, horizon: int, report: CheckReport) -> None:
+def check_availability(panel: Panel, folds, label_end_days: int, report: CheckReport) -> None:
+    """(1) birleştirilmiş her `<kaynak>__available_at <= karar zamanı` (mekanik: merge_asof zaten garanti eder — birleştirme
+    hatasını yakalar); (2) BAĞIMSIZ: hiçbir kaynak satırı gözlem gününden ÖNCE yayımlanmış iddia edemez (`available_at >= date`);
+    (3) eğitim satırlarının etiketi (`Target.label_end_days`, tek kaynak) ilk test kararından ÖNCE tamamlanmış olmalı."""
     violations = audit_available_at(panel.merged.reset_index(drop=True), panel.sources)
-    # etiket sızıntısı: eğitim satırının etiketi, ilk test kararından ÖNCE tamamlanmış olmalı
-    label_end_days = horizon + 1
+    before_obs = {name: int((p["available_at"] < p["date"]).sum()) for name, p in panel.panels.items() if len(p)}
     label_leaks = 0
     for tr_mask, te_mask, tr_dates, te_dates in folds:
         first_test_decision = te_dates.min() + pd.Timedelta(days=1)
         label_leaks += int((tr_dates + pd.Timedelta(days=label_end_days) > first_test_decision).sum())
-    ok = sum(violations.values()) == 0 and label_leaks == 0
-    report.add("availability", ok, {"available_at_violations": violations, "train_label_overlap_days": label_leaks})
+    ok = sum(violations.values()) == 0 and sum(before_obs.values()) == 0 and label_leaks == 0
+    report.add("availability", ok, {"available_at_violations": violations, "available_before_observation": before_obs,
+                                    "train_label_overlap_days": label_leaks})
 
 
 def check_extra_lag(panel: Panel, models_cfg, cv, seed, horizon, folds, base_oof: pd.DataFrame, report: CheckReport) -> None:

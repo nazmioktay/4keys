@@ -1,5 +1,3 @@
-import io
-import zipfile
 
 import numpy as np
 import pandas as pd
@@ -9,8 +7,7 @@ from research import config
 from research.data import download_metrics, store
 from research.sources import cache, coverage, pit
 from research.sources.base import MARKET, Source, validate_panel
-from research.sources.registry import SOURCE_REGISTRY, available_sources, get_source, register_source
-
+from research.sources.registry import available_sources, get_source, register_source
 from tests.research.test_data import FakeHttp, _listing_xml, _zip
 
 
@@ -255,7 +252,7 @@ def test_derivatives_metrics_source_end_to_end(tmp_cache):
 
 # ---------------------------------------------------------------- sentiment_fng
 def test_fng_value_visible_to_close_of_same_day_but_not_the_previous_one():
-    ts = lambda d: int(pd.Timestamp(d).timestamp())  # noqa: E731
+    ts = lambda d: int(pd.Timestamp(d).timestamp())
     data = [{"value": str(v), "timestamp": str(ts(d)), "value_classification": "x"} for v, d in [(20, "2024-03-01"), (60, "2024-03-02"), (80, "2024-03-03")]]
     src = get_source("sentiment_fng", fetcher=lambda: data)
     dates = pd.date_range("2024-03-01", periods=3)
@@ -327,3 +324,28 @@ def test_coverage_report_counts_symbols_and_missing_rate(tmp_cache):
     assert 0.38 < entry["decision_rows_missing"] < 0.42  # CCC hiç yok (40/120) + BBB 29 Nisan sonrası, bayatlık toleransını aşan ~8 gün
     md = coverage.coverage_markdown([entry])
     assert "ohlcv_core" in md and "67%" in md
+
+
+def test_derivatives_metrics_fetch_cuts_the_final_test_window_even_when_called_directly(tmp_cache):
+    idx = pd.date_range("2025-09-20", periods=30, freq="D", name="date")
+    store.write_frame("um_metrics_1d", "BTCUSDT", pd.DataFrame({"oi_value_last": 1.0, "oi_value_mean": 1.0}, index=idx))
+    raw = get_source("derivatives_metrics").fetch(pd.Timestamp("2025-09-01"), pd.Timestamp("2025-12-31"), ["BTCUSDT"])
+    assert raw["BTCUSDT"].index.max() == pd.Timestamp("2025-09-30")  # >= 2025-10-01 satırları doğrudan fetch()'te de yok
+
+
+def test_cache_key_changes_when_a_db_or_network_source_data_signature_changes(tmp_cache):
+    dates = pd.date_range("2024-01-01", periods=3)
+
+    class Sig(_Toy):
+        sig = "a"
+
+        def data_signature(self):
+            return self.sig
+
+    s = Sig(lag_days=0.0)
+    k1 = cache.cache_key(s, "h", ["A"], dates)
+    s.sig = "b"  # DB satırı eklendi / API yeni veri döndü
+    assert cache.cache_key(s, "h", ["A"], dates) != k1
+    live = get_source("sentiment_fng")  # canlı API: günün/12 saatlik dilimin imzası
+    assert live.data_signature() != "" and get_source("sentiment_fng", fetcher=lambda: []).data_signature() == ""
+    assert get_source("macro").data_signature() != "" and get_source("macro", fetcher=lambda s_, e_: {}).data_signature() == ""

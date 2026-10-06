@@ -59,6 +59,11 @@ class Source(ABC):
         """Özellik kolonlarına `<name>__` öneki ekler (rezerve kolonlar hariç)."""
         return frame.rename(columns={c: f"{self.name}__{c}" for c in frame.columns if c not in RESERVED_COLUMNS})
 
+    def data_signature(self) -> str:
+        """Önbellek anahtarına girer: kaynağın VERİSİ (DB/ağ) değiştiyse değişmeli. Dosya tabanlı kaynaklar için `store.snapshot_hash()`
+        zaten anahtardadır (boş bırakın); DB/ağ kaynakları kendi imzasını (satır sayısı, son zaman, çekim günü) döndürür."""
+        return ""
+
     def param_hash(self) -> str:
         blob = json.dumps({"name": self.name, "version": self.version, "params": self.params}, sort_keys=True, default=str)
         return hashlib.sha256(blob.encode()).hexdigest()[:12]

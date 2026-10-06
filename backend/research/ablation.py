@@ -5,16 +5,15 @@ Her ablasyon bir deneme (config) sayılır: `register=True` ise her biri `<id>__
 
 from __future__ import annotations
 
+import argparse
+
 import numpy as np
 import pandas as pd
 
-import argparse
-
-from . import config, pred_metrics, signals, stats
-from .budget import assert_budget
-from .registry import register_experiment
+from . import pred_metrics, signals, stats
 from .oof import build_folds, run_oof
 from .panel import Panel
+from .registry import assert_budget, record_smoke_run, register_experiment
 from .runner import _portfolio, _trim, load_config
 
 
@@ -49,12 +48,17 @@ def _paired_ci(a: pd.Series, b: pd.Series, stat, n_boot: int, mean_block: float,
 
 def run_ablation(
     cfg_source, panel: Panel, *, n_boot: int = 300, mean_block: float = 15.0, seed: int = 0,
-    register: bool = False, results_dir=None, log_path=None, registry_file=None,
+    register: bool = True, smoke: bool = False, results_dir=None, log_path=None, registry_file=None,
 ) -> pd.DataFrame:
     """Tam model ile her kaynağı dışarıda bırakan modeli kıyaslar. Dönen tablo (satır = kaynak):
     d_ic, d_ic_lo, d_ic_hi, d_sharpe, d_sharpe_lo, d_sharpe_hi (tam − kaynaksız; pozitif = kaynak katkı veriyor).
-    `register=True`: her ablasyon ayrı bir config/deneme olarak kaydedilir (`<id>__abl_<kaynak>`; sayaç + bütçe)."""
+    VARSAYILAN `register=True`: her ablasyon ayrı bir config/deneme olarak kaydedilir (`<id>__abl_<kaynak>`; sayaç + bütçe).
+    Kayıtsız çalıştırmak yalnızca `smoke=True` ile mümkündür (smoke soru başına sınırlıdır; sonuç karar için kullanılamaz)."""
     cfg = load_config(cfg_source)
+    if not register and not smoke:
+        raise ValueError("Kayıtsız ablasyon yalnızca smoke=True ile yapılabilir (deneme/bütçe kaçağını önlemek için)")
+    if smoke:
+        record_smoke_run(cfg["question"], registry_file)
     if register:
         assert_budget(cfg["question"], len(panel.sources), registry_file)  # hepsi sığmıyorsa HİÇ başlama
     dates = pd.Series(panel.X.index.get_level_values("date"), index=panel.X.index)
@@ -95,11 +99,11 @@ def main(argv: list[str] | None = None) -> int:
 
     ap = argparse.ArgumentParser(description="Kaynak ablasyonu")
     ap.add_argument("config")
-    ap.add_argument("--register", action="store_true", help="Her ablasyonu deneme olarak kaydet (sayaç + bütçe)")
+    ap.add_argument("--smoke", action="store_true", help="Kaydetme (deneme sayılmaz; soru başına sınırlı, karar için KULLANILAMAZ)")
     ap.add_argument("--n-boot", type=int, default=300)
     args = ap.parse_args(argv)
     cfg = load_config(args.config)
-    table = run_ablation(cfg, build_panel(cfg), n_boot=args.n_boot, register=args.register)
+    table = run_ablation(cfg, build_panel(cfg), n_boot=args.n_boot, register=not args.smoke, smoke=args.smoke)
     print(ablation_markdown(table))
     return 0
 

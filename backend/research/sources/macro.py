@@ -58,6 +58,9 @@ class Macro(Source):
         super().__init__(**params)
         self._fetcher = fetcher
 
+    def data_signature(self) -> str:
+        return "" if self._fetcher is not None else f"{pd.Timestamp.now(tz='UTC'):%Y-%m-%d}"  # canlı yfinance: günlük
+
     @property
     def history_start(self):
         return pd.Timestamp("2000-01-01")
@@ -66,7 +69,9 @@ class Macro(Source):
         return (self._fetcher or _yf_fetch)(start, end)
 
     def to_panel(self, universe, dates):
-        from app.ml.macro_features import _expanding_zscore  # yeniden kullanım: yalnızca geçmişle normalizasyon
+        from app.ml.macro_features import (
+            _expanding_zscore,  # yeniden kullanım: yalnızca geçmişle normalizasyon
+        )
 
         raw = self.fetch(dates.min() - pd.Timedelta(days=60), dates.max())
         if not raw:

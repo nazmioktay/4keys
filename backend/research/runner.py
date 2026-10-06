@@ -19,12 +19,19 @@ import yaml
 
 from . import checks as chk
 from . import config, engine, pred_metrics, signals, stats
-from .budget import assert_budget
 from .data import store
 from .data.universe import universe_membership
-from .oof import OofResult, build_folds, run_oof
+from .oof import build_folds, run_oof
 from .panel import Panel, build_panel
-from .registry import ExperimentExistsError, current_trial_count, is_registered, register_experiment
+from .registry import (
+    ExperimentExistsError,
+    assert_budget,
+    current_trial_count,
+    is_registered,
+    normalize_question,
+    record_smoke_run,
+    register_experiment,
+)
 from .report import render_report
 
 DEFAULT_CHECKS = {"shuffled_target": True, "availability": True, "extra_lag": True, "reproducibility": True}
@@ -55,6 +62,10 @@ def load_config(source) -> dict:
             raise ConfigError(f"config'te '{key}' zorunlu")
     cfg.setdefault("smoke", False)
     cfg.setdefault("question", "genel")
+    try:
+        cfg["question"] = normalize_question(cfg["question"])  # 'q' / 'Q ' tek bütçe
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
     cfg.setdefault("universe", {"n": 20})
     cfg.setdefault("arm", "arm")
     cfg.setdefault("seed", 0)
@@ -154,6 +165,8 @@ def run_experiment(
         if is_registered(cfg["id"], registry_file, results_dir):  # ağır işe başlamadan: kayıtlar değiştirilmez
             raise ExperimentExistsError(f"{cfg['id']} zaten kayıtlı (kayıtlar değiştirilmez)")
         assert_budget(cfg["question"], extra_question_cost, registry_file)  # bütçe dolduysa YENİ deneme yapılmaz
+    else:
+        record_smoke_run(cfg["question"], registry_file)  # smoke deneme sayılmaz ama soru başına sınırlıdır (kaçak yok)
 
     panel = panel or build_panel(cfg)
     target, seed, cv = panel.target, int(cfg["seed"]), cfg["cv"]
@@ -174,7 +187,7 @@ def run_experiment(
     fold_arg = fold_tuples = [(f.train_mask, f.test_mask, f.train_dates, f.test_dates) for f in res.folds]
     flags = cfg["checks"]
     if flags["availability"]:
-        chk.check_availability(panel, fold_tuples, target.horizon, report)
+        chk.check_availability(panel, fold_tuples, target.label_end_days, report)
     if flags["shuffled_target"]:
         chk.check_shuffled_target(panel, cfg["models"], cv, seed, target.horizon, fold_arg, report)
     if flags["extra_lag"]:
@@ -233,6 +246,7 @@ def run_experiment(
     metrics["deflated_sharpe_if_registered"] = dsr
 
     extra = {
+        **({"SMOKE": "çerçeve kontrolü — karar için KULLANILAMAZ (deneme sayacına sayılmaz, soru başına sınırlı)"} if smoke else {}),
         "geçerli": report.valid, "uyarılar": ", ".join(report.warnings) or "yok", "başarısız testler": ", ".join(report.failures) or "yok",
         "birincil model": primary, "PBO": f"{pbo:.2f}" if pbo == pbo else "—", "stres Sharpe (ücret×2, kayma×3)": f"{stats.sharpe(stress):.2f}",
         "+1 bar gecikme Sharpe": f"{stats.sharpe(delayed):.2f}",

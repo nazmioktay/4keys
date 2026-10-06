@@ -7,12 +7,12 @@ from pathlib import Path
 import matplotlib
 
 matplotlib.use("Agg")  # başsız (konteyner) çizim
-import matplotlib.pyplot as plt  # noqa: E402
-import numpy as np  # noqa: E402
-import pandas as pd  # noqa: E402
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 
-from . import stats  # noqa: E402
-from .guard import assert_no_final_test  # noqa: E402
+from . import stats
+from .guard import assert_no_final_test
 
 
 def _fmt(x, pct=False, nd=2) -> str:

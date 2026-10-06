@@ -48,7 +48,7 @@ def fetch_depth_bands(symbol: str, get_json: Callable = _default_get_json) -> di
     try:
         book = get_json(f"{FAPI}/fapi/v1/depth", {"symbol": symbol, "limit": 1000})
         return compute_depth_bands(book["bids"], book["asks"])
-    except Exception:  # noqa: BLE001 - toplama opsiyoneldir, ana akışı bozmamalı
+    except Exception:
         logger.warning("depth alınamadı: %s", symbol, exc_info=True)
         return None
 

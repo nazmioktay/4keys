@@ -22,7 +22,9 @@ def to_ccxt_symbol(symbol: str) -> str:
 
 
 def _default_fetcher() -> Callable[[str], dict | None]:
-    from app.exchanges import get_exchange  # yeniden kullanım: kimlik doğrulamasız, GERÇEK piyasa verisi
+    from app.exchanges import (
+        get_exchange,  # yeniden kullanım: kimlik doğrulamasız, GERÇEK piyasa verisi
+    )
 
     exchange = get_exchange("binance")
     return lambda ccxt_symbol: exchange.fetch_market_limits(ccxt_symbol, "future")
@@ -44,7 +46,7 @@ def get_limits(symbols: list[str], fetcher: Callable[[str], dict | None] | None 
         for s in missing:
             try:
                 cached[s] = fetch(to_ccxt_symbol(s))
-            except Exception:  # noqa: BLE001 - delist/bilinmeyen sembol: kısıtsız + raporlanır
+            except Exception:
                 cached[s] = None
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(cached, sort_keys=True), encoding="utf-8")

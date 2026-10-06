@@ -9,7 +9,6 @@ from research.oof import build_folds, run_oof
 from research.panel import build_panel
 from research.sources.base import Source
 from research.sources.registry import SOURCE_REGISTRY, register_source
-
 from tests.research.synth import make_market, write_market
 
 
@@ -52,7 +51,7 @@ def world(tmp_path_factory):
 
 def test_ablation_attributes_skill_to_the_informative_source_not_to_noise(world):
     cfg, panel, folds, res, tmp = world
-    table = ablation.run_ablation(cfg, panel, n_boot=200)
+    table = ablation.run_ablation(cfg, panel, n_boot=200, register=False, smoke=True, registry_file=tmp / "_registry.json")
     core, noise = table.loc["ohlcv_core"], table.loc["noise_src"]
     assert core["d_ic"] > 0.1 and core["d_ic_lo"] > 0  # bilgi veren kaynak: GA sıfırı dışlar
     assert abs(noise["d_ic"]) < 0.02 and noise["d_ic_lo"] <= 0 <= noise["d_ic_hi"]  # gürültü: GA sıfırı içerir
@@ -137,3 +136,13 @@ def test_stacking_refuses_the_final_test_window():
     shifted = [f + pd.Timedelta(days=1300) for f in folds]
     with pytest.raises(Exception, match="nihai test"):
         stacking.stack_oof(oof, y, shifted, horizon=1)
+
+
+def test_unregistered_ablation_requires_smoke_and_is_counted_separately(world, tmp_path):
+    cfg, panel, folds, res, _ = world
+    reg = tmp_path / "_registry.json"
+    with pytest.raises(ValueError, match="smoke=True"):
+        ablation.run_ablation(cfg, panel, n_boot=20, register=False, registry_file=reg)  # sessiz kayıtsız yol KAPALI
+    ablation.run_ablation(cfg, panel, n_boot=20, register=False, smoke=True, registry_file=reg)
+    data = __import__("json").loads(reg.read_text())
+    assert data["smoke_runs"] == {"q": 1} and data["total_trials"] == 0  # deneme sayacı artmadı, smoke ayrı sayıldı

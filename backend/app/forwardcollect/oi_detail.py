@@ -39,7 +39,7 @@ def fetch_oi_detail(symbol: str, get_json: Callable = _default_get_json) -> dict
     def attempt(label: str, fn) -> None:
         try:
             out.update(fn())
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.warning("%s alınamadı: %s", label, symbol, exc_info=True)
 
     attempt("openInterest", lambda: {"open_interest": _num(get_json(f"{FAPI}/fapi/v1/openInterest", {"symbol": symbol})["openInterest"])})

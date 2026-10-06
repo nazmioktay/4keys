@@ -16,7 +16,7 @@ Veri önbelleği: `python -m research.data.download --all --hourly-top 60` (gün
 ```bash
 cd backend && python -m research.runner research/configs/ornek_vol.yaml           # config'te smoke: true ise sayaç artmaz
 python -m research.runner research/configs/ornek_vol.yaml --smoke                 # her config'i smoke olarak koştur
-python -m research.ablation research/configs/ornek_vol.yaml [--register]          # her kaynak tek tek çıkarılır
+python -m research.ablation research/configs/ornek_vol.yaml [--smoke]              # her kaynak tek tek çıkarılır (varsayılan: her biri KAYITLI deneme)
 ```
 Tek YAML: `id, question, sources, universe{n}, period{start,end}, target{name,h}, models[], cv{n_splits,embargo_days,min_train_days},
 signal{adapter,params}, arm, seed, checks{...}` (bkz. `research/configs/ornek_vol.yaml`). Akış: noktasal-zamanlı evren → kaynak
@@ -67,7 +67,7 @@ motoru → sızıntı testleri → kayıt (sayaç, Deflated Sharpe, deneyler.md)
 Geçersiz deney yine KAYDEDİLİR (karar "GEÇERSİZ: ..."; sayaç artar — gizlenmez). Her test kendi negatif kontrolüyle doğrulanır (`tests/research/test_checks.py`).
 
 ## Deneme bütçesi ve sayaç
-Soru (`question`) başına en fazla **40 config** (ablasyonlar dahil); dolunca `BudgetExceededError`, yeni deneme yapılmaz — mevcut sonuçlardan karar verilir.
+Soru adı normalize edilir (`strip`+küçük harf); `smoke` koşuları sayaca girmez ama soru başına en fazla 10'dur ve sonuçları karar için kullanılamaz. Soru (`question`) başına en fazla **40 config** (ablasyonlar dahil); dolunca `BudgetExceededError`, yeni deneme yapılmaz — mevcut sonuçlardan karar verilir.
 Her varyant (model) bir deneme sayılır (Deflated Sharpe için global sayaç). `smoke: true` / `--smoke` hiçbir şey kaydetmez.
 
 ## İleriye dönük toplayıcılar (canlı koda dokunan tek istisna)

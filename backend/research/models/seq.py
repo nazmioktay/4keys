@@ -5,7 +5,10 @@ Panel uyumu: X (date, symbol) MultiIndex'li; her sembolün satırları tarih sı
 (pencere sonundaki satırın etiketi). Tahminde, pencereyi tamamlamak için EĞİTİMDEN kalan son `seq_len-1` satır sembol
 başına saklanır (geçmiş veri → ileri bilgi yok). İKİLİ sınıflandırma hedefi (y ∈ {0,1}) gerekir; P(y=1) =
 tahmin sınıfı 1 ise güven, değilse 1−güven. `sample_weight` DESTEKLENMEZ (mevcut modellerde yok; yok sayılır — belgelenmiş
-sınırlama). torch gerekir (içe aktarma tembeldir)."""
+sınırlama). torch gerekir (içe aktarma tembeldir).
+
+Bilinen tutarsızlık (sızıntı DEĞİL): tahminde pencere, eğitimin son `seq_len-1` satırı + test satırlarından kurulur; purge/embargo boşluğu
+yüzünden pencere takvimsel olarak bitişik olmayan günleri kapsayabilir (yalnızca GEÇMİŞ veri; eğitim penceresiyle biçimsel fark)."""
 
 from __future__ import annotations
 

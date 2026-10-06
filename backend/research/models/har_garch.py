@@ -95,7 +95,7 @@ class Garch11(BaseModel):
                 omega, alpha, beta = (float(res.params[k]) for k in ("omega", "alpha[1]", "beta[1]"))
                 if not (alpha >= 0 and beta >= 0 and alpha + beta < 0.9999 and omega > 0):
                     raise ValueError("kararsız GARCH parametresi")
-            except Exception:  # noqa: BLE001 - kestirim başarısızsa RiskMetrics (EWMA) yedeği
+            except Exception:
                 omega, alpha, beta = 0.0, 0.06, 0.94
             self._train[sym] = {"returns": r, "omega": omega, "alpha": alpha, "beta": beta, "s2_init": float(r.var())}
         # eğitim satırları için süzülmüş tahminler -> hedefe ölçek

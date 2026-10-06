@@ -10,7 +10,6 @@ from app.core.config import settings
 from app.db import repository as db
 from app.db.session import init_db, reset_for_tests
 from research.panel import ForwardOnlyTooShortError, check_forward_only
-from research.sources import pit
 from research.sources.base import validate_panel
 from research.sources.registry import get_source
 
@@ -115,3 +114,12 @@ def test_forward_sources_merge_point_in_time_with_missing_flag_when_no_data():
     merged = merge_sources(decision_frame(dates, symbols=["BTCUSDT"]), [(src, src.to_panel(["BTCUSDT"], dates))])
     assert (merged["liquidations__missing"] == 1).all()  # veri yok -> NaN + eksik bayrağı, sıfır doldurma yok
     assert merged.filter(like="liquidations__liq_").isna().all().all()
+
+
+def test_forward_source_cache_signature_changes_with_new_rows():
+    src = get_source("oi_detail")
+    empty_sig = src.data_signature()
+    db.record_oi_detail_snapshot("BTCUSDT", {"open_interest": 1.0})
+    one = src.data_signature()
+    db.record_oi_detail_snapshot("ETHUSDT", {"open_interest": 2.0})
+    assert len({empty_sig, one, src.data_signature()}) == 3  # yeni satır -> önbellek anahtarı değişir (bayat parquet yok)

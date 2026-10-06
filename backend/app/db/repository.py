@@ -12,18 +12,18 @@ from app.ml.features import FEATURE_COLUMNS
 from .models import (
     DEPTH_BAND_COLUMNS,
     OI_DETAIL_COLUMNS,
-    DepthBandSnapshot,
-    LiquidationEvent,
-    OIDetailSnapshot,
+    AppStateRow,
     BacktestRun,
     BacktestTradeRow,
+    DepthBandSnapshot,
     FeatureSnapshot,
+    LiquidationEvent,
     MacroSnapshot,
     OHLCVRaw,
+    OIDetailSnapshot,
     OpenInterestSnapshot,
     OptimizationRun,
     OrderbookSnapshot,
-    AppStateRow,
     SignalRecord,
     TradeRecord,
 )
@@ -850,8 +850,9 @@ def load_portfolio_state() -> dict | None:
 
 
 # ---------------------------------------------------------------- ileriye dönük toplayıcılar (forward-only)
-def record_liquidation_events(rows: list[dict]) -> int:
-    """Tasfiye olaylarını toplu yazar (aynı olay tekrar gelirse yok sayılır). Döner: gönderilen satır sayısı."""
+def record_liquidation_events(rows: list[dict], raise_on_error: bool = False) -> int:
+    """Tasfiye olaylarını toplu yazar (aynı olay tekrar gelirse yok sayılır). Döner: gönderilen satır sayısı (DB kapalıysa 0).
+    `raise_on_error=True`: DB hatasında istisnayı YUTMAZ (toplayıcı satırları geri koyup yeniden denesin)."""
     if not is_enabled() or not rows:
         return 0
     try:
@@ -869,6 +870,8 @@ def record_liquidation_events(rows: list[dict]) -> int:
         return len(rows)
     except SQLAlchemyError:
         logger.exception("liquidation events persist failed")
+        if raise_on_error:
+            raise
         return 0
 
 

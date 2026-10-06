@@ -11,7 +11,6 @@ from research.models.registry import MODEL_REGISTRY, register_model
 from research.oof import build_folds, run_oof
 from research.panel import build_panel
 from research.sources.pit import AVAILABLE_SUFFIX
-
 from tests.research.synth import make_market, write_market
 
 
@@ -37,7 +36,7 @@ def test_honest_pipeline_passes_every_check(setup):
     cfg, panel, folds = setup
     rep = checks.CheckReport()
     res = run_oof(panel.X, panel.y, cfg["models"], panel.target, cfg["cv"], 0, folds)
-    checks.check_availability(panel, folds, 1, rep)
+    checks.check_availability(panel, folds, panel.target.label_end_days, rep)
     checks.check_shuffled_target(panel, cfg["models"], cfg["cv"], 0, 1, folds, rep)
     checks.check_extra_lag(panel, cfg["models"], cfg["cv"], 0, 1, folds, res.oof, rep)
     again = run_oof(panel.X, panel.y, cfg["models"], panel.target, cfg["cv"], 0, folds)
@@ -65,7 +64,7 @@ def test_availability_audit_catches_features_published_after_decision_time(setup
     bad[col] = bad["decision_time"] + pd.Timedelta(hours=1)  # karar zamanından SONRA yayımlanmış
     panel2 = type(panel)(**{**panel.__dict__, "merged": bad})
     rep = checks.CheckReport()
-    checks.check_availability(panel2, folds, 1, rep)
+    checks.check_availability(panel2, folds, panel.target.label_end_days, rep)
     assert "availability" in rep.failures and rep.results["availability"]["available_at_violations"]["ohlcv_core"] == len(bad)
 
 
@@ -74,7 +73,7 @@ def test_availability_audit_catches_training_labels_that_overlap_the_test_period
     tr, te, tr_d, te_d = folds[0]
     bad_train_dates = tr_d.append(pd.DatetimeIndex([te_d.min() - pd.Timedelta(hours=0)]))  # test başlangıcının ETİKETİ test içine taşan gün
     rep = checks.CheckReport()
-    checks.check_availability(panel, [(tr, te, bad_train_dates, te_d)], 1, rep)
+    checks.check_availability(panel, [(tr, te, bad_train_dates, te_d)], panel.target.label_end_days, rep)
     assert "availability" in rep.failures and rep.results["availability"]["train_label_overlap_days"] > 0
 
 
@@ -146,3 +145,15 @@ def test_shuffle_within_date_preserves_per_date_values_and_breaks_alignment():
     assert all(sorted(s.xs(d, level="date")) == sorted(y.xs(d, level="date")) for d in y.index.get_level_values("date").unique())
     assert not s.equals(y)
     assert checks.shuffle_within_date(y, 1).equals(s)  # tohumlu -> tekrarlanabilir
+
+
+def test_availability_audit_catches_a_source_claiming_publication_before_the_observation_day(setup):
+    """BAĞIMSIZ denetim: merge_asof `available_at <= karar`ı mekanik garanti eder; kaynağın beyanı gözlem gününden ÖNCE ise
+    (imkânsız: veri henüz oluşmamış) ayrıca yakalanır."""
+    cfg, panel, folds = setup
+    bad_panels = {k: v.copy() for k, v in panel.panels.items()}
+    bad_panels["ohlcv_core"].loc[bad_panels["ohlcv_core"].index[:5], "available_at"] -= pd.Timedelta(days=30)
+    panel2 = type(panel)(**{**panel.__dict__, "panels": bad_panels})
+    rep = checks.CheckReport()
+    checks.check_availability(panel2, folds, panel.target.label_end_days, rep)
+    assert "availability" in rep.failures and rep.results["availability"]["available_before_observation"]["ohlcv_core"] == 5

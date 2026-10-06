@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 
 from ..data import store
+from ..guard import cut_final_test
 from .base import Source
 from .ohlcv_core import stack_features
 from .registry import register_source
@@ -32,6 +33,7 @@ class DerivativesMetrics(Source):
         for s in symbols:
             df = store.read_frame("um_metrics_1d", s)
             if df is not None and len(df):
+                df = cut_final_test(df)  # nihai pencere (>= 2025-10-01) varsayılan KESİLİR (doğrudan fetch() çağrısı da)
                 out[s] = df[(df.index >= start) & (df.index <= end)]
         return out
 

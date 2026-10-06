@@ -167,7 +167,7 @@ def _fetch_zip_frames(http: Http, keys: list[str], parser) -> list[pd.DataFrame]
         if content:
             try:
                 frames.append(parser(content))
-            except Exception:  # noqa: BLE001 - bozuk zip: atlanır, kalite raporunda eksik gün olarak görünür
+            except Exception:
                 continue
     return frames
 
@@ -322,7 +322,7 @@ def _run_parallel(tasks: list, workers: int, label: str) -> list[dict]:
         for i, fut in enumerate(as_completed(futures), 1):
             try:
                 results.append(fut.result())
-            except Exception as exc:  # noqa: BLE001 - tek sembol hatası tümünü durdurmaz; raporlanır
+            except Exception as exc:
                 results.append({"symbol": futures[fut], "status": "error", "error": str(exc)[:200]})
             if i % 25 == 0 or i == len(futures):
                 print(f"[{label}] {i}/{len(futures)}", flush=True)

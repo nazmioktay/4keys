@@ -72,7 +72,7 @@ def download_metrics(http: Http, symbol: str, since: pd.Timestamp | None = None)
         if content:
             try:
                 frames.append(daily_aggregate(parse_metrics_zip(content)))
-            except Exception:  # noqa: BLE001 - bozuk dosya: eksik gün olarak kalır (kalite raporu)
+            except Exception:
                 continue
     if not frames:
         return None

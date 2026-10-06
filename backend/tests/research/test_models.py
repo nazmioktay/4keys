@@ -2,7 +2,6 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from research.models import registry
 from research.models.base import BaseModel
 from research.models.registry import available_models, get_model, register_model
 

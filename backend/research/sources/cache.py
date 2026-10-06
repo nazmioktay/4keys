@@ -13,7 +13,7 @@ from .base import Source
 
 
 def cache_key(source: Source, data_hash: str, universe: list[str], dates: pd.DatetimeIndex) -> str:
-    blob = "|".join([source.param_hash(), data_hash, ",".join(sorted(universe)), str(dates.min()), str(dates.max()), str(len(dates))])
+    blob = "|".join([source.param_hash(), data_hash, source.data_signature(), ",".join(sorted(universe)), str(dates.min()), str(dates.max()), str(len(dates))])
     return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
 

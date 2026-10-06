@@ -74,4 +74,16 @@ içinde tek yerde durur ve bu belgeyle birebir aynı olmalıdır.
 - **Sızıntı testleri:** karıştırılmış hedef, `available_at` denetimi veya tekrarlanabilirlik testinden biri başarısızsa deney **GEÇERSİZ**
   sayılır (yine kaydedilir, sayaç artar, karar "GEÇERSİZ: ..."); +1 gün gecikme testi yalnızca UYARIDIR (kalıcı hedeflerde güçsüzdür).
 - **Eşikler yine önceden kayıtlıdır (§5);** çerçeve yalnızca ölçer, sonuç görüldükten sonra değiştirilemez.
+- **Smoke kaçağı kapatıldı:** `smoke` koşuları deneme sayacına sayılmaz AMA soru başına en fazla **10** kez koşturulabilir (`smoke_runs`,
+  `_registry.json`); çıktıları "karar için KULLANILAMAZ" damgalıdır. Kayıtsız ablasyon yalnızca `smoke=True` ile yapılabilir
+  (varsayılan: her ablasyon kayıtlı bir config). Bütçe, kayıt anında **kilit altında** zorlanır (eşzamanlı koşular 40'ı aşamaz).
+- **`question` normalize edilir** (`strip` + küçük harf; yalnızca `a-z0-9_.-`): "Vol_Tahmini " ile "vol_tahmini" aynı bütçedir.
+- **`final_test` kayıt satırı tam eşleşir:** `FINAL-TEST-ACILDI e1` satırı `e10`'u AÇMAZ.
+- **AÇIK KARAR (kullanıcıya):** `forward_only` veri nihai test penceresinden (>= 2025-10-01) SONRA birikir, oysa deney dönemi
+  (`period.end`) bu pencereye giremez. Sonuç: bu kaynaklar mevcut kurallarla hiçbir deneyde kullanılamaz — koşucu bunu sessizce boş
+  özellik üretmek yerine `ForwardOnlyNoOverlapError` ile REDDEDER. Seçenekler: (a) forward_only verileri yalnızca nihai pencere açıldığında
+  (Aşama 5) kullanmak; (b) KURALLAR'a ayrı, önceden kayıtlı bir "ileriye dönük doğrulama" penceresi eklemek (ör. toplama başlangıcından itibaren
+  ilk 12 ay yalnızca keşif, sonrası kilitli test). Nihai pencere kilidini bu karar verilmeden gevşetmiyoruz.
+- **Kod sınırı notu:** araştırma kodu `app/`'e yalnızca iki yerden bağlanır: `app/forwardcollect` (toplayıcı, opt-in) ve
+  `research/sources/forward.py` (onun tablolarını `app.db.repository` üzerinden okur). Başka araştırma modülü `app/`'e dokunmaz.
 

@@ -6,10 +6,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-import numpy as np
 import pandas as pd
 
-from . import config
 from .data import store
 from .data.universe import universe_membership
 from .guard import assert_no_final_test
@@ -24,6 +22,10 @@ OHLC = ("open", "high", "low", "close")
 
 class ForwardOnlyTooShortError(RuntimeError):
     pass
+
+
+class ForwardOnlyNoOverlapError(RuntimeError):
+    """forward_only kaynak verisi, deney döneminde (period.end < nihai pencere) hiç satır üretmiyor."""
 
 
 @dataclass
@@ -90,6 +92,13 @@ def build_panel(cfg: dict) -> Panel:
         panel = source_cache.load_or_build(src, candidates, dates, data_hash)
         validate_panel(src, panel)
         panels[src.name] = panel
+        if src.forward_only and (panel.empty or not panel["date"].isin(dates).any()):
+            raise ForwardOnlyNoOverlapError(
+                f"'{src.name}' forward_only kaynağı deney döneminde ({dates.min():%Y-%m-%d} .. {dates.max():%Y-%m-%d}) hiç veri üretmiyor: "
+                "forward_only veri yalnızca toplamaya başlandığı andan itibaren (nihai test penceresinden SONRA) birikir. "
+                "Bu kaynaklar ancak nihai pencere açıldığında (Aşama 5) veya KURALLAR.md'ye eklenecek ayrı bir 'ileriye dönük doğrulama' "
+                "kuralıyla kullanılabilir (bkz. KURALLAR.md §9, açık karar)."
+            )
     merged = merge_sources(decisions, [(s, panels[s.name]) for s in sources])
 
     idx = pd.MultiIndex.from_frame(merged[["date", "symbol"]])
