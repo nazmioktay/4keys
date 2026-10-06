@@ -73,7 +73,7 @@ def check_availability(panel: Panel, folds, label_end_days: int, report: CheckRe
     violations = audit_available_at(panel.merged.reset_index(drop=True), panel.sources)
     before_obs = {name: int((p["available_at"] < p["date"]).sum()) for name, p in panel.panels.items() if len(p)}
     label_leaks = 0
-    for tr_mask, te_mask, tr_dates, te_dates in folds:
+    for _tr_mask, _te_mask, tr_dates, te_dates in folds:
         first_test_decision = te_dates.min() + pd.Timedelta(days=1)
         label_leaks += int((tr_dates + pd.Timedelta(days=label_end_days) > first_test_decision).sum())
     ok = sum(violations.values()) == 0 and sum(before_obs.values()) == 0 and label_leaks == 0

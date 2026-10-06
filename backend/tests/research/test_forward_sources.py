@@ -69,7 +69,7 @@ def test_oi_detail_daily_last_and_change():
     from app.db.models import OIDetailSnapshot
     from app.db.session import session_scope
 
-    for day, val in [("2024-03-01", 1e9), ("2024-03-02", 1.1e9), ("2024-03-03", 1.21e9)]:
+    for _day, val in [("2024-03-01", 1e9), ("2024-03-02", 1.1e9), ("2024-03-03", 1.21e9)]:
         db.record_oi_detail_snapshot("BTCUSDT", {"open_interest": 100.0, "open_interest_value": val, "top_ls_account": 1.5, "global_ls_account": 1.2, "taker_buy_sell_ratio": 1.05})
     with session_scope() as s:
         for row, day in zip(s.query(OIDetailSnapshot).order_by(OIDetailSnapshot.id).all(), ("2024-03-01", "2024-03-02", "2024-03-03")):
