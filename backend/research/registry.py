@@ -47,9 +47,19 @@ class ExperimentExistsError(RuntimeError):
 
 
 def git_commit() -> str:
+    """Deneyin koştuğu kod sürümü: `GIT_COMMIT` ortam değişkeni (verilirse) ya da `git rev-parse`. Koşu anında `backend/`
+    altında commit edilmemiş değişiklik varsa `+dirty` eklenir (kayıttaki hash o kodu tam temsil etmez)."""
+    env = os.environ.get("GIT_COMMIT", "").strip()
+    if env:
+        return env
     try:
         out = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=config.REPO_ROOT, capture_output=True, text=True, timeout=10)
-        return out.stdout.strip() or "unknown"
+        commit = out.stdout.strip()
+        if not commit:
+            return "unknown"
+        dirty = subprocess.run(["git", "status", "--porcelain", "--untracked-files=no", "--", "backend"], cwd=config.REPO_ROOT,
+                               capture_output=True, text=True, timeout=10)
+        return commit + ("+dirty" if dirty.returncode == 0 and dirty.stdout.strip() else "")
     except Exception:
         return "unknown"
 
