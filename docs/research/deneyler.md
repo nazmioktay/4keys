@@ -543,3 +543,8 @@ varlığına dayanıyor. Bu tarihte kabul edilmiş kol YOK (trend_001, kesitsel_
 - Nihai pencere (KURALLAR §1) tek kullanımlıktır; kabul edilmemiş bir adayla açılması onu gelecekteki gerçek adaylar için tüketirdi.
 - **Kullanıcı kararıyla (2026-10-08) koşturulmadı; nihai pencere KİLİTLİ ve KULLANILMAMIŞ.** Tasarım
   `docs/research/sablonlar/portfoy_nihai_test.md`'de bekliyor.
+
+## Portföy paper modu — UYGULANMADI (2026-10-08)
+Talimat "aday_v1 nihai testi geçti" varsayımıyla geldi; `research/configs/aday_v1.yaml` yok ve nihai test yapılmadı (kabul edilmiş kol
+yok). Kullanıcı kararıyla (2026-10-08) kod yazılmadı; saatlik ML motoru varsayılan olarak kalıyor. Tasarım
+`docs/research/sablonlar/portfoy_paper.md`'de bekliyor.
