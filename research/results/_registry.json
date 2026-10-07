@@ -1,6 +1,17 @@
 {
- "total_trials": 0,
- "experiments": [],
+ "total_trials": 248,
+ "experiments": [
+  {
+   "id": "trend_001",
+   "question": "trend",
+   "n_variants": 248,
+   "trials_before": 0,
+   "trials_after": 248,
+   "date": "2026-10-07T07:35:46+00:00",
+   "git_commit": "unknown",
+   "data_hash": "0774e2086a790a0b"
+  }
+ ],
  "smoke_runs": {
   "vol_tahmini": 1
  }

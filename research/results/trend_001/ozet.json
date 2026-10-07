@@ -1,0 +1,1177 @@
+{
+ "experiment_id": "trend_001",
+ "decision": "KALDI — main LF: (net_sharpe, deflated_sharpe, pbo, max_drawdown, calmar, stress); main LS: (net_sharpe, deflated_sharpe, pbo, max_drawdown, calmar, stress, plateau). DUR (ızgara genişletilmez).",
+ "pbo": 0.49696969696969695,
+ "n_variants": 248,
+ "trials_after": 248,
+ "btc_calmar": 0.20735530682802936,
+ "plateau": {
+  "LF": {
+   "N": 30,
+   "band": 0.25,
+   "base_sharpe": 0.5215922251911284,
+   "neighbors": {
+    "a20×0.5": 0.5981564313083968,
+    "a20×1.5": 0.5254811406053139,
+    "a60×0.5": 0.5773899776624811,
+    "a60×1.5": 0.44408698052615087,
+    "a120×0.5": 0.5693025633125187,
+    "a120×1.5": 0.3917595176118931,
+    "a250×0.5": 0.5312349313885767,
+    "a250×1.5": 0.5628648738239427,
+    "ema8/32×0.5": 0.5814123125519551,
+    "ema8/32×1.5": 0.45014163202809726,
+    "ema16/64×0.5": 0.5896868788687377,
+    "ema16/64×1.5": 0.45525609302369624,
+    "ema32/128×0.5": 0.6333084808221768,
+    "ema32/128×1.5": 0.5476477149632443,
+    "vol_span×0.5": 0.6840675144990354,
+    "vol_span×1.5": 0.4561494656531839
+   },
+   "ratio": 0.7510838902331024
+  },
+  "LS": {
+   "N": 30,
+   "band": 0.25,
+   "base_sharpe": 0.3774727392540632,
+   "neighbors": {
+    "a20×0.5": 0.43215213886283815,
+    "a20×1.5": 0.4516786517981604,
+    "a60×0.5": 0.40174852591542665,
+    "a60×1.5": 0.260223799177648,
+    "a120×0.5": 0.3875305562876364,
+    "a120×1.5": 0.18544595825810065,
+    "a250×0.5": 0.41668431244534393,
+    "a250×1.5": 0.33929281524075716,
+    "ema8/32×0.5": 0.3901590459846286,
+    "ema8/32×1.5": 0.349124859540215,
+    "ema16/64×0.5": 0.4058866893429286,
+    "ema16/64×1.5": 0.3581105469297373,
+    "ema32/128×0.5": 0.4218036404874581,
+    "ema32/128×1.5": 0.3459669100911861,
+    "vol_span×0.5": 0.38292042071953364,
+    "vol_span×1.5": 0.3412971219373877
+   },
+   "ratio": 0.4912830490079012
+  }
+ },
+ "nav_small": {
+  "LF": {
+   "skipped_rate_1000": 0.10540529481566349,
+   "skipped_rate_10000": 0.0028984271770171773,
+   "annual_return_1000": 0.0750613827785156,
+   "annual_return_10000": 0.08012495149792298
+  },
+  "LS": {
+   "skipped_rate_1000": 0.0867221153585652,
+   "skipped_rate_10000": 2.8635244258633525e-05,
+   "annual_return_1000": 0.0638493832804865,
+   "annual_return_10000": 0.055069563771584784
+  }
+ },
+ "stress": {
+  "main LF (WF)": {
+   "2020-03": {
+    "max_dd": null,
+    "recovery_days": null,
+    "note": "değerlendirilemez (seri dönemden sonra başlıyor)"
+   },
+   "2021-05": {
+    "max_dd": -0.08835399840323965,
+    "recovery_days": 84,
+    "note": ""
+   },
+   "2022-05 (LUNA)": {
+    "max_dd": -0.23396805730855763,
+    "recovery_days": 656,
+    "note": ""
+   },
+   "2022-11 (FTX)": {
+    "max_dd": -0.3993278765976215,
+    "recovery_days": 479,
+    "note": ""
+   }
+  },
+  "main LS (WF)": {
+   "2020-03": {
+    "max_dd": null,
+    "recovery_days": null,
+    "note": "değerlendirilemez (seri dönemden sonra başlıyor)"
+   },
+   "2021-05": {
+    "max_dd": -0.09666196766418089,
+    "recovery_days": 89,
+    "note": ""
+   },
+   "2022-05 (LUNA)": {
+    "max_dd": -0.23695534852316202,
+    "recovery_days": 40,
+    "note": ""
+   },
+   "2022-11 (FTX)": {
+    "max_dd": -0.22137289949810557,
+    "recovery_days": 463,
+    "note": ""
+   }
+  },
+  "BTC al-tut": {
+   "2020-03": {
+    "max_dd": -0.5401549013303055,
+    "recovery_days": 137,
+    "note": ""
+   },
+   "2021-05": {
+    "max_dd": -0.45612286992065976,
+    "recovery_days": 143,
+    "note": ""
+   },
+   "2022-05 (LUNA)": {
+    "max_dd": -0.5765633374522795,
+    "recovery_days": 647,
+    "note": ""
+   },
+   "2022-11 (FTX)": {
+    "max_dd": -0.766619107269602,
+    "recovery_days": 469,
+    "note": ""
+   }
+  },
+  "EW ilk-10 al-tut (aylık)": {
+   "2020-03": {
+    "max_dd": null,
+    "recovery_days": null,
+    "note": "değerlendirilemez (seri dönemden sonra başlıyor)"
+   },
+   "2021-05": {
+    "max_dd": -0.5163396410543538,
+    "recovery_days": null,
+    "note": "2025-09-30'e kadar toparlanmadı"
+   },
+   "2022-05 (LUNA)": {
+    "max_dd": -0.8279767408352648,
+    "recovery_days": null,
+    "note": "2025-09-30'e kadar toparlanmadı"
+   },
+   "2022-11 (FTX)": {
+    "max_dd": -0.8976566624601074,
+    "recovery_days": null,
+    "note": "2025-09-30'e kadar toparlanmadı"
+   }
+  },
+  "BTC EMA200 long/flat": {
+   "2020-03": {
+    "max_dd": null,
+    "recovery_days": null,
+    "note": "değerlendirilemez (seri dönemden sonra başlıyor)"
+   },
+   "2021-05": {
+    "max_dd": -0.44547044176481954,
+    "recovery_days": 1026,
+    "note": ""
+   },
+   "2022-05 (LUNA)": {
+    "max_dd": -0.5941229508482775,
+    "recovery_days": 680,
+    "note": ""
+   },
+   "2022-11 (FTX)": {
+    "max_dd": -0.5941229508482775,
+    "recovery_days": 496,
+    "note": ""
+   }
+  }
+ },
+ "benchmarks": {
+  "BTC al-tut": {
+   "sharpe": 0.5441262646580297,
+   "calmar": 0.20735530682802936,
+   "max_dd": -0.766619107269602,
+   "annual_return": 0.15896254020811829,
+   "turnover": 3.5688973923974407e-14,
+   "cost_to_gross": 8.066313466696863e-17,
+   "positive_years": 0.6,
+   "corr_btc": 0.9999999999999999
+  },
+  "EW ilk-10 al-tut (aylık)": {
+   "sharpe": 0.14761903683916136,
+   "calmar": -0.215219320168293,
+   "max_dd": -0.9264354337944556,
+   "annual_return": -0.19938680424106037,
+   "turnover": 7.942347647431604,
+   "cost_to_gross": 0.06679985664865533,
+   "positive_years": 0.6,
+   "corr_btc": 0.830304233612954
+  },
+  "BTC EMA200 long/flat": {
+   "sharpe": 0.23272819174450568,
+   "calmar": 0.01687243483461658,
+   "max_dd": -0.6046888503095816,
+   "annual_return": 0.010202573222067635,
+   "turnover": 12.960093732591213,
+   "cost_to_gross": 0.48087450358687994,
+   "positive_years": 0.6,
+   "corr_btc": 0.7329232502244519
+  }
+ },
+ "wf": [
+  {
+   "signal": "a20",
+   "dir": "LF",
+   "sharpe": 0.3969053349098954,
+   "calmar": 0.17286612536016135,
+   "max_dd": -0.42064311836575696,
+   "annual_return": 0.07271494603130413,
+   "turnover": 31.202748198143347,
+   "cost_to_gross": 0.2916015468544994,
+   "positive_years": 0.8,
+   "corr_btc": 0.6202984492927134,
+   "dsr": 0.28264682202109936,
+   "stress_sharpe": 0.21677246941878625,
+   "delay1_sharpe": 0.4459665522122632,
+   "selections": [
+    "2021-04:N10/b0.10",
+    "2021-10:N10/b0.10",
+    "2022-04:N10/b0.10",
+    "2022-10:N10/b0.10",
+    "2023-04:N10/b0.10",
+    "2023-10:N30/b0.25",
+    "2024-04:N30/b0.25",
+    "2024-10:N10/b0.25",
+    "2025-04:N10/b0.25"
+   ],
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": false,
+    "max_drawdown": false,
+    "calmar": false,
+    "positive_years": true,
+    "stress": false,
+    "plateau": false
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, pbo, max_drawdown, calmar, stress)"
+  },
+  {
+   "signal": "a20",
+   "dir": "LS",
+   "sharpe": 0.042952434306877466,
+   "calmar": -0.05887954992633893,
+   "max_dd": -0.3471519171117208,
+   "annual_return": -0.02044014863560384,
+   "turnover": 47.522518545041606,
+   "cost_to_gross": 0.8572229866040944,
+   "positive_years": 0.4,
+   "corr_btc": -0.06274344239678517,
+   "dsr": 0.09302885342387202,
+   "stress_sharpe": -0.25266909447306524,
+   "delay1_sharpe": 0.15934401538531148,
+   "selections": [
+    "2021-04:N10/b0.25",
+    "2021-10:N10/b0.25",
+    "2022-04:N10/b0.25",
+    "2022-10:N10/b0.25",
+    "2023-04:N10/b0.25",
+    "2023-10:N30/b0.25",
+    "2024-04:N10/b0.25",
+    "2024-10:N30/b0.25",
+    "2025-04:N10/b0.25"
+   ],
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": false,
+    "max_drawdown": true,
+    "calmar": false,
+    "positive_years": false,
+    "stress": false,
+    "plateau": false
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, pbo, calmar, positive_years, stress)",
+   "legs": {
+    "long": 0.35693880893154445,
+    "short": -0.29027934991519794
+   }
+  },
+  {
+   "signal": "a60",
+   "dir": "LF",
+   "sharpe": 0.38364334007730616,
+   "calmar": 0.15744318963709444,
+   "max_dd": -0.43056222273765055,
+   "annual_return": 0.06778908968505282,
+   "turnover": 19.62399065415027,
+   "cost_to_gross": 0.256821916132906,
+   "positive_years": 0.8,
+   "corr_btc": 0.6501252859722075,
+   "dsr": 0.27455579163718047,
+   "stress_sharpe": 0.22854352872165648,
+   "delay1_sharpe": 0.2613306886694088,
+   "selections": [
+    "2021-04:N30/b0.25",
+    "2021-10:N10/b0.25",
+    "2022-04:N30/b0.25",
+    "2022-10:N10/b0.10",
+    "2023-04:N30/b0.25",
+    "2023-10:N30/b0.25",
+    "2024-04:N30/b0.25",
+    "2024-10:N30/b0.25",
+    "2025-04:N30/b0.25"
+   ],
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": false,
+    "max_drawdown": false,
+    "calmar": false,
+    "positive_years": true,
+    "stress": false,
+    "plateau": false
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, pbo, max_drawdown, calmar, stress)"
+  },
+  {
+   "signal": "a60",
+   "dir": "LS",
+   "sharpe": 0.2849779269760517,
+   "calmar": 0.1289340627695304,
+   "max_dd": -0.31608270278747097,
+   "annual_return": 0.04075382704156261,
+   "turnover": 30.388573446854274,
+   "cost_to_gross": 0.40443161881317685,
+   "positive_years": 0.8,
+   "corr_btc": 0.013477686845614874,
+   "dsr": 0.2091899153518637,
+   "stress_sharpe": 0.029105163775865042,
+   "delay1_sharpe": 0.24049883780624043,
+   "selections": [
+    "2021-04:N20/b0.25",
+    "2021-10:N20/b0.25",
+    "2022-04:N30/b0.25",
+    "2022-10:N30/b0.25",
+    "2023-04:N30/b0.25",
+    "2023-10:N30/b0.25",
+    "2024-04:N30/b0.25",
+    "2024-10:N30/b0.25",
+    "2025-04:N30/b0.25"
+   ],
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": false,
+    "max_drawdown": true,
+    "calmar": false,
+    "positive_years": true,
+    "stress": false,
+    "plateau": false
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, pbo, calmar, stress)",
+   "legs": {
+    "long": 0.3518832155624465,
+    "short": -0.008622554503875529
+   }
+  },
+  {
+   "signal": "a120",
+   "dir": "LF",
+   "sharpe": 0.3744388616968147,
+   "calmar": 0.1482983905081607,
+   "max_dd": -0.4391752455720185,
+   "annual_return": 0.06512898206935658,
+   "turnover": 14.759809792180548,
+   "cost_to_gross": 0.23132690116161456,
+   "positive_years": 0.8,
+   "corr_btc": 0.6795134914426755,
+   "dsr": 0.2673311943582913,
+   "stress_sharpe": 0.27716440490756505,
+   "delay1_sharpe": 0.3241597269562691,
+   "selections": [
+    "2021-04:N10/b0.25",
+    "2021-10:N10/b0.25",
+    "2022-04:N10/b0.25",
+    "2022-10:N10/b0.25",
+    "2023-04:N10/b0.25",
+    "2023-10:N30/b0.25",
+    "2024-04:N30/b0.25",
+    "2024-10:N30/b0.25",
+    "2025-04:N10/b0.25"
+   ],
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": false,
+    "max_drawdown": false,
+    "calmar": false,
+    "positive_years": true,
+    "stress": false,
+    "plateau": false
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, pbo, max_drawdown, calmar, stress)"
+  },
+  {
+   "signal": "a120",
+   "dir": "LS",
+   "sharpe": 0.45196609304849705,
+   "calmar": 0.3297983682814456,
+   "max_dd": -0.26102936342004823,
+   "annual_return": 0.08608705812947637,
+   "turnover": 25.270574662853605,
+   "cost_to_gross": 0.2389549079994606,
+   "positive_years": 0.8,
+   "corr_btc": 0.22632150539711754,
+   "dsr": 0.3239704304250041,
+   "stress_sharpe": 0.3364672058481083,
+   "delay1_sharpe": 0.37852006769383123,
+   "selections": [
+    "2021-04:N10/b0.25",
+    "2021-10:N10/b0.25",
+    "2022-04:N10/b0.25",
+    "2022-10:N10/b0.25",
+    "2023-04:N10/b0.25",
+    "2023-10:N10/b0.25",
+    "2024-04:N10/b0.25",
+    "2024-10:N10/b0.10",
+    "2025-04:N10/b0.25"
+   ],
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": false,
+    "max_drawdown": true,
+    "calmar": false,
+    "positive_years": true,
+    "stress": false,
+    "plateau": false
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, pbo, calmar, stress)",
+   "legs": {
+    "long": 0.7606114104191,
+    "short": -0.22974566009382752
+   }
+  },
+  {
+   "signal": "a250",
+   "dir": "LF",
+   "sharpe": -0.1551639434650941,
+   "calmar": -0.0989412723553676,
+   "max_dd": -0.6377757595333029,
+   "annual_return": -0.06310234512563595,
+   "turnover": 12.283895709596536,
+   "cost_to_gross": NaN,
+   "positive_years": 0.8,
+   "corr_btc": 0.7383888157383106,
+   "dsr": 0.04057707680565769,
+   "stress_sharpe": -0.2751926387045119,
+   "delay1_sharpe": 0.10776761802579927,
+   "selections": [
+    "2021-04:N10/b0.25",
+    "2021-10:N10/b0.25",
+    "2022-04:N10/b0.25",
+    "2022-10:N10/b0.25",
+    "2023-04:N30/b0.25",
+    "2023-10:N30/b0.25",
+    "2024-04:N30/b0.25",
+    "2024-10:N30/b0.25",
+    "2025-04:N10/b0.25"
+   ],
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": false,
+    "max_drawdown": false,
+    "calmar": false,
+    "positive_years": true,
+    "stress": false,
+    "plateau": false
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, pbo, max_drawdown, calmar, stress)"
+  },
+  {
+   "signal": "a250",
+   "dir": "LS",
+   "sharpe": 0.20676100158777797,
+   "calmar": 0.042797755913978004,
+   "max_dd": -0.4801715865902487,
+   "annual_return": 0.020550266359717018,
+   "turnover": 22.50068961647354,
+   "cost_to_gross": 0.44659290417465675,
+   "positive_years": 0.8,
+   "corr_btc": 0.3430078163509809,
+   "dsr": 0.16561332315242527,
+   "stress_sharpe": 0.03032536206732565,
+   "delay1_sharpe": 0.3829446091031289,
+   "selections": [
+    "2021-04:N10/b0.25",
+    "2021-10:N10/b0.25",
+    "2022-04:N20/b0.25",
+    "2022-10:N20/b0.25",
+    "2023-04:N30/b0.25",
+    "2023-10:N30/b0.25",
+    "2024-04:N20/b0.25",
+    "2024-10:N10/b0.25",
+    "2025-04:N10/b0.25"
+   ],
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": false,
+    "max_drawdown": false,
+    "calmar": false,
+    "positive_years": true,
+    "stress": false,
+    "plateau": false
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, pbo, max_drawdown, calmar, stress)",
+   "legs": {
+    "long": 0.6783217118893248,
+    "short": -0.42073156110971693
+   }
+  },
+  {
+   "signal": "b20",
+   "dir": "LF",
+   "sharpe": 0.7359468426564126,
+   "calmar": 0.4509069149578955,
+   "max_dd": -0.37111339382787856,
+   "annual_return": 0.16733759551048322,
+   "turnover": 26.023723162221035,
+   "cost_to_gross": 0.10164604695812288,
+   "positive_years": 0.8,
+   "corr_btc": 0.5163460848847545,
+   "dsr": 0.5589688139518743,
+   "stress_sharpe": 0.531386177926044,
+   "delay1_sharpe": 0.6270531034622493,
+   "selections": [
+    "2021-04:N20/b0.00",
+    "2021-10:N20/b0.25",
+    "2022-04:N30/b0.25",
+    "2022-10:N30/b0.25",
+    "2023-04:N30/b0.25",
+    "2023-10:N30/b0.25",
+    "2024-04:N30/b0.25",
+    "2024-10:N30/b0.25",
+    "2025-04:N30/b0.25"
+   ],
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": false,
+    "max_drawdown": false,
+    "calmar": false,
+    "positive_years": true,
+    "stress": true,
+    "plateau": false
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, pbo, max_drawdown, calmar)"
+  },
+  {
+   "signal": "b20",
+   "dir": "LS",
+   "sharpe": 0.1609630743843591,
+   "calmar": 0.02437620246892067,
+   "max_dd": -0.345349456981481,
+   "annual_return": 0.00841830828591239,
+   "turnover": 40.86675632060887,
+   "cost_to_gross": 0.5544857485996968,
+   "positive_years": 0.6,
+   "corr_btc": -0.02223396144585481,
+   "dsr": 0.1416769262764035,
+   "stress_sharpe": -0.08754190294738395,
+   "delay1_sharpe": 0.22312999364604197,
+   "selections": [
+    "2021-04:N10/b0.10",
+    "2021-10:N10/b0.25",
+    "2022-04:N10/b0.25",
+    "2022-10:N10/b0.25",
+    "2023-04:N10/b0.25",
+    "2023-10:N30/b0.25",
+    "2024-04:N30/b0.25",
+    "2024-10:N30/b0.25",
+    "2025-04:N10/b0.25"
+   ],
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": false,
+    "max_drawdown": true,
+    "calmar": false,
+    "positive_years": true,
+    "stress": false,
+    "plateau": false
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, pbo, calmar, stress)",
+   "legs": {
+    "long": 0.6150827057329928,
+    "short": -0.41461435977962274
+   }
+  },
+  {
+   "signal": "b60",
+   "dir": "LF",
+   "sharpe": 0.3332995336660342,
+   "calmar": 0.12411902627063887,
+   "max_dd": -0.4307986383955106,
+   "annual_return": 0.05347030751636783,
+   "turnover": 16.11574451540192,
+   "cost_to_gross": 0.20179764842265346,
+   "positive_years": 0.8,
+   "corr_btc": 0.5866497242770605,
+   "dsr": 0.2403072127254593,
+   "stress_sharpe": 0.19656314279044226,
+   "delay1_sharpe": 0.10468562945022991,
+   "selections": [
+    "2021-04:N30/b0.00",
+    "2021-10:N30/b0.25",
+    "2022-04:N30/b0.25",
+    "2022-10:N10/b0.10",
+    "2023-04:N30/b0.25",
+    "2023-10:N30/b0.25",
+    "2024-04:N30/b0.25",
+    "2024-10:N30/b0.25",
+    "2025-04:N30/b0.25"
+   ],
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": false,
+    "max_drawdown": false,
+    "calmar": false,
+    "positive_years": true,
+    "stress": false,
+    "plateau": false
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, pbo, max_drawdown, calmar, stress)"
+  },
+  {
+   "signal": "b60",
+   "dir": "LS",
+   "sharpe": -0.15619309573104223,
+   "calmar": -0.1283603945974762,
+   "max_dd": -0.5362646878364117,
+   "annual_return": -0.0688351469393742,
+   "turnover": 26.419233982086457,
+   "cost_to_gross": NaN,
+   "positive_years": 0.2,
+   "corr_btc": 0.1037785789948823,
+   "dsr": 0.040526040080898704,
+   "stress_sharpe": -0.34487219130583724,
+   "delay1_sharpe": -0.2196480127088948,
+   "selections": [
+    "2021-04:N30/b0.00",
+    "2021-10:N20/b0.10",
+    "2022-04:N10/b0.25",
+    "2022-10:N10/b0.25",
+    "2023-04:N10/b0.25",
+    "2023-10:N30/b0.25",
+    "2024-04:N30/b0.25",
+    "2024-10:N30/b0.25",
+    "2025-04:N30/b0.25"
+   ],
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": false,
+    "max_drawdown": false,
+    "calmar": false,
+    "positive_years": false,
+    "stress": false,
+    "plateau": false
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, pbo, max_drawdown, calmar, positive_years, stress)",
+   "legs": {
+    "long": -0.012568412640399155,
+    "short": -0.14809087107741759
+   }
+  },
+  {
+   "signal": "b120",
+   "dir": "LF",
+   "sharpe": 0.5740575201914855,
+   "calmar": 0.28347066513582087,
+   "max_dd": -0.42358715935599256,
+   "annual_return": 0.12007453380563615,
+   "turnover": 11.757464889823307,
+   "cost_to_gross": 0.12530216241428266,
+   "positive_years": 0.8,
+   "corr_btc": 0.6091062049826776,
+   "dsr": 0.4220805589484515,
+   "stress_sharpe": 0.5024851116118285,
+   "delay1_sharpe": 0.518587538201456,
+   "selections": [
+    "2021-04:N10/b0.25",
+    "2021-10:N10/b0.25",
+    "2022-04:N10/b0.25",
+    "2022-10:N10/b0.25",
+    "2023-04:N10/b0.25",
+    "2023-10:N10/b0.25",
+    "2024-04:N10/b0.25",
+    "2024-10:N10/b0.25",
+    "2025-04:N10/b0.25"
+   ],
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": false,
+    "max_drawdown": false,
+    "calmar": false,
+    "positive_years": true,
+    "stress": true,
+    "plateau": false
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, pbo, max_drawdown, calmar)"
+  },
+  {
+   "signal": "b120",
+   "dir": "LS",
+   "sharpe": 0.4751690653588569,
+   "calmar": 0.2833251024358307,
+   "max_dd": -0.32396064066695185,
+   "annual_return": 0.09178618170214148,
+   "turnover": 18.976615344565122,
+   "cost_to_gross": 0.197439763988937,
+   "positive_years": 0.8,
+   "corr_btc": 0.25059717475543036,
+   "dsr": 0.34241473512580134,
+   "stress_sharpe": 0.36953562713313237,
+   "delay1_sharpe": 0.44273530051596927,
+   "selections": [
+    "2021-04:N10/b0.25",
+    "2021-10:N10/b0.25",
+    "2022-04:N10/b0.25",
+    "2022-10:N10/b0.25",
+    "2023-04:N10/b0.25",
+    "2023-10:N10/b0.25",
+    "2024-04:N10/b0.25",
+    "2024-10:N10/b0.25",
+    "2025-04:N10/b0.25"
+   ],
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": false,
+    "max_drawdown": true,
+    "calmar": false,
+    "positive_years": true,
+    "stress": false,
+    "plateau": false
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, pbo, calmar, stress)",
+   "legs": {
+    "long": 0.7632209463835617,
+    "short": -0.2155274323546449
+   }
+  },
+  {
+   "signal": "b250",
+   "dir": "LF",
+   "sharpe": 0.04344448022666154,
+   "calmar": -0.036570832689716816,
+   "max_dd": -0.47680182767925294,
+   "annual_return": -0.017437039866209147,
+   "turnover": 10.060461534931937,
+   "cost_to_gross": 0.749663789232172,
+   "positive_years": 0.4,
+   "corr_btc": 0.7002910685231678,
+   "dsr": 0.0932958693493473,
+   "stress_sharpe": -0.03967888262017103,
+   "delay1_sharpe": 0.06347988449901033,
+   "selections": [
+    "2021-04:N10/b0.25",
+    "2021-10:N20/b0.25",
+    "2022-04:N20/b0.25",
+    "2022-10:N20/b0.25",
+    "2023-04:N30/b0.25",
+    "2023-10:N30/b0.25",
+    "2024-04:N30/b0.25",
+    "2024-10:N30/b0.25",
+    "2025-04:N30/b0.25"
+   ],
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": false,
+    "max_drawdown": false,
+    "calmar": false,
+    "positive_years": false,
+    "stress": false,
+    "plateau": false
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, pbo, max_drawdown, calmar, positive_years, stress)"
+  },
+  {
+   "signal": "b250",
+   "dir": "LS",
+   "sharpe": -0.2514195221838444,
+   "calmar": -0.15898396908736298,
+   "max_dd": -0.5308124067972126,
+   "annual_return": -0.0843906632734368,
+   "turnover": 17.41514458089236,
+   "cost_to_gross": NaN,
+   "positive_years": 0.6,
+   "corr_btc": 0.2972920872797037,
+   "dsr": 0.02574992458210922,
+   "stress_sharpe": -0.4352162991887387,
+   "delay1_sharpe": -0.19281058169671386,
+   "selections": [
+    "2021-04:N10/b0.25",
+    "2021-10:N20/b0.25",
+    "2022-04:N30/b0.25",
+    "2022-10:N30/b0.25",
+    "2023-04:N30/b0.25",
+    "2023-10:N30/b0.25",
+    "2024-04:N30/b0.25",
+    "2024-10:N30/b0.25",
+    "2025-04:N10/b0.25"
+   ],
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": false,
+    "max_drawdown": false,
+    "calmar": false,
+    "positive_years": true,
+    "stress": false,
+    "plateau": false
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, pbo, max_drawdown, calmar, stress)",
+   "legs": {
+    "long": 0.12705587825702835,
+    "short": -0.3751295601822786
+   }
+  },
+  {
+   "signal": "c_mix",
+   "dir": "LF",
+   "sharpe": 0.24209792071833922,
+   "calmar": 0.05657803258405574,
+   "max_dd": -0.519213375463932,
+   "annual_return": 0.02937607127507591,
+   "turnover": 11.701714085054123,
+   "cost_to_gross": 0.23947491247694985,
+   "positive_years": 0.8,
+   "corr_btc": 0.6072014569095626,
+   "dsr": 0.1849699073706747,
+   "stress_sharpe": 0.15621354765819545,
+   "delay1_sharpe": 0.1868630212070235,
+   "selections": [
+    "2021-04:N30/b0.25",
+    "2021-10:N10/b0.25",
+    "2022-04:N10/b0.25",
+    "2022-10:N10/b0.25",
+    "2023-04:N10/b0.25",
+    "2023-10:N30/b0.25",
+    "2024-04:N30/b0.25",
+    "2024-10:N30/b0.25",
+    "2025-04:N30/b0.25"
+   ],
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": false,
+    "max_drawdown": false,
+    "calmar": false,
+    "positive_years": true,
+    "stress": false,
+    "plateau": false
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, pbo, max_drawdown, calmar, stress)"
+  },
+  {
+   "signal": "c_mix",
+   "dir": "LS",
+   "sharpe": 0.2669890854615711,
+   "calmar": 0.09943700734951375,
+   "max_dd": -0.3623330199466259,
+   "annual_return": 0.036029311167404154,
+   "turnover": 18.6342831305786,
+   "cost_to_gross": 0.37035492639266304,
+   "positive_years": 0.6,
+   "corr_btc": 0.028410780673188214,
+   "dsr": 0.1992243174486571,
+   "stress_sharpe": 0.10737352144185058,
+   "delay1_sharpe": 0.3002371736137132,
+   "selections": [
+    "2021-04:N10/b0.10",
+    "2021-10:N10/b0.25",
+    "2022-04:N20/b0.25",
+    "2022-10:N10/b0.25",
+    "2023-04:N30/b0.25",
+    "2023-10:N30/b0.25",
+    "2024-04:N30/b0.25",
+    "2024-10:N30/b0.25",
+    "2025-04:N30/b0.25"
+   ],
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": false,
+    "max_drawdown": false,
+    "calmar": false,
+    "positive_years": true,
+    "stress": false,
+    "plateau": false
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, pbo, max_drawdown, calmar, stress)",
+   "legs": {
+    "long": 0.4115128345843201,
+    "short": -0.08808677704083148
+   }
+  },
+  {
+   "signal": "d20_10",
+   "dir": "LF",
+   "sharpe": 0.44198284199671367,
+   "calmar": 0.22527247139315668,
+   "max_dd": -0.3751253949819856,
+   "annual_return": 0.08450542480992596,
+   "turnover": 13.814892001217551,
+   "cost_to_gross": 0.1717259866585079,
+   "positive_years": 0.6,
+   "corr_btc": 0.5586139945306055,
+   "dsr": 0.3165280483861781,
+   "stress_sharpe": 0.358136496487757,
+   "delay1_sharpe": 0.35911123784529353,
+   "selections": [
+    "2021-04:N10/b0.00",
+    "2021-10:N10/b0.25",
+    "2022-04:N10/b0.25",
+    "2022-10:N10/b0.25",
+    "2023-04:N10/b0.25",
+    "2023-10:N30/b0.25",
+    "2024-04:N30/b0.25",
+    "2024-10:N20/b0.25",
+    "2025-04:N10/b0.25"
+   ],
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": false,
+    "max_drawdown": false,
+    "calmar": false,
+    "positive_years": true,
+    "stress": false,
+    "plateau": false
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, pbo, max_drawdown, calmar, stress)"
+  },
+  {
+   "signal": "d20_10",
+   "dir": "LS",
+   "sharpe": 0.05635196087048852,
+   "calmar": -0.04198008663894394,
+   "max_dd": -0.41786987343203463,
+   "annual_return": -0.01754221349048135,
+   "turnover": 20.198387646699903,
+   "cost_to_gross": 0.6968509285440944,
+   "positive_years": 0.6,
+   "corr_btc": 0.03934068372558869,
+   "dsr": 0.09797063517026755,
+   "stress_sharpe": -0.05824861262951301,
+   "delay1_sharpe": 0.07470791629540609,
+   "selections": [
+    "2021-04:N10/b0.00",
+    "2021-10:N10/b0.25",
+    "2022-04:N10/b0.25",
+    "2022-10:N10/b0.25",
+    "2023-04:N10/b0.25",
+    "2023-10:N10/b0.25",
+    "2024-04:N10/b0.25",
+    "2024-10:N30/b0.25",
+    "2025-04:N10/b0.25"
+   ],
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": false,
+    "max_drawdown": false,
+    "calmar": false,
+    "positive_years": true,
+    "stress": false,
+    "plateau": false
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, pbo, max_drawdown, calmar, stress)",
+   "legs": {
+    "long": 0.38969786393550643,
+    "short": -0.2945697597754085
+   }
+  },
+  {
+   "signal": "d55_20",
+   "dir": "LF",
+   "sharpe": 0.09964084671317258,
+   "calmar": -0.013535671978631928,
+   "max_dd": -0.5251316313355354,
+   "annual_return": -0.007108009507361679,
+   "turnover": 10.316728415317161,
+   "cost_to_gross": 0.377243097322854,
+   "positive_years": 0.8,
+   "corr_btc": 0.5915907514671713,
+   "dsr": 0.11488673753275858,
+   "stress_sharpe": 0.02050980078651719,
+   "delay1_sharpe": -0.008546349623184952,
+   "selections": [
+    "2021-04:N30/b0.00",
+    "2021-10:N10/b0.25",
+    "2022-04:N10/b0.25",
+    "2022-10:N10/b0.25",
+    "2023-04:N10/b0.25",
+    "2023-10:N30/b0.25",
+    "2024-04:N30/b0.25",
+    "2024-10:N30/b0.25",
+    "2025-04:N30/b0.25"
+   ],
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": false,
+    "max_drawdown": false,
+    "calmar": false,
+    "positive_years": true,
+    "stress": false,
+    "plateau": false
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, pbo, max_drawdown, calmar, stress)"
+  },
+  {
+   "signal": "d55_20",
+   "dir": "LS",
+   "sharpe": -0.17575499472753567,
+   "calmar": -0.12384582436939365,
+   "max_dd": -0.5935946950964919,
+   "annual_return": -0.0735142243555239,
+   "turnover": 15.539319278761548,
+   "cost_to_gross": NaN,
+   "positive_years": 0.2,
+   "corr_btc": 0.1730315088391091,
+   "dsr": 0.037093555526953044,
+   "stress_sharpe": -0.2834549656810849,
+   "delay1_sharpe": -0.1598583127722773,
+   "selections": [
+    "2021-04:N10/b0.00",
+    "2021-10:N10/b0.25",
+    "2022-04:N10/b0.25",
+    "2022-10:N10/b0.25",
+    "2023-04:N10/b0.25",
+    "2023-10:N30/b0.25",
+    "2024-04:N30/b0.25",
+    "2024-10:N30/b0.25",
+    "2025-04:N30/b0.25"
+   ],
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": false,
+    "max_drawdown": false,
+    "calmar": false,
+    "positive_years": false,
+    "stress": false,
+    "plateau": false
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, pbo, max_drawdown, calmar, positive_years, stress)",
+   "legs": {
+    "long": 0.1316489508544722,
+    "short": -0.3007030760858957
+   }
+  },
+  {
+   "signal": "main",
+   "dir": "LF",
+   "sharpe": 0.4272066789512915,
+   "calmar": 0.16732312764824397,
+   "max_dd": -0.4788635774629203,
+   "annual_return": 0.08012495149792298,
+   "turnover": 18.05341718863186,
+   "cost_to_gross": 0.15870673435964092,
+   "positive_years": 0.8,
+   "corr_btc": 0.6027162207877608,
+   "dsr": 0.3065349664757452,
+   "stress_sharpe": 0.2862943100554782,
+   "delay1_sharpe": 0.41273992842258417,
+   "selections": [
+    "2021-04:N30/b0.25",
+    "2021-10:N10/b0.25",
+    "2022-04:N10/b0.25",
+    "2022-10:N10/b0.25",
+    "2023-04:N30/b0.25",
+    "2023-10:N30/b0.25",
+    "2024-04:N30/b0.25",
+    "2024-10:N30/b0.25",
+    "2025-04:N30/b0.25"
+   ],
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": false,
+    "max_drawdown": false,
+    "calmar": false,
+    "positive_years": true,
+    "stress": false,
+    "plateau": true
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, pbo, max_drawdown, calmar, stress)"
+  },
+  {
+   "signal": "main",
+   "dir": "LS",
+   "sharpe": 0.3386908826104105,
+   "calmar": 0.15622858038975324,
+   "max_dd": -0.3524935298919013,
+   "annual_return": 0.055069563771584784,
+   "turnover": 28.282318343637424,
+   "cost_to_gross": 0.3652103299336897,
+   "positive_years": 0.6,
+   "corr_btc": 0.07470207957072336,
+   "dsr": 0.2438468393715369,
+   "stress_sharpe": 0.12404740321617821,
+   "delay1_sharpe": 0.37016182963587324,
+   "selections": [
+    "2021-04:N10/b0.25",
+    "2021-10:N10/b0.25",
+    "2022-04:N10/b0.25",
+    "2022-10:N10/b0.25",
+    "2023-04:N30/b0.25",
+    "2023-10:N30/b0.25",
+    "2024-04:N30/b0.25",
+    "2024-10:N30/b0.25",
+    "2025-04:N30/b0.25"
+   ],
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": false,
+    "max_drawdown": false,
+    "calmar": false,
+    "positive_years": true,
+    "stress": false,
+    "plateau": false
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, pbo, max_drawdown, calmar, stress, plateau)",
+   "legs": {
+    "long": 0.3855554601574599,
+    "short": 0.022092395737709034
+   }
+  }
+ ],
+ "unlimited_symbols": [
+  "AERGOUSDT",
+  "BTTUSDT",
+  "BZRXUSDT",
+  "COCOSUSDT",
+  "EOSUSDT",
+  "FRONTUSDT",
+  "HNTUSDT",
+  "KEEPUSDT",
+  "LENDUSDT",
+  "LUNAUSDT",
+  "MATICUSDT",
+  "RNDRUSDT",
+  "SRMUSDT",
+  "SXPUSDT",
+  "TOMOUSDT",
+  "YFIIUSDT"
+ ],
+ "data_hash": "0774e2086a790a0b",
+ "window": [
+  "2021-04-01",
+  "2025-09-30"
+ ]
+}

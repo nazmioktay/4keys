@@ -90,7 +90,9 @@ def run(
     fee_rate=None,
     slippage_bps=None,
     funding: pd.DataFrame | None = None,
-    band: float = 0.0,
+    band: float | pd.Series = 0.0,
+    band_relative: bool = False,
+    rebalance_days: pd.DatetimeIndex | None = None,
     account_size: float = 100_000.0,
     delay_bars: int = 0,
     min_notional: pd.Series | None = None,
@@ -103,7 +105,9 @@ def run(
     `target`: tarih × sembol hedef ağırlık (NaN = 0). `open_prices`: tarih × sembol günlük açılış.
     `fee_rate`: oran (0,0005 = %0,05); skaler/Series/DataFrame. `slippage_bps`: bps; aynı biçimler.
     `funding`: `daily_funding` çıktısı (oran; pozitif long öder). `band`: yeniden dengeleme bandı
-    (|hedef − mevcut| ≤ band ise işlem yapılmaz). `min_notional`/`amount_step`: sembol limitleri;
+    (|hedef − mevcut| ≤ band ise işlem yapılmaz; skaler ya da işlem günü indeksli Series); `band_relative=True` ise bant hedefe göreli: |hedef − mevcut| ≤
+    band·|hedef| (hedef 0 = çıkış her zaman işlem görür). `rebalance_days`: verilirse YALNIZCA bu günlerin açılışında
+    işlem yapılır (diğer günler pozisyon drift'le tutulur; fiyatı olmayan pozisyon yine tasfiye edilir). `min_notional`/`amount_step`: sembol limitleri;
     asgari emrin altında kalan YENİ/ARTAN pozisyonlar açılmaz ve `skipped`'a yazılır."""
     assert_no_final_test(open_prices.index, allow_final_test, final_test_experiment_id)
     assert_no_final_test(target.index, allow_final_test, final_test_experiment_id)
@@ -125,10 +129,14 @@ def run(
     min_n = None if min_notional is None else min_notional.reindex(columns).to_numpy(dtype=float)
     step = None if amount_step is None else amount_step.reindex(columns).to_numpy(dtype=float)
 
+    rebalance = None if rebalance_days is None else index.isin(pd.DatetimeIndex(rebalance_days))
+    band_by_day = (band.reindex(index).ffill().fillna(0.0).to_numpy(dtype=float) if isinstance(band, pd.Series)
+                   else np.full(n_days, float(band)))
     w_prev = np.zeros(n_sym)  # önceki günün sonunda (drift sonrası) ağırlık
     nav = 1.0
     out_nav, out_ret, out_gross, out_turn = [], [], [], []
     out_comm, out_slip, out_fund = [], [], []
+    out_trades = []  # gün başına GERÇEKTEN yapılan emir sayısı (Δağırlık ≠ 0)
     contrib = np.zeros((n_days - 1, n_sym))
     held = np.zeros((n_days - 1, n_sym))
     skipped: list[dict] = []
@@ -147,7 +155,10 @@ def run(
 
         # yeniden dengeleme bandı: küçük sapmalarda mevcut pozisyon korunur
         diff = wanted - w_cur
-        trade = np.abs(diff) > band
+        b = band_by_day[d]
+        trade = np.abs(diff) > (b * np.abs(wanted) if band_relative else b)
+        if rebalance is not None and not rebalance[d]:
+            trade = np.zeros(n_sym, dtype=bool)
         w_new = np.where(trade, wanted, w_cur)
 
         # asgari emir / adım yuvarlaması (yalnızca limit verildiyse)
@@ -182,6 +193,7 @@ def run(
         out_ret.append(day_ret)
         out_gross.append(gross)
         out_turn.append(float(np.sum(np.abs(delta))))
+        out_trades.append(int(np.count_nonzero(np.abs(delta) > 1e-12)))
         out_comm.append(comm)
         out_slip.append(slp)
         out_fund.append(fnd)
@@ -202,8 +214,10 @@ def run(
             "missing_price_symbol_days": missing_days,
             "forced_liquidations": forced_liquidations,
             "skipped_positions": len(skipped),
+            "trades_per_day": pd.Series(out_trades, index=days, name="trades", dtype="int64"),
             "delay_bars": delay_bars,
-            "band": band,
+            "band": float(np.mean(band_by_day)) if isinstance(band, pd.Series) else band,
+            "band_relative": band_relative,
             "n_days": len(days),
         },
     )
