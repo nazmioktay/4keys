@@ -136,18 +136,28 @@ def test_probability_adapters_filter_and_size():
 
 
 # ---------------------------------------------------------------- deneme bütçesi
-def test_budget_counts_configs_per_question_and_blocks_at_the_limit(tmp_path):
+def test_budget_counts_variants_per_question_and_blocks_at_the_limit(tmp_path):
     reg = tmp_path / "_registry.json"
     paths = dict(results_dir=tmp_path / "res", log_path=tmp_path / "deneyler.md", registry_file=reg)
     r = pd.Series(np.random.default_rng(0).normal(0.001, 0.01, 300), index=pd.date_range("2021-01-01", periods=300))
     for i in range(3):
         registry.register_experiment(f"e{i}", {}, r, {"sharpe": 1.0, "max_drawdown": -0.1}, question="vol_tahmini", **paths)
-    registry.register_experiment("x1", {}, r, {"sharpe": 1.0, "max_drawdown": -0.1}, question="baska", **paths)
-    assert budget.configs_used("vol_tahmini", reg) == 3 and budget.configs_used("baska", reg) == 1
+    registry.register_experiment("x1", {}, r, {"sharpe": 1.0, "max_drawdown": -0.1}, question="baska", n_variants=5, **paths)
+    assert budget.variants_used("vol_tahmini", reg) == 3 and budget.variants_used("baska", reg) == 5  # varyant sayısı, deney değil
     assert budget.assert_budget("vol_tahmini", 1, reg, limit=4) == 0
     with pytest.raises(budget.BudgetExceededError, match="bütçesi dolu"):
         budget.assert_budget("vol_tahmini", 2, reg, limit=4)
-    assert budget.MAX_CONFIGS_PER_QUESTION == 40
+    assert budget.MAX_VARIANTS_PER_QUESTION == 40
+
+
+def test_a_single_experiment_cannot_exceed_the_variant_budget(tmp_path, monkeypatch):
+    reg = tmp_path / "_registry.json"
+    paths = dict(results_dir=tmp_path / "res", log_path=tmp_path / "deneyler.md", registry_file=reg)
+    r = pd.Series(np.random.default_rng(0).normal(0.001, 0.01, 300), index=pd.date_range("2021-01-01", periods=300))
+    monkeypatch.setattr(registry, "MAX_VARIANTS_PER_QUESTION", 40)
+    with pytest.raises(budget.BudgetExceededError, match="41 yeni"):  # 216 varyantlık ızgara gibi: tek deney de bütçeyi aşamaz
+        registry.register_experiment("buyuk", {}, r, {"sharpe": 1.0, "max_drawdown": -0.1}, question="q", n_variants=41, **paths)
+    assert registry.current_trial_count(reg) == 0
 
 
 def test_registry_tolerates_legacy_records_and_refuses_to_overwrite_a_corrupt_file(tmp_path):
@@ -156,8 +166,8 @@ def test_registry_tolerates_legacy_records_and_refuses_to_overwrite_a_corrupt_fi
     reg = tmp_path / "_registry.json"
     reg.write_text(json.dumps({"total_trials": 2, "experiments": [
         {"id": "eski1", "question": None}, {"id": "eski2", "question": " Garip Soru!  "}]}), encoding="utf-8")  # smoke_runs anahtarı YOK
-    assert budget.configs_used("genel", reg) == 1  # question=None -> "genel"
-    assert budget.configs_used("baska_soru", reg) == 0  # regex'e uymayan ESKİ kayıt (' Garip Soru!  ') sayımı/bütçeyi BOZMAZ (toleranslı)
+    assert budget.variants_used("genel", reg) == 1  # question=None -> "genel"; n_variants yok -> 1
+    assert budget.variants_used("baska_soru", reg) == 0  # regex'e uymayan ESKİ kayıt (' Garip Soru!  ') sayımı/bütçeyi BOZMAZ (toleranslı)
     assert budget.assert_budget("baska_soru", 1, reg) == 39
     assert registry.record_smoke_run("genel", reg) == 1
     reg.write_text("{bozuk json", encoding="utf-8")

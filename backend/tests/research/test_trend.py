@@ -145,18 +145,25 @@ def test_engine_rebalance_days_and_per_day_band():
 
 # ---------------------------------------------------------------- uçtan uca (sentetik)
 def test_run_study_end_to_end_on_synthetic_market(tmp_path):
+    """Akış (kayıtsız; `register=False` yalnızca testler içindir). trend_001'in 248 varyantı varyant bütçesini (40) aşar:
+    aynı ızgara bugün kayda ALINAMAZ (KURALLAR §9, 2026-10-07)."""
+    from research import budget
+
     paths = dict(results_dir=tmp_path / "results", log_path=tmp_path / "deneyler.md", registry_file=tmp_path / "results" / "_registry.json")
     paths["log_path"].write_text("# Deney günlüğü\n\n**Toplam deneme: 0**\n\n| t |\n|---|\n", encoding="utf-8")
-    s = trend.run_study(market=_market(), progress=lambda *_: None, **paths)
+    m = _market()
+    s = trend.run_study(market=m, progress=lambda *_: None, register=False, **paths)
     assert s["n_variants"] == 216 + 32 and s["trials_after"] == 248
     assert len(s["wf"]) == 24 and 0.0 <= s["pbo"] <= 1.0
     assert {r["dir"] for r in s["wf"]} == {"LF", "LS"}
     out = paths["results_dir"] / trend.EXPERIMENT_ID
-    for f in ("metrics.json", "sonuc.md", "varyantlar_216.md", "turnover_getiri.png", "main_LF/report.md", "ozet.json"):
+    for f in ("sonuc.md", "varyantlar_216.md", "turnover_getiri.png", "main_LF/report.md", "ozet.json"):
         assert (out / f).exists(), f
-    log = paths["log_path"].read_text(encoding="utf-8")
-    assert "SONUÇ — `trend_001`" in log and "**Toplam deneme: 248**" in log
+    assert not (out / "metrics.json").exists()  # kayıt yok
     assert s["stress"]["main LF (WF)"]["2020-03"]["max_dd"] is None  # pencere öncesi: değerlendirilemez
+    with pytest.raises(budget.BudgetExceededError, match="248 yeni"):
+        trend.run_study(market=m, progress=lambda *_: None, register=True, results_dir=tmp_path / "r2",
+                        log_path=paths["log_path"], registry_file=tmp_path / "r2" / "_registry.json")
 
 
 # ---------------------------------------------------------------- denetim düzeltmeleri: raporlama metrikleri

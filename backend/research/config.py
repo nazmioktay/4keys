@@ -41,6 +41,9 @@ TOP_TIER_COUNT = 20  # "ilk 20 sembol" = noktasal-zamanlı hacim sıralaması
 
 ANNUALIZATION_DAYS = 365
 
+# --- Hesap (KURALLAR.md §3): birincil NAV — kullanıcının gerçek hesabı; min notional/adım Binance'in GÜNCEL limitleri ---
+ACCOUNT_NAV = 250.0  # USDT (2026-10-07)
+
 # --- Kabul eşikleri (KURALLAR.md §5) ---
 ACCEPTANCE = {
     "sharpe_arm": 0.8,

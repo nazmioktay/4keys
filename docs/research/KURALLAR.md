@@ -28,6 +28,16 @@ Portföyün **günlük net getiri serisi**. Sharpe / Sortino / Calmar günlük s
 | Spot (maker = taker) | %0,10 | binance.com/en/fee/schedule, Regular user: 0,100% / 0,100% (2026-10) |
 | Kayma | BTC/ETH 2 bps; ilk 20 sembol 5 bps; diğerleri 15 bps | Kademe, noktasal-zamanlı hacim sıralamasından (`research.data.universe`) |
 | Funding | gerçek geçmiş oranlar, sembolün kendi funding aralığıyla | `fundingRate` arşivi; long öder, short alır |
+| Hesap (birincil NAV) | **250 USDT** (kullanıcının gerçek hesabı, 2026-10-07) | `research.config.ACCOUNT_NAV`; min notional ve adım Binance'in GÜNCEL limitleri (`research.data.limits`, önbellekli); delist semboller kısıtsız varsayılır ve raporlanır. Koşucuda config `account: {nav, limits}` ile değiştirilebilir; birincil sonuç 250 USDT'dir. |
+
+**Küçük hesap kısıtı (2026-10-07 limitleri):**
+- Min notional: sembollerin çoğunda 5 USDT, ETHUSDT'de 20, BTCUSDT'de 50 USDT.
+- Miktar adımı da bağlayıcı: BTCUSDT'de 0,001 BTC, yani BTC fiyatı 100 bin USDT iken en küçük işlem ~100 USDT.
+- 250 USDT'de varlık başına %20 tavanla bir pozisyon en fazla 50 USDT olur.
+- Sonuç: **BTC, fiyat ~50 bin USDT'nin üstündeyken fiilen açılamaz.** Motor miktarı adıma aşağı yuvarlar, 0'a düşen emir atlanır. BTC'yi açmak için ağırlığın (fiyat × 0,001) / 250'yi geçmesi gerekir: 100 bin USDT'de %40.
+- Tasarımlar bunu hesaba katmalı. Raporda "atlanan emir denemesi oranı" ve limiti bilinmeyen (delist) semboller gösterilir.
+- Limitler okunamazsa (ağ/borsa hatası) koşu DURUR: `LimitsUnavailableError`; hata önbelleğe yazılmaz. Yalnızca borsada olmayan (delist) semboller kısıtsız varsayılır.
+- BTC al-tut kıyası bilinçli olarak hesap kısıtsızdır (piyasa ölçütü).
 
 Ücret ×2 ve kayma ×3 duyarlılık testi zorunludur (bkz. kabul eşikleri).
 
@@ -71,8 +81,11 @@ içinde tek yerde durur ve bu belgeyle birebir aynı olmalıdır.
 `research/registry.py` deney kaydı · `research/report.py` rapor · `research/smoke.py` altyapı kontrolü.
 
 ## 9. Deney bütçesi, ileriye dönük veri ve geçersizlik (Aşama 1 çerçevesi)
-- **Deneme bütçesi:** soru (`question`, ör. "vol_tahmini") başına en fazla **40 config** (ablasyonlar dahil). Bütçe dolunca yeni deneme
-  YAPILMAZ; mevcut sonuçlardan karar verilir (`research.budget`, `BudgetExceededError`). `smoke` deneyler sayılmaz.
+- **Deneme bütçesi:** soru (`question`, ör. "vol_tahmini") başına en fazla **40 VARYANT**: deneme sayacına giren her varyant
+  bütçeden düşer (ablasyonlar dahil; 2026-10-07'de "config" yerine varyant olarak netleştirildi). Tek bir deney de bütçeyi aşamaz
+  (ör. 216 varyantlık bir ızgara kayda alınamaz). Bütçe dolunca yeni deneme YAPILMAZ; mevcut sonuçlardan karar verilir
+  (`research.budget`, `BudgetExceededError`). `smoke` deneyler sayılmaz. *Geriye dönük:* `trend` sorusu trend_001 ile 248/40 varyant
+  kullandı (kural netleşmeden önce); bu soruda yeni deneme yapılamaz, bu da trend_001'in "DUR" kararıyla tutarlı.
 - **forward_only veri:** geçmişi olmayan kaynaklar (tasfiye akışı, emir defteri derinliği, ayrıntılı açık pozisyon) **12 aylık veri
   birikmeden** hiçbir deneyde kullanılamaz (`research.panel.check_forward_only`).
 - **Sızıntı testleri:** karıştırılmış hedef, `available_at` denetimi veya tekrarlanabilirlik testinden biri başarısızsa deney **GEÇERSİZ**
@@ -80,7 +93,7 @@ içinde tek yerde durur ve bu belgeyle birebir aynı olmalıdır.
 - **Eşikler yine önceden kayıtlıdır (§5);** çerçeve yalnızca ölçer, sonuç görüldükten sonra değiştirilemez.
 - **Smoke kaçağı kapatıldı:** `smoke` koşuları deneme sayacına sayılmaz AMA soru başına en fazla **10** kez koşturulabilir (`smoke_runs`,
   `_registry.json`); çıktıları "karar için KULLANILAMAZ" damgalıdır. Kayıtsız ablasyon yalnızca `smoke=True` ile yapılabilir
-  (varsayılan: her ablasyon kayıtlı bir config). Bütçe, kayıt anında **kilit altında** zorlanır (eşzamanlı koşular 40'ı aşamaz).
+  (varsayılan: her ablasyon kayıtlı bir varyant). Bütçe, kayıt anında **kilit altında** zorlanır (eşzamanlı koşular 40'ı aşamaz).
 - **`question` normalize edilir** (`strip` + küçük harf; yalnızca `a-z0-9_.-`): "Vol_Tahmini " ile "vol_tahmini" aynı bütçedir.
 - **`final_test` kayıt satırı tam eşleşir:** `FINAL-TEST-ACILDI e1` satırı `e10`'u AÇMAZ.
 - **forward_only ile nihai pencere çakışması — KARAR VERİLDİ (2026-10-07, seçenek b):** forward_only veri nihai pencereden sonra

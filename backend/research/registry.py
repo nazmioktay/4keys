@@ -22,7 +22,7 @@ from .data import store
 
 _LOCK = threading.Lock()
 
-MAX_CONFIGS_PER_QUESTION = 40  # KURALLAR.md §9: soru başına en fazla 40 config (ablasyonlar dahil)
+MAX_VARIANTS_PER_QUESTION = 40  # KURALLAR.md §9: soru başına en fazla 40 VARYANT (deneme sayacına giren her varyant; ablasyonlar dahil)
 MAX_SMOKE_PER_QUESTION = 10  # smoke sayılmaz AMA sınırsız deneme-yanılma kaçağı olmasın: soru başına en fazla 10 smoke koşusu
 
 
@@ -86,23 +86,24 @@ def _loose_question(question) -> str:
     return (str(question).strip().lower() if question else "") or "genel"
 
 
-def _configs_in(registry: dict, question: str) -> int:
-    return sum(1 for e in registry["experiments"] if _loose_question(e.get("question")) == question)
+def _variants_in(registry: dict, question: str) -> int:
+    """Sorunun kullandığı bütçe = kayıtlı deneylerin varyant sayıları toplamı (`n_variants` yoksa eski kayıt: 1)."""
+    return sum(int(e.get("n_variants") or 1) for e in registry["experiments"] if _loose_question(e.get("question")) == question)
 
 
-def configs_used(question: str, registry_file: Path | None = None) -> int:
-    return _configs_in(_read_registry(Path(registry_file or config.REGISTRY_FILE)), normalize_question(question))
+def variants_used(question: str, registry_file: Path | None = None) -> int:
+    return _variants_in(_read_registry(Path(registry_file or config.REGISTRY_FILE)), normalize_question(question))
 
 
 def assert_budget(question: str, n_new: int = 1, registry_file: Path | None = None, limit: int | None = None) -> int:
-    """Yeni `n_new` config sığıyor mu? Sığmıyorsa `BudgetExceededError`. Döner: kalan bütçe. (Erken/hızlı başarısızlık için;
+    """Yeni `n_new` VARYANT sığıyor mu? Sığmıyorsa `BudgetExceededError`. Döner: kalan bütçe. (Erken/hızlı başarısızlık için;
     asıl zorlama `register_experiment` içinde KİLİT ALTINDADIR.)"""
     q = normalize_question(question)
-    limit = MAX_CONFIGS_PER_QUESTION if limit is None else limit
-    used = configs_used(q, registry_file)
+    limit = MAX_VARIANTS_PER_QUESTION if limit is None else limit
+    used = variants_used(q, registry_file)
     if used + n_new > limit:
         raise BudgetExceededError(
-            f"'{q}' sorusu için deneme bütçesi dolu ({used}/{limit} config; {n_new} yeni istendi). "
+            f"'{q}' sorusu için deneme bütçesi dolu ({used}/{limit} varyant; {n_new} yeni istendi). "
             "Yeni deneme yapılmaz: mevcut sonuçlardan karar verin (docs/research/deneyler.md)."
         )
     return limit - used - n_new
@@ -184,9 +185,10 @@ def register_experiment(
         registry = _read_registry(registry_file)
         if (out_dir / "metrics.json").exists() or any(e["id"] == experiment_id for e in registry["experiments"]):
             raise ExperimentExistsError(f"{experiment_id} zaten kayıtlı (kayıtlar değiştirilmez)")
-        if question is not None and _configs_in(registry, question) + 1 > MAX_CONFIGS_PER_QUESTION:  # eşzamanlı koşular dahil: KİLİT ALTINDA
+        if question is not None and _variants_in(registry, question) + n_variants > MAX_VARIANTS_PER_QUESTION:  # eşzamanlı koşular dahil: KİLİT ALTINDA
             raise BudgetExceededError(
-                f"'{question}' sorusu için deneme bütçesi dolu ({_configs_in(registry, question)}/{MAX_CONFIGS_PER_QUESTION} config). "
+                f"'{question}' sorusu için deneme bütçesi dolu ({_variants_in(registry, question)}/{MAX_VARIANTS_PER_QUESTION} varyant; "
+                f"{n_variants} yeni). "
                 "Yeni deneme yapılmaz: mevcut sonuçlardan karar verin."
             )
         before = int(registry["total_trials"])

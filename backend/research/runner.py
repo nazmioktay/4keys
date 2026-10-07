@@ -69,6 +69,12 @@ def load_config(source) -> dict:
     cfg.setdefault("zone", "main")
     if cfg["zone"] not in config.ZONES:
         raise ConfigError(f"zone '{cfg['zone']}' geçersiz (geçerli: {', '.join(config.ZONES)}; KURALLAR.md §10)")
+    cfg["account"] = {"nav": config.ACCOUNT_NAV, "limits": True, **(cfg.get("account") or {})}
+    nav = cfg["account"]["nav"]
+    if isinstance(nav, bool) or not isinstance(nav, (int, float)) or nav <= 0:
+        raise ConfigError(f"account.nav pozitif bir sayı olmalı (USDT): {nav!r}")
+    if not isinstance(cfg["account"]["limits"], bool):
+        raise ConfigError(f"account.limits true/false olmalı: {cfg['account']['limits']!r}")
     cfg.setdefault("universe", {"n": 20})
     cfg.setdefault("arm", "arm")
     cfg.setdefault("seed", 0)
@@ -128,19 +134,36 @@ def _funding_frame(panel: Panel, index: pd.DatetimeIndex) -> pd.DataFrame | None
     return engine.daily_funding(pd.concat(rows, ignore_index=True), index, panel.candidates) if rows else None
 
 
-def _portfolio(panel: Panel, weights: pd.DataFrame, fee_mult: float = 1.0, slip_mult: float = 1.0, delay: int = 0):
+def load_account_limits(symbols: list[str]):
+    """(min_notional, amount_step, limitsiz_semboller) — Binance'in GÜNCEL limitleri (önbellekli; delist = kısıtsız, raporlanır)."""
+    from .data.limits import engine_limits, get_limits
+
+    return engine_limits(get_limits(list(symbols)))
+
+
+def _portfolio(panel: Panel, weights: pd.DataFrame, fee_mult: float = 1.0, slip_mult: float = 1.0, delay: int = 0, *,
+               account: dict):
+    """Kol portföyü: hesap (`account`: nav + limits) ZORUNLU — yeni bir çağrı sessizce limitsiz/100k NAV ile koşamasın."""
     start = weights.index[weights.abs().sum(axis=1) > 0].min() if (weights.abs().sum(axis=1) > 0).any() else weights.index.min()
     open_px = panel.prices["open"].loc[start:, panel.candidates]
     w = weights.reindex(open_px.index).fillna(0.0)[panel.candidates]
     slip = _slippage_frame(panel, open_px.index) * slip_mult
+    min_n = step = None
+    unconstrained: list[str] = []
+    if account["limits"]:
+        min_n, step, unconstrained = load_account_limits(panel.candidates)
     result = engine.run(
         w, open_px, fee_rate=config.FUTURES_TAKER_FEE * fee_mult, slippage_bps=slip,
         funding=_funding_frame(panel, open_px.index), delay_bars=delay,
+        account_size=float(account["nav"]), min_notional=min_n, amount_step=step,
     )
+    result.diagnostics["unconstrained_symbols"] = list(unconstrained)  # limiti bilinmeyen (delist) -> kısıtsız varsayıldı
     return result
 
 
 def _benchmark(panel: Panel, start: pd.Timestamp):
+    """BTC al-tut kıyası BİLİNÇLİ olarak idealdir: hesap büyüklüğü/min notional/adım kısıtı yok (spot eşdeğeri BTC getirisi).
+    Kabul eşiğindeki 'BTC al-tut Calmar' piyasa ölçütüdür; 250 USDT'de adım yuvarlaması kıyası yapay olarak bozardı."""
     if "BTCUSDT" not in panel.prices["open"].columns:
         return None
     px = panel.prices["open"].loc[start:, ["BTCUSDT"]]
@@ -161,12 +184,11 @@ def run_experiment(
     log_path: Path | None = None,
     registry_file: Path | None = None,
     panel: Panel | None = None,
-    extra_question_cost: int = 1,
 ) -> ExperimentResult:
     """Deneyi config'teki bölgede (`zone`) koşturur: yükleyici/motor/rapor o bölgenin kilidine uyar (KURALLAR.md §10)."""
     cfg = load_config(source)
     with guard.zone(cfg["zone"]):
-        return _run_experiment(cfg, smoke, results_dir, log_path, registry_file, panel, extra_question_cost)
+        return _run_experiment(cfg, smoke, results_dir, log_path, registry_file, panel)
 
 
 def check_panel_zone(panel: Panel, cfg: dict) -> None:
@@ -174,7 +196,7 @@ def check_panel_zone(panel: Panel, cfg: dict) -> None:
         raise ConfigError(f"panel '{panel.zone}' bölgesinde kurulmuş, config '{cfg['zone']}' bölgesini istiyor")
 
 
-def _run_experiment(cfg, smoke, results_dir, log_path, registry_file, panel, extra_question_cost) -> ExperimentResult:
+def _run_experiment(cfg, smoke, results_dir, log_path, registry_file, panel) -> ExperimentResult:
     if panel is not None:
         check_panel_zone(panel, cfg)
     if smoke is not None:
@@ -185,7 +207,7 @@ def _run_experiment(cfg, smoke, results_dir, log_path, registry_file, panel, ext
     if not smoke:
         if is_registered(cfg["id"], registry_file, results_dir):  # ağır işe başlamadan: kayıtlar değiştirilmez
             raise ExperimentExistsError(f"{cfg['id']} zaten kayıtlı (kayıtlar değiştirilmez)")
-        assert_budget(cfg["question"], extra_question_cost, registry_file)  # bütçe dolduysa YENİ deneme yapılmaz
+        assert_budget(cfg["question"], len(cfg["models"]), registry_file)  # bütçe = kaydedilecek varyant (model) sayısı
     else:
         record_smoke_run(cfg["question"], registry_file)  # smoke deneme sayılmaz ama soru başına sınırlıdır (kaçak yok)
 
@@ -224,7 +246,7 @@ def _run_experiment(cfg, smoke, results_dir, log_path, registry_file, panel, ext
     for m in res.oof.columns:
         pred_wide = res.oof[m].unstack("symbol").reindex(columns=panel.candidates)
         weights = signals.make_weights(adapter, pred_wide, panel.membership.reindex(columns=panel.candidates).fillna(False), **aparams)
-        results[m] = _portfolio(panel, weights)
+        results[m] = _portfolio(panel, weights, account=cfg["account"])
         ret_cols[m] = _trim(results[m].returns, first_oof)
     bench = _benchmark(panel, first_oof)
     bench_ret = _trim(bench.returns, first_oof) if bench is not None else None
@@ -233,6 +255,7 @@ def _run_experiment(cfg, smoke, results_dir, log_path, registry_file, panel, ext
         variants[m] = {
             "summary": stats.summary(r, bench_ret), "costs": engine.cost_summary(results[m]), "pred": pred_m[m],
             "turnover_mean": float(results[m].turnover.mean()), "skipped_positions": results[m].diagnostics["skipped_positions"],
+            "trades_executed": int(results[m].diagnostics["trades_per_day"].sum()),
         }
 
     # PBO: modeller = tek bir deneyin varyantları
@@ -245,8 +268,8 @@ def _run_experiment(cfg, smoke, results_dir, log_path, registry_file, panel, ext
     pm_weights = signals.make_weights(adapter, res.oof[primary].unstack("symbol").reindex(columns=panel.candidates),
                                       panel.membership.reindex(columns=panel.candidates).fillna(False), **aparams)
     a = config.ACCEPTANCE
-    stress = _trim(_portfolio(panel, pm_weights, a["stress_fee_mult"], a["stress_slippage_mult"]).returns, first_oof)
-    delayed = _trim(_portfolio(panel, pm_weights, delay=1).returns, first_oof)
+    stress = _trim(_portfolio(panel, pm_weights, a["stress_fee_mult"], a["stress_slippage_mult"], account=cfg["account"]).returns, first_oof)
+    delayed = _trim(_portfolio(panel, pm_weights, delay=1, account=cfg["account"]).returns, first_oof)
     p = variants[primary]["summary"]
     yearly = p["yearly_returns"]
     pos_years = (sum(1 for v in yearly.values() if v > 0) / len(yearly)) if yearly else float("nan")
@@ -258,7 +281,8 @@ def _run_experiment(cfg, smoke, results_dir, log_path, registry_file, panel, ext
         positive_year_fraction=pos_years, stress_sharpe=stats.sharpe(stress), plateau_ratio=float("nan"), is_portfolio=(cfg["arm"] == "portfolio"),
     )
     metrics = {
-        "id": cfg["id"], "question": cfg["question"], "zone": cfg["zone"], "primary": primary, "sharpe": p["sharpe"], "max_drawdown": p["max_drawdown"],
+        "id": cfg["id"], "question": cfg["question"], "zone": cfg["zone"],
+        "account": {**cfg["account"], "unconstrained_symbols": results[primary].diagnostics["unconstrained_symbols"]}, "primary": primary, "sharpe": p["sharpe"], "max_drawdown": p["max_drawdown"],
         "variants": variants, "pbo": pbo, "stress_sharpe": stats.sharpe(stress), "delay1_sharpe": stats.sharpe(delayed),
         "btc_calmar": btc_calmar, "acceptance": acceptance, "acceptance_not_evaluated": ["plateau (parametre taraması gerekir)"],
         "valid": report.valid, "check_results": report.results, "check_failures": report.failures, "check_warnings": report.warnings,
