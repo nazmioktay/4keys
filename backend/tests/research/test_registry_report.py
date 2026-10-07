@@ -86,3 +86,29 @@ def test_render_report_refuses_final_test_dates(tmp_path):
     r = _returns(n=40, start="2025-09-01")  # 09-01 .. 10-10
     with pytest.raises(FinalTestError):
         report.render_report(r, None, tmp_path / "rep", "x")
+
+
+def test_git_commit_prefers_env_then_git_and_marks_uncommitted_backend_changes(tmp_path, monkeypatch):
+    import shutil
+    import subprocess
+
+    from research import config as rconfig
+    from research import registry as reg
+
+    monkeypatch.setenv("GIT_COMMIT", "abc1234")
+    assert reg.git_commit() == "abc1234"  # ortam değişkeni önceliklidir
+    monkeypatch.delenv("GIT_COMMIT")
+    if shutil.which("git") is None:
+        pytest.skip("git yok")
+    repo = tmp_path / "repo"
+    (repo / "backend").mkdir(parents=True)
+    (repo / "backend" / "x.py").write_text("a = 1\n", encoding="utf-8")
+    run = lambda *a: subprocess.run(["git", *a], cwd=repo, check=True, capture_output=True)  # noqa: E731
+    run("init", "-q")
+    run("-c", "user.email=t@t", "-c", "user.name=t", "add", ".")
+    run("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "ilk")
+    monkeypatch.setattr(rconfig, "REPO_ROOT", repo)
+    head = subprocess.run(["git", "rev-parse", "--short", "HEAD"], cwd=repo, capture_output=True, text=True).stdout.strip()
+    assert reg.git_commit() == head
+    (repo / "backend" / "x.py").write_text("a = 2\n", encoding="utf-8")
+    assert reg.git_commit() == head + "+dirty"  # backend'de commit edilmemiş değişiklik
