@@ -167,3 +167,78 @@ Tam tablo: `research/results/trend_001/varyantlar_216.md`; turnover-getiri: `tur
 > - EW ilk-10 kıyası bağımsız, maliyetsiz hesapla yıllık -%21 çıktı (raporlanan -%19,9).
 >
 > **Bütçe notu:** KURALLAR §9'daki "soru başına 40 config" bütçesi kodda kayıtlı deney başına sayılıyor. trend_001 bütçeden 1/40 düşüyor; deneme sayacına ise 248 varyant olarak işlendi.
+
+## ÖN KAYIT — `kesitsel` (2026-10-07, sonuç görülmeden önce; dal `research/kesitsel`)
+**Hipotez:** Kripto'da kesitsel momentum (göreli kazananların kısa vadede göreli kazanmaya devam etmesi; Liu, Tsyvinski & Wu 2022),
+maliyetler sonrası trend koluyla düşük korelasyonlu pozitif getiri üretir.
+
+**Bütçeye sığdırma (kullanıcı onayı, 2026-10-07).** Soru `kesitsel`, bütçe 40 varyant; bu deney **37** kullanır (aşağıda). Bant tek
+değerde sabit; ana aday önceden belirlendi; zarar limiti %25.
+
+**Veri ve pencereler.** trend_001 ile aynı: USDⓈ-M perpetual günlük OHLCV, pozisyon üretimi 2020-10-01'de başlar,
+**değerlendirme penceresi 2021-04-01 → 2025-09-30**. Nihai pencere (>= 2025-10-01) kullanılmaz. 2020-03 stres dönemi değerlendirilemez.
+
+**Evren.** Noktasal-zamanlı ilk N perpetual (30 g ort. hacim, stable/kaldıraçlı/endeks hariç, >= 90 g geçmiş), N ∈ {30, 50}.
+
+**Skor** (gün t kapanışında; yalnızca <= t verisi; son 1 gün hariç):
+- L ∈ {7, 14, 28} için `r_L = log(close_{t-1} / close_{t-1-L})`.
+- Düz skor: her L için evren üyeleri arasında kesitsel z-skor (ortalama/std, o gün geçerli üyeler); üç z-skorun ortalaması.
+  Üç bileşenden biri eksikse sembol o gün skorlanmaz.
+- Vol-ayarlı skor: z-skorlardan önce `r_L / (σ · √L)`; σ = 60 günlük EWMA (span 60) günlük log getiri std'si.
+
+**Portföyler** (dilim: skorlanmış üye sayısı n için k = max(1, ⌊n/5⌋) isim; en iyi k long, en kötü k short):
+- a) **Dolar-nötr:** en iyi dilim long, en kötü dilim short. Her bacakta ters vol ağırlık (1/σ_i, σ yıllık 60 g EWMA), bacak brütü 1 (ham).
+- b) **Long + BTC beta hedge:** en iyi dilim long (ters vol, ham brüt 1) + BTCUSDT'de `−β` short. β = long bacak ham portföyünün son 60 günlük
+  günlük getirisinin BTC günlük getirisine OLS betası (yalnızca <= t), [0, 2]'ye kırpılır. BTC long dilimdeyse ağırlıklar netleşir.
+- c) **Yalnızca long:** en iyi dilim (ters vol, ham brüt 1).
+
+**Boyutlandırma.**
+- Kol hedef vol yıllık **%20**: ölçek = 0,20 / (ham portföyün geçmiş günlük getirisinin 60 g EWMA vol'ü), yalnızca <= t (trend_001 ile aynı yöntem).
+- İsim başına tavan **%10**, `research.sizing.asset_caps(base_cap=0,10)` ile: tavan_t = max(%10, bir lotun notional'ı / NAV) (KURALLAR §3).
+  (b)'deki BTC hedge bacağı isim tavanına tabi değildir; yalnızca brüt tavana tabidir.
+- Brüt tavan: (a) ve (b) **2,0x**, (c) **1,0x** (aşılırsa orantılı küçültme). Hesap kaldıraç tavanı ayrıca 3x.
+
+**Yeniden dengeleme ve maliyet.**
+- Haftalık: işlem pazartesi 00:00 UTC açılışında (karar pazar kapanışı). 3 günlük: 2020-10-01'den itibaren her 3. gün.
+- Dengeleme günleri dışında işlem yok (zarar limiti çıkışları hariç); pozisyon drift'le tutulur.
+- Göreli no-trade bandı **%25** sabit (dengeleme günlerinde |hedef − mevcut| ≤ 0,25·|hedef| ise işlem yok; çıkış her zaman).
+- Maliyet: KURALLAR §3 (taker %0,05; kayma 2/5/15 bps; **gerçek funding**, short alır/öder).
+- Hesap: **250 USDT, 3x, en yakın lot, Binance güncel limitleri** (KURALLAR §3). Atlanan emirler, lot_scale ve 1x önerisi raporlanır.
+
+**Zarar limiti varyantı** (yalnızca ana aday portföyü, short isimler): dengeleme günündeki açılış fiyatı referanstır. Bir short ismin
+kapanışı referansın **%25** üstüne çıkarsa o isim ertesi açılışta kapatılır ve bir sonraki dengelemeye kadar açılmaz.
+
+**Ana aday (önceden belirlendi):** düz skor + (a) dolar-nötr. Karar YALNIZCA ana aday walk-forward serisine göre verilir.
+
+**Walk-forward.** Skor ve portföy parametreleri SABİT. Walk-forward yalnızca (N, dengeleme sıklığı) seçer: 4 aday. Katmanlar trend_001 ile
+aynı (6 aylık, 2021-04-01 … 2025-04-01); her katmanda 2020-10-01'den katman başına kadarki net Sharpe'ı en yüksek kombinasyon seçilir.
+Birleştirilmiş hedef tek motor koşusunda çalışır. 6 (skor × portföy) + 1 (zarar limitli ana aday) walk-forward serisi raporlanır.
+
+**Deneme sayımı: 37 varyant.**
+- Temel ızgara: 2 evren × 2 skor × 3 portföy × 2 dengeleme = **24**.
+- Zarar limitli ana aday: 2 evren × 2 dengeleme = **4**.
+- Plato (ana adayın son walk-forward seçimiyle): 7, 14, 28 ufukları ve vol span'i (60; ters vol ve hedef vol) tek tek ×0,5 ve ×1,5
+  (7→4/10, 14→7/21, 28→14/42, 60→30/90) = **8**. Plato oranı = en kötü komşu Sharpe / ana aday sabit-kombinasyon Sharpe; eşik ≥ 0,70.
+- Trend karışımı: **1** (aşağıda).
+- PBO: 24 temel varyant (CSCV, 16 blok). Deflated Sharpe: global toplam deneme sayısı ve 37 varyantın Sharpe varyansı ile.
+- Walk-forward serileri ayrıca sayılmaz. Getiri–ufuk teşhisi işlem değildir, sayılmaz.
+
+**Trend koluyla ilişki.** trend_001 bir kol üretmedi (KALDI). Karşılaştırma `research/results/trend_001/daily_returns.parquet` içindeki
+`main_LF_wf` ve `main_LS_wf` serileriyle yapılır (bu seriler 10.000 USDT / aşağı yuvarlama ile koşmuştu; korelasyon için yeterli).
+- Günlük getiri korelasyonu (Pearson, değerlendirme penceresi) her iki seriyle raporlanır.
+- **Eşit risk karışımı:** ana aday WF serisi ile `main_LF_wf`; her gün ağırlık, serilerin t−1'e kadarki 60 g vol'üyle ters orantılı
+  (toplam 1). Portföy eşikleriyle (Sharpe ≥ 1,0; DD ≤ %30) yalnızca BİLGİ için değerlendirilir.
+
+**Teşhis — getiri–ufuk.** Ana skor, N = 50: her gün t için en iyi dilim − en kötü dilim (eşit ağırlık) ortalama ileri log getirisi,
+t+1 açılışından itibaren h = 1…60 gün (brüt, maliyetsiz), değerlendirme penceresindeki günlerin ortalaması. Kümülatif farkın tepe
+yaptığı ve düşmeye başladığı ufuk (momentumun geri dönüşe çevrildiği yer) raporlanır.
+
+**Kıyaslar, stres, duyarlılık.** trend_001 ile aynı: BTC al-tut (hesap kısıtsız), EW ilk-10 al-tut (aylık), BTC EMA200 long/flat;
+stres 2021-05, 2022-05 (LUNA), 2022-11 (FTX); ücret ×2 + kayma ×3 (kabul eşiği), +1 gün gecikme (rapor). Short bacak katkısı ayrıca.
+
+**Karar kuralı.** Ana aday WF serisi KURALLAR §5 kol eşiklerinin TÜMÜNÜ (net Sharpe ≥ 0,8; DSR ≥ 0,95; PBO ≤ 0,25; maks. DD ≤ %35;
+Calmar ≥ max(BTC al-tut Calmar, 0,7); pozitif yıl ≥ %60; stres Sharpe ≥ 0,5; plato ≥ 0,70) geçerse **VE** `main_LF_wf` ile `main_LS_wf`'nin
+ikisiyle de korelasyonu < 0,5 ise **"kesitsel kol" adayı**. Aksi halde hangi koşulda kaldığı yazılır ve DURULUR: ızgara genişletilmez.
+Diğer varyantlar bilgi içindir.
+
+**Çıktı.** `research/results/kesitsel_001/`: sonuç, varyant tablosu, ana aday raporu, getiri–ufuk grafiği, ozet.json, günlük getiriler.
