@@ -82,7 +82,7 @@ def test_smoke_run_never_counts_or_logs(market):
 
 def test_budget_blocks_new_experiments_when_the_question_is_full(market, monkeypatch):
     _log(market)
-    monkeypatch.setattr(registry, "MAX_CONFIGS_PER_QUESTION", 1)
+    monkeypatch.setattr(registry, "MAX_VARIANTS_PER_QUESTION", 2)  # _cfg: 2 model = 2 varyant
     no_checks = {k: False for k in runner.DEFAULT_CHECKS}
     runner.run_experiment(_cfg(id="b1", checks=no_checks), **_paths(market))
     with pytest.raises(budget.BudgetExceededError, match="bütçesi dolu"):
@@ -110,7 +110,7 @@ def test_question_text_is_normalized_so_it_cannot_be_used_to_dodge_the_budget(ma
     with pytest.raises(runner.ConfigError, match="question"):
         runner.load_config(_cfg(question="boşluk var!"))
     _log(market)
-    monkeypatch.setattr(registry, "MAX_CONFIGS_PER_QUESTION", 1)
+    monkeypatch.setattr(registry, "MAX_VARIANTS_PER_QUESTION", 2)  # _cfg: 2 model = 2 varyant
     no_checks = {k: False for k in runner.DEFAULT_CHECKS}
     runner.run_experiment(_cfg(id="n1", question="Vol_Tahmini", checks=no_checks), **_paths(market))
     with pytest.raises(budget.BudgetExceededError):  # "vol_tahmini " yazarak yeni bütçe AÇILAMAZ
@@ -120,7 +120,7 @@ def test_question_text_is_normalized_so_it_cannot_be_used_to_dodge_the_budget(ma
 def test_budget_is_enforced_under_the_registry_lock_for_concurrent_runs(tmp_path, monkeypatch):
     import threading
 
-    monkeypatch.setattr(registry, "MAX_CONFIGS_PER_QUESTION", 3)
+    monkeypatch.setattr(registry, "MAX_VARIANTS_PER_QUESTION", 3)
     paths = dict(results_dir=tmp_path / "res", log_path=tmp_path / "deneyler.md", registry_file=tmp_path / "res" / "_registry.json")
     (tmp_path / "deneyler.md").write_text("# g\n\n**Toplam deneme: 0**\n\n| t |\n|---|\n", encoding="utf-8")
     returns = pd.Series(np.random.default_rng(0).normal(0.001, 0.01, 200), index=pd.date_range("2021-01-01", periods=200))
@@ -195,3 +195,56 @@ def test_forward_only_source_in_the_main_zone_fails_loudly(market, monkeypatch):
             build_panel(runner.load_config(_cfg(sources=["ohlcv_core", "oi_detail"])))
     finally:
         reset_for_tests()
+
+
+def test_account_defaults_to_the_real_small_account_and_min_notional_is_applied(market, monkeypatch):
+    """Birincil NAV kullanıcının hesabı (250 USDT); Binance limitleri TÜM kol koşularına (varyant, stres, gecikme) geçer;
+    yalnızca BTC al-tut kıyası bilinçli olarak idealdir."""
+    cfg = runner.load_config(_cfg())
+    assert cfg["account"] == {"nav": 250.0, "leverage": 3.0, "lot_rounding": "nearest", "limits": True}
+    assert runner.load_config(_cfg(account={"nav": 10_000}))["account"]["nav"] == 10_000
+    for bad in ({"nav": 0}, {"nav": "250"}, {"nav": True}, {"limits": "evet"}, {"leverage": 0}, {"lot_rounding": "yukari"}):
+        with pytest.raises(runner.ConfigError):
+            runner.load_config(_cfg(account=bad))
+
+    calls = []
+    real_run = runner.engine.run
+
+    def spy(*a, **k):
+        calls.append({"account_size": k.get("account_size"), "limits": k.get("min_notional") is not None,
+                      "lot": k.get("lot_rounding"), "max_gross": k.get("max_gross")})
+        return real_run(*a, **k)
+
+    monkeypatch.setattr(runner.engine, "run", spy)
+    monkeypatch.setattr(runner, "load_account_limits", lambda symbols: (pd.Series(1e9, index=list(symbols)), None, ["DEADUSDT"]))
+    _log(market)
+    no_checks = {k: False for k in runner.DEFAULT_CHECKS}
+    r = runner.run_experiment(_cfg(id="acc1", checks=no_checks, smoke=True), **_paths(market))
+    arm = [c for c in calls if c["limits"]]
+    ideal = [c for c in calls if not c["limits"]]
+    assert len(arm) == 2 + 2 and all(c["account_size"] == 250.0 and c["lot"] == "nearest" and c["max_gross"] == 3.0 for c in arm)
+    assert len(ideal) == 1 and ideal[0]["account_size"] is None  # yalnızca BTC al-tut kıyası
+    primary = r.metrics["variants"][r.metrics["primary"]]
+    assert primary["skipped_positions"] > 0 and primary["trades_executed"] == 0  # 1e9 USDT asgari emir: hiçbir pozisyon açılamaz
+    assert r.metrics["account"]["unconstrained_symbols"] == ["DEADUSDT"]  # limiti bilinmeyen semboller raporlanır
+
+
+def test_real_limit_loading_is_wired_to_binance_limits(monkeypatch):
+    """conftest'in ağsız yamasını aşarak GERÇEK `load_account_limits` -> `get_limits` -> `engine_limits` zincirini sınar."""
+    from research.data import limits
+
+    real = runner.__dict__.get("_load_account_limits_original")
+    assert real is not None
+    monkeypatch.setattr(limits, "get_limits", lambda symbols: {"BTCUSDT": {"amount_step": 0.001, "amount_min": 0.001, "price_tick": 0.1,
+                                                                          "cost_min": 50.0}, "DEADUSDT": None})
+    min_n, step, unknown = real(["BTCUSDT", "DEADUSDT"])
+    assert min_n["BTCUSDT"] == 50.0 and step["BTCUSDT"] == 0.001 and unknown == ["DEADUSDT"]
+
+
+def test_recommended_nav_for_1x_is_driven_by_the_largest_minimum_lot():
+    min_n = pd.Series({"BTCUSDT": 50.0, "ETHUSDT": 20.0, "SOLUSDT": 5.0})
+    step = pd.Series({"BTCUSDT": 0.001, "ETHUSDT": 0.001, "SOLUSDT": 0.01})
+    nav, sym = runner.recommended_nav_1x(min_n, step, pd.Series({"BTCUSDT": 114_000.0, "ETHUSDT": 4_000.0, "SOLUSDT": 200.0}))
+    assert sym == "BTCUSDT" and nav == pytest.approx(0.001 * 114_000 / 0.20)  # 570 USDT: BTC'nin bir lotu %20'ye sığsın
+    nav_low, _ = runner.recommended_nav_1x(min_n, step, pd.Series({"BTCUSDT": 30_000.0, "ETHUSDT": 4_000.0}))
+    assert nav_low == pytest.approx(0.002 * 30_000 / 0.20)  # BTC ucuzken min notional (50 USDT) 0,002 BTC'ye yukarı yuvarlanır: 60 -> 300

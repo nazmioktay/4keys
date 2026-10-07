@@ -251,13 +251,17 @@ def test_quality_flags_gaps_zero_volume_and_jumps_without_filling():
 
 
 # ---------------------------------------------------------------- limitler
+class BadSymbol(Exception):  # ccxt.BadSymbol taklidi (ada göre tanınır)
+    pass
+
+
 def test_limits_are_cached_and_unknown_symbols_reported(tmp_cache):
     calls = []
 
     def fetcher(sym):
         calls.append(sym)
         if sym.startswith("DEAD"):
-            raise RuntimeError("bilinmeyen")
+            raise BadSymbol("borsada yok")
         return {"amount_step": 0.001, "amount_min": 0.001, "price_tick": 0.1, "cost_min": 100.0}
 
     out = limits.get_limits(["BTCUSDT", "DEADUSDT"], fetcher=fetcher)
@@ -267,6 +271,22 @@ def test_limits_are_cached_and_unknown_symbols_reported(tmp_cache):
     assert len(calls) == 2
     min_notional, step, unknown = limits.engine_limits(out)
     assert min_notional["BTCUSDT"] == 100.0 and unknown == ["DEADUSDT"]
+
+
+def test_network_errors_are_not_cached_as_unconstrained_and_stop_the_run(tmp_cache):
+    """Denetim bulgusu: ağ hatası eskiden 'limitsiz' (None) olarak KALICI önbelleğe yazılıyordu -> 250 USDT kısıtı sessizce kalkardı."""
+    calls = []
+
+    def flaky(sym):
+        calls.append(sym)
+        if len(calls) == 1:
+            raise ConnectionError("ağ yok")
+        return {"amount_step": 0.001, "amount_min": 0.001, "price_tick": 0.1, "cost_min": 50.0}
+
+    with pytest.raises(limits.LimitsUnavailableError, match="okunamadı"):
+        limits.get_limits(["BTCUSDT"], fetcher=flaky)
+    out = limits.get_limits(["BTCUSDT"], fetcher=flaky)  # önbellekte YOK -> yeniden denenir
+    assert out["BTCUSDT"]["cost_min"] == 50.0 and len(calls) == 2
 
 
 def test_final_test_marker_requires_exact_experiment_id_not_a_prefix(tmp_path):

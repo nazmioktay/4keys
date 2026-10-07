@@ -372,8 +372,13 @@ def _status(acc: dict, evaluate_plateau: bool) -> str:
 
 def run_study(*, market: Market | None = None, results_dir: Path | None = None, log_path: Path | None = None,
               registry_file: Path | None = None, register: bool = True, progress=print) -> dict:
-    from .registry import current_trial_count, register_experiment
+    from .registry import assert_budget, current_trial_count, register_experiment
 
+    if register:  # bütçe dolacaksa ağır hesaba HİÇ başlama (asıl zorlama kayıtta, kilit altında)
+        n_signals = len(A_LOOKBACKS) + len(B_LOOKBACKS) + 1 + len(DONCHIAN) + 1  # a, b, c_mix, Donchian, main
+        n_plateau = len(DIRECTIONS) * len(PLATEAU_MULTS) * (len(A_LOOKBACKS) + len(EMA_PAIRS) + 1)
+        n_planned = n_signals * len(DIRECTIONS) * len(UNIVERSES) * len(BANDS) + n_plateau
+        assert_budget(QUESTION, n_planned, registry_file)
     m = market or load_market()
     results_dir = Path(results_dir or config.RESULTS_DIR)
     registry_file = Path(registry_file or config.REGISTRY_FILE)

@@ -24,7 +24,7 @@ def _primary_returns(panel: Panel, cfg: dict, X: pd.DataFrame, folds, seed: int)
     first = pred.dropna().index.get_level_values("date").min()
     weights = signals.make_weights(cfg["signal"]["adapter"], pred.unstack("symbol").reindex(columns=panel.candidates),
                                    panel.membership.reindex(columns=panel.candidates).fillna(False), **cfg["signal"]["params"])
-    returns = _trim(_portfolio(panel, weights).returns, first)
+    returns = _trim(_portfolio(panel, weights, account=cfg["account"]).returns, first)
     ic = pred_metrics.daily_ic(pred, panel.y)[0]
     return pred, returns, ic
 
