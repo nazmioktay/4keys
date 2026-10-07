@@ -535,3 +535,11 @@ Kullanıcı talimatı (3 soru: volatilite tahmini, kesitsel sıralama, trend met
 - Portföye giremeyecek deneyler global deneme sayacını (321) büyütüp gelecekteki kolların Deflated Sharpe eşiğini zorlaştıracağından
   **kullanıcı kararıyla (2026-10-08) koşturulmadı.** Tasarım `docs/research/sablonlar/ml_turnuva.md`'de bekliyor; bir kol kabul edilince
   her soru için config listesi ön kayıt olarak yazılıp uygulanır.
+
+## Portföy ve nihai test — KOŞTURULMADI (2026-10-08; deneme sayılmaz, nihai pencere AÇILMADI)
+Kullanıcı talimatı (kabul edilen kolların portföyü → aday_v1 kilidi → nihai pencerede tek seferlik test) kabul edilmiş kolların
+varlığına dayanıyor. Bu tarihte kabul edilmiş kol YOK (trend_001, kesitsel_001, carry_001: KALDI).
+- Başarısız kollardan portföy kurmak sonuca göre seçim olur (KURALLAR §7).
+- Nihai pencere (KURALLAR §1) tek kullanımlıktır; kabul edilmemiş bir adayla açılması onu gelecekteki gerçek adaylar için tüketirdi.
+- **Kullanıcı kararıyla (2026-10-08) koşturulmadı; nihai pencere KİLİTLİ ve KULLANILMAMIŞ.** Tasarım
+  `docs/research/sablonlar/portfoy_nihai_test.md`'de bekliyor.
