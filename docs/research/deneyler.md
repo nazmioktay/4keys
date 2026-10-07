@@ -309,3 +309,77 @@ Tam tablo: `research/results/kesitsel_001/varyantlar.md`. Limiti bilinmeyen (del
 >   eşik zaten 0,7'ye bağlı.
 > - KURALLAR §9 sızıntı testleri (karıştırılmış hedef, `available_at`, tekrarlanabilirlik) model tabanlı koşucu içindir; bu kural tabanlı
 >   modülde (trend_001'de olduğu gibi) yoktur. İleri bakış birim testlerle sınandı (skor, beta, seçim, zarar limiti).
+
+## ÖN KAYIT — `carry` (2026-10-07, sonuç görülmeden önce; dal `research/carry`)
+**Hipotez:** Perpetual funding ve vadeli kontrat basis'i, kaldıraçlı long talebinin yapısal bir primidir. Delta-nötr toplandığında
+maliyetler sonrası risksiz getirinin belirgin üstünde ve trend koluyla düşük korelasyonlu getiri sağlar.
+
+**Kullanıcı kararları (2026-10-07):** bütçe taslağı (36 varyant) onaylandı; risksiz getiri **yıllık %4**; boşta kalan USDT **%0** kazanır
+(faizli sürüm yalnızca bilgi); A stratejisinde plato uygulanamaz sayılır.
+
+**Veri.** USDⓈ-M perpetual günlük OHLCV + gerçek funding olayları (her sembolün kendi aralığı: 8/4/2/1 saat; olaylar ödeme zamanına
+göre günlüğe toplanır, `engine.daily_funding`), aynı adlı spot çifti günlük OHLCV, BTC/ETH USDⓈ-M quarterly günlük OHLCV, perp 1 saatlik
+OHLCV (bacak riski için). Mark/index fiyatı indirilmedi: basis = perp (ya da quarterly) − spot, aynı zaman damgasıyla.
+Lot/asgari emir: Binance güncel perp limitleri (quarterly'de aynı varlığın perp limiti; spot bacak perp miktarına eşitlenir).
+
+**Pencere.** Değerlendirme **2021-04-01 → 2025-09-30** (öncekilerle aynı); nihai pencere kullanılmaz. A ayrıca 2020-01-01'den koşar;
+2020 ve 2021-Q1 yalnızca yıllık tabloda bilgi olarak gösterilir.
+
+**Ortak yürütme ve muhasebe.**
+- Karar gün t kapanışında, işlem t+1 açılışında. Pozisyon = q coin spot long + q coin perp/quarterly short (1x hedge, eşit miktar).
+- **Bağlanan sermaye:** notional N için spot cüzdanında N, vadeli cüzdanında marj N/kaldıraç. Portföy Marjı (PM) varyantında spot teminattır:
+  bağlanan sermaye 1,10·N (%10 USDT tampon). Getiri, 250 USDT hesabın günlük NAV'ından ölçülür (boştaki nakit %0); ayrıca
+  "sermaye verimliliği" = ortalama bağlanan sermaye / NAV ve bağlanan sermayeye göre yıllık getiri raporlanır.
+- **Hesap:** 250 USDT; q, perp miktar adımına EN YAKIN lota yuvarlanır; asgari emir altındaki pozisyon açılmaz (KURALLAR §3).
+- **Maliyetler:** spot ücreti %0,10, perp/quarterly taker %0,05; kayma her iki bacakta KURALLAR §3 kademeleri (2/5/15 bps).
+  **Bacak riski:** her bacak çifti işleminde ek maliyet = E|ΔP| over τ dakika = σ_1s·√(τ/60)·√(2/π); σ_1s = son 7 günün 1 saatlik
+  perp log getiri std'si (1 saatlik veri yoksa günlük σ/√24). Birincil τ = 1 dk; τ = 5 dk duyarlılık olarak raporlanır.
+- **Cüzdan dengeleme ve tasfiye:** her gün açılışta vadeli cüzdan özsermayesi E_p, hedef marjın (q·P/kaldıraç) %50'sinin altına
+  düşmüş ya da %150'sinin üstüne çıkmışsa iki bacak birlikte yeniden boyutlanır (aynı q), nakit cüzdanlar arasında taşınır
+  (transfer ücretsiz; bacak işlemleri ücretli). Gün içi en yüksek fiyatta E_p − q·(H − P_açılış) ≤ %1·q·H ise perp bacağı **tasfiye**:
+  vadeli cüzdan özsermayesi 0'a iner, spot kalır, ertesi açılışta kalan özsermayeyle yeniden hedge'lenir. PM'de tasfiye simüle edilmez
+  (yalnızca stres raporu). Ayrıca: dönem içi en kötü günlük yükseliş ve +%30 tek gün şoku için her kaldıraçta marj tamponunun yetip
+  yetmediği raporlanır.
+- **Funding:** short bacak, (t açılışı, t+1 açılışı] aralığındaki ödemeleri q·P_açılış üzerinden alır/öder.
+- **PnL kalemleri ayrı:** funding geliri, basis PnL (iki bacağın fiyat PnL toplamı), ücret+kayma, bacak riski, tasfiye kaybı.
+- **Delist:** perp ya da spot fiyatı biterse iki bacak son mevcut kapanıştan kapatılır (maliyetler dahil). Delist tarihinden önceki 30 gün
+  içinde açık carry pozisyonu olan semboller ve PnL'leri raporlanır. Funding tavanı: tutulan pozisyonlarda |oran| ≥ %0,3 / olay
+  sayısı raporlanır. ADL simüle edilemez (veri yok); not düşülür.
+
+**Stratejiler ve varyantlar (36).**
+- **A — BTC/ETH sürekli carry (8):** tüm sermaye tek varlıkta, her zaman açık. {BTC, ETH} × kaldıraç {1x, 2x, 3x} = 6; PM {BTC, ETH} = 2.
+- **B — koşullu çok coinli funding carry (12):**
+  - Evren: noktasal-zamanlı ilk 30 perpetual (KURALLAR universe), aynı adlı spot çifti olanlar (spotu olmayan `1000…` vb. hariç).
+  - Beklenen getiri (yıllık, notional'a göre) = son W günün günlük funding toplamlarının ortalaması × 365, W ∈ {3, 7}.
+  - Giriş eşiği = gidiş-dönüş maliyet (2 × (spot ücreti + perp ücreti + iki bacak kayması + bacak riski)) × 365 / **14** (beklenen tutma
+    süresi, gün) + **%10** (güvenlik payı). Yalnızca pozitif funding (perp short).
+  - Çıkış (histerezis): beklenen getiri < **%3** (negatif dahil). Tutulan pozisyon çıkış koşuluna kadar tutulur; boş slotlar en yüksek
+    beklenen getirili uygun sembollerle doldurulur.
+  - En fazla K ∈ {3, 5, 8} sembol; slot başına sermaye NAV/K; slot notional'ı ≤ son 30 günün ortalama günlük quote hacminin %0,1'i
+    (perp ve spotun küçüğü). Kaldıraç {1x, 3x}. 3 × 2 × 2 = 12.
+- **C — vadeli basis, cash-and-carry (8):**
+  - Kontrat: kalan gün ≥ 30 olan en yakın BTC/ETH USDⓈ-M quarterly.
+  - Yıllık basis = (F/S − 1) × 365 / kalan gün. Giriş eşiği = gidiş-dönüş maliyet × 365 / kalan gün + %10.
+  - "Vadeye kadar tut": vade günü açılışında iki bacak kapanır (quarterly'nin uzlaşma fiyatı ≈ spot açılışı varsayılır; ücretler dahil);
+    ertesi karar gününde yeni kontrat eşiği aşıyorsa açılır.
+  - "Daralınca geç": yıllık basis < %3 olunca erken kapanır; sonraki uygun kontrat eşiği aşıyorsa ona geçilir.
+  - {BTC, ETH} × {vadeye kadar, daralınca geç} × kaldıraç {1x, 3x} = 8. Funding yok.
+- **Plato (8):** B ana adayı (K5, W7, 1x): güvenlik payı %10 → %5/%15, çıkış eşiği %3 → %1,5/%4,5, beklenen tutma 14 → 7/21 gün (6).
+  C ana adayı (BTC, vadeye kadar, 1x): güvenlik payı %10 → %5/%15 (2). Plato oranı = en kötü komşu Sharpe / ana aday Sharpe ≥ 0,70;
+  bir stratejinin plato sonucu o stratejinin TÜM varyantlarına uygulanır. **A'nın ayarlanabilir parametresi yoktur; plato uygulanamaz
+  (geçti sayılır).**
+- **D — kıyas (deneme değil):** USDT'yi boşta tutup yıllık %4 almak. Ayrıca BTC al-tut (Calmar eşiği için).
+
+**Deneme sayımı:** 8 + 12 + 8 + 8 = **36** varyant (soru `carry`). Walk-forward yok: serbest parametre seçimi yapılmaz, her varyant sabit
+koşar. PBO: 28 temel varyant (CSCV, 16 blok). DSR: global toplam deneme sayısı ve 36 varyantın Sharpe varyansı. τ = 5 dk, faizli boş
+nakit, +1 gün gecikme ve stres koşuları raporlamadır, sayılmaz.
+
+**Çıktı.** Strateji × varyant tablosu: NAV'a ve bağlanan sermayeye göre yıllık getiri, vol, Sharpe, maks. DD, en uzun su altı süresi
+(gün), sermaye verimliliği, işlem sayısı, tasfiye sayısı, PnL kalemleri, 2020–2025 yıllık getiriler, BTC ve trend_001 (main_LF_wf,
+main_LS_wf) korelasyonu. Stres dönemleri ve duyarlılık (ücret ×2 + kayma ×3, bacak riski τ = 5 dk, +1 gün) öncekilerle aynı.
+
+**Karar kuralı.** Bir varyant "carry kolu" adayıdır ancak KURALLAR §5 kol eşiklerinin TÜMÜNÜ (net Sharpe ≥ 0,8; DSR ≥ 0,95; PBO ≤ 0,25;
+maks. DD ≤ %35; Calmar ≥ max(BTC al-tut Calmar, 0,7); pozitif yıl ≥ %60; ücret ×2 + kayma ×3 Sharpe ≥ 0,5; plato ≥ 0,70) geçerse **VE**
+NAV'a göre yıllık net getirisi ≥ **%8** (risksiz %4'ün 2 katı) ise. Geçenlerden **EN BASİT** olan aday ilan edilir; sadelik sırası:
+A-1x (BTC, ETH) → A-2x → A-3x → A-PM → C (1x önce; vadeye kadar önce; BTC önce) → B (1x önce; K3 → K5 → K8; W7 → W3).
+Hiçbiri geçmezse DURULUR ve hangi koşullarda kalındığı yazılır. Trend korelasyonu raporlanır, karar koşulu değildir.
