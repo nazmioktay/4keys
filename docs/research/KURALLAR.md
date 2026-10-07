@@ -28,16 +28,37 @@ Portföyün **günlük net getiri serisi**. Sharpe / Sortino / Calmar günlük s
 | Spot (maker = taker) | %0,10 | binance.com/en/fee/schedule, Regular user: 0,100% / 0,100% (2026-10) |
 | Kayma | BTC/ETH 2 bps; ilk 20 sembol 5 bps; diğerleri 15 bps | Kademe, noktasal-zamanlı hacim sıralamasından (`research.data.universe`) |
 | Funding | gerçek geçmiş oranlar, sembolün kendi funding aralığıyla | `fundingRate` arşivi; long öder, short alır |
-| Hesap (birincil NAV) | **250 USDT** (kullanıcının gerçek hesabı, 2026-10-07) | `research.config.ACCOUNT_NAV`; min notional ve adım Binance'in GÜNCEL limitleri (`research.data.limits`, önbellekli); delist semboller kısıtsız varsayılır ve raporlanır. Koşucuda config `account: {nav, limits}` ile değiştirilebilir; birincil sonuç 250 USDT'dir. |
+| Hesap (birincil) | **250 USDT, 3x kaldıraç, en yakın lot** (kullanıcının gerçek hesabı, 2026-10-07) | `research.config.ACCOUNT_NAV / ACCOUNT_LEVERAGE / ACCOUNT_LOT_ROUNDING`; min notional ve adım Binance'in GÜNCEL limitleri (`research.data.limits`, önbellekli). Koşucuda config `account: {nav, leverage, lot_rounding, limits}` ile değiştirilebilir; birincil sonuç bu hesapla raporlanır. |
 
-**Küçük hesap kısıtı (2026-10-07 limitleri):**
-- Min notional: sembollerin çoğunda 5 USDT, ETHUSDT'de 20, BTCUSDT'de 50 USDT.
-- Miktar adımı da bağlayıcı: BTCUSDT'de 0,001 BTC, yani BTC fiyatı 100 bin USDT iken en küçük işlem ~100 USDT.
-- 250 USDT'de varlık başına %20 tavanla bir pozisyon en fazla 50 USDT olur.
-- Sonuç: **BTC, fiyat ~50 bin USDT'nin üstündeyken fiilen açılamaz.** Motor miktarı adıma aşağı yuvarlar, 0'a düşen emir atlanır. BTC'yi açmak için ağırlığın (fiyat × 0,001) / 250'yi geçmesi gerekir: 100 bin USDT'de %40.
-- Tasarımlar bunu hesaba katmalı. Raporda "atlanan emir denemesi oranı" ve limiti bilinmeyen (delist) semboller gösterilir.
-- Limitler okunamazsa (ağ/borsa hatası) koşu DURUR: `LimitsUnavailableError`; hata önbelleğe yazılmaz. Yalnızca borsada olmayan (delist) semboller kısıtsız varsayılır.
+**Küçük hesap ve lot kuralı (2026-10-07):**
+- Min notional: sembollerin çoğunda 5 USDT, ETHUSDT'de 20, BTCUSDT'de 50 USDT. Miktar adımı da bağlayıcı: BTCUSDT'de 0,001 BTC,
+  yani BTC 100 bin USDT iken en küçük lot ~100 USDT (250 USDT NAV'ın %40'ı).
+- **BTC evrenden çıkarılmaz; tavanı en küçük lota göre ayarlanır** (kullanıcı kararı). Varlık başına tavan kullanan tasarımlar
+  `research.sizing.asset_caps` kullanır: tavan_t = max(%20, bir lotun notional'ı_t / NAV). Yalnızca t günündeki fiyat kullanılır.
+  Örnek: 114 bin USDT'de BTC tavanı %45,6 (bir lot). Böylece tavana dayanan BTC sinyali her fiyatta en az bir lot açar.
+  `asset_caps` sinyal adaptörlerine OTOMATİK bağlı değildir: varlık başına tavan kullanan her tasarım onu açıkça kullanmalı ve
+  ön kayıtta belirtmelidir; aksi halde düz %20 tavanla BTC (114 bin USDT'de) açılamaz.
+  Sınır: tavan, deneyin BAŞLANGIÇ NAV'ına göre hesaplanır. NAV başlangıcın yarısının altına düşerse tavandaki hedef yarım lotun
+  altında kalabilir ve BTC açılmaz ("min_lot").
+- **En yakın lota yuvarlama** (`engine.run(lot_rounding="nearest")`):
+  - Miktar en yakın lota yuvarlanır.
+  - Hedef, en küçük lotun (max(min notional, 1 adım)) yarısından küçükse sonuç 0 lot olur: yeni pozisyon açılmaz ("min_lot"), mevcut pozisyon (yönü ne olursa olsun) KAPATILIR. Tam kapanış her zaman yapılabilir varsayılır.
+  - Hedef yarım lottan büyükse en az bir lot açılır.
+- **Yuvarlama riski büyütebilir:** hedefi lotun 0,5–1 katı olan pozisyon 1 lota, yani hedefin 2 katına kadar çıkar. Vol hedefi bu sembollerde aşılabilir. Her varyantta `lot_scale` raporlanır: GERÇEKLEŞEN emirlerde Σ|yuvarlanmış| / Σ|hedef| (atlanan emirler hariç); >1 ise yuvarlama pozisyonları büyütmüştür.
+- **Kaldıraç tavanı 3x:**
+  - Hedeflerin brütü NAV'ın 3 katını aşarsa önce TÜM hedefler orantılı küçültülür; bu adımda hangi sembolün açılacağı sütun sırasına
+    bağlı kalmaz. Ancak lot yuvarlaması brütü yeniden tavanın üstüne çıkarırsa, tavana dayanan artışlarda sütun sırası belirleyici
+    olabilir (sonraki artış tamamen atlanır). Mevcut adaptörlerin brüt tavanı 1,0–1,5x olduğu için pratik etkisi düşüktür.
+  - "nearest" modunda önce küçültme ve kapanış emirleri, sonra artışlar işlenir (borsadaki sıra). Yuvarlama sonrası brütü ARTIRAN bir emir tavanı aşacaksa TAMAMEN atlanır ("leverage"; tavana sığan daha küçük bir lot denenmez). Küçültme emirleri engellenmez.
+  - 250 USDT'de 750 USDT'ye kadar pozisyon taşınabilir. Sinyal adaptörlerinin kendi brüt tavanları ayrıca geçerlidir.
+- **1x öneri:** her deney raporu "1x için önerilen asgari hesap"ı yazar: evrendeki her sembolün en küçük lotunun %20 referans tavana sığdığı NAV (`runner.recommended_nav_1x`).
+  - Fiyat, deney penceresinin son günününkidir ve tarihi raporlanır; limitler ise güncel.
+  - Örnek: BTC 114 bin USDT'de 0,001 × 114.000 / 0,20 ≈ **570 USDT**.
+  - 1x ile çalışılacaksa başlangıçta hesabın en az bu tutara çıkarılması önerilir (BTC fiyatıyla değişir).
+- Raporda atlanan emir denemeleri (nedenleriyle: min_lot, leverage, price) ve limiti bilinmeyen (delist) semboller gösterilir.
+- Limitler okunamazsa (ağ/borsa hatası) koşu DURUR (`LimitsUnavailableError`); hata önbelleğe yazılmaz. Yalnızca borsada olmayan (delist) semboller kısıtsız varsayılır.
 - BTC al-tut kıyası bilinçli olarak hesap kısıtsızdır (piyasa ölçütü).
+- trend_001 bu kuraldan ÖNCE koştu (NAV 10.000, aşağı yuvarlama, kaldıraç tavanı yok); sonuçları o varsayımlarla geçerlidir.
 
 Ücret ×2 ve kayma ×3 duyarlılık testi zorunludur (bkz. kabul eşikleri).
 

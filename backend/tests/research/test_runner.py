@@ -201,9 +201,9 @@ def test_account_defaults_to_the_real_small_account_and_min_notional_is_applied(
     """Birincil NAV kullanıcının hesabı (250 USDT); Binance limitleri TÜM kol koşularına (varyant, stres, gecikme) geçer;
     yalnızca BTC al-tut kıyası bilinçli olarak idealdir."""
     cfg = runner.load_config(_cfg())
-    assert cfg["account"] == {"nav": config.ACCOUNT_NAV, "limits": True} and config.ACCOUNT_NAV == 250.0
+    assert cfg["account"] == {"nav": 250.0, "leverage": 3.0, "lot_rounding": "nearest", "limits": True}
     assert runner.load_config(_cfg(account={"nav": 10_000}))["account"]["nav"] == 10_000
-    for bad in ({"nav": 0}, {"nav": "250"}, {"nav": True}, {"limits": "evet"}):
+    for bad in ({"nav": 0}, {"nav": "250"}, {"nav": True}, {"limits": "evet"}, {"leverage": 0}, {"lot_rounding": "yukari"}):
         with pytest.raises(runner.ConfigError):
             runner.load_config(_cfg(account=bad))
 
@@ -211,7 +211,8 @@ def test_account_defaults_to_the_real_small_account_and_min_notional_is_applied(
     real_run = runner.engine.run
 
     def spy(*a, **k):
-        calls.append({"account_size": k.get("account_size"), "limits": k.get("min_notional") is not None})
+        calls.append({"account_size": k.get("account_size"), "limits": k.get("min_notional") is not None,
+                      "lot": k.get("lot_rounding"), "max_gross": k.get("max_gross")})
         return real_run(*a, **k)
 
     monkeypatch.setattr(runner.engine, "run", spy)
@@ -221,7 +222,7 @@ def test_account_defaults_to_the_real_small_account_and_min_notional_is_applied(
     r = runner.run_experiment(_cfg(id="acc1", checks=no_checks, smoke=True), **_paths(market))
     arm = [c for c in calls if c["limits"]]
     ideal = [c for c in calls if not c["limits"]]
-    assert len(arm) == 2 + 2 and all(c["account_size"] == 250.0 for c in arm)  # 2 model + stres + gecikme
+    assert len(arm) == 2 + 2 and all(c["account_size"] == 250.0 and c["lot"] == "nearest" and c["max_gross"] == 3.0 for c in arm)
     assert len(ideal) == 1 and ideal[0]["account_size"] is None  # yalnızca BTC al-tut kıyası
     primary = r.metrics["variants"][r.metrics["primary"]]
     assert primary["skipped_positions"] > 0 and primary["trades_executed"] == 0  # 1e9 USDT asgari emir: hiçbir pozisyon açılamaz
@@ -238,3 +239,12 @@ def test_real_limit_loading_is_wired_to_binance_limits(monkeypatch):
                                                                           "cost_min": 50.0}, "DEADUSDT": None})
     min_n, step, unknown = real(["BTCUSDT", "DEADUSDT"])
     assert min_n["BTCUSDT"] == 50.0 and step["BTCUSDT"] == 0.001 and unknown == ["DEADUSDT"]
+
+
+def test_recommended_nav_for_1x_is_driven_by_the_largest_minimum_lot():
+    min_n = pd.Series({"BTCUSDT": 50.0, "ETHUSDT": 20.0, "SOLUSDT": 5.0})
+    step = pd.Series({"BTCUSDT": 0.001, "ETHUSDT": 0.001, "SOLUSDT": 0.01})
+    nav, sym = runner.recommended_nav_1x(min_n, step, pd.Series({"BTCUSDT": 114_000.0, "ETHUSDT": 4_000.0, "SOLUSDT": 200.0}))
+    assert sym == "BTCUSDT" and nav == pytest.approx(0.001 * 114_000 / 0.20)  # 570 USDT: BTC'nin bir lotu %20'ye sığsın
+    nav_low, _ = runner.recommended_nav_1x(min_n, step, pd.Series({"BTCUSDT": 30_000.0, "ETHUSDT": 4_000.0}))
+    assert nav_low == pytest.approx(0.002 * 30_000 / 0.20)  # BTC ucuzken min notional (50 USDT) 0,002 BTC'ye yukarı yuvarlanır: 60 -> 300

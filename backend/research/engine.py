@@ -97,6 +97,8 @@ def run(
     delay_bars: int = 0,
     min_notional: pd.Series | None = None,
     amount_step: pd.Series | None = None,
+    lot_rounding: str = "floor",
+    max_gross: float | None = None,
     allow_final_test: bool = False,
     final_test_experiment_id: str | None = None,
 ) -> EngineResult:
@@ -108,11 +110,21 @@ def run(
     (|hedef − mevcut| ≤ band ise işlem yapılmaz; skaler ya da işlem günü indeksli Series); `band_relative=True` ise bant hedefe göreli: |hedef − mevcut| ≤
     band·|hedef| (hedef 0 = çıkış her zaman işlem görür). `rebalance_days`: verilirse YALNIZCA bu günlerin açılışında
     işlem yapılır (diğer günler pozisyon drift'le tutulur; fiyatı olmayan pozisyon yine tasfiye edilir). `min_notional`/`amount_step`: sembol limitleri;
-    asgari emrin altında kalan YENİ/ARTAN pozisyonlar açılmaz ve `skipped`'a yazılır."""
+    asgari emrin altında kalan YENİ/ARTAN pozisyonlar açılmaz ve `skipped`'a yazılır.
+    `lot_rounding`: "floor" (varsayılan; miktar adıma aşağı yuvarlanır, asgari emrin altı atlanır) veya "nearest" (miktar en
+    yakın lota yuvarlanır; hedef en küçük lotun (max(min notional, 1 adım)) yarısından küçükse 0 lot: yeni pozisyon açılmaz,
+    mevcut pozisyon KAPATILIR (tam kapanış her zaman yapılabilir varsayılır); aksi halde en az bir lot. Yuvarlama pozisyonu
+    hedefin 2 katına kadar büyütebilir: `diagnostics["lot_scale"]` = GERÇEKLEŞEN emirlerde Σ|yuvarlanmış| / Σ|hedef| raporlanır;
+    atlanan emirler oranda yoktur).
+    `max_gross`: kaldıraç tavanı (NAV katı). Hedeflerin brütü tavanı aşarsa önce TÜM hedefler orantılı küçültülür (sıra bağımlılığı
+    yok); "nearest"te önce küçültme/kapanış emirleri, sonra artışlar işlenir; yuvarlama sonrası brütü artıran emir tavanı aşacaksa
+    TAMAMEN atlanır ("leverage"; muhafazakâr: tavana sığan daha küçük bir lot denenmez); küçültme emirleri engellenmez."""
     assert_no_final_test(open_prices.index, allow_final_test, final_test_experiment_id)
     assert_no_final_test(target.index, allow_final_test, final_test_experiment_id)
     if delay_bars < 0:
         raise ValueError("delay_bars >= 0 olmalı")
+    if lot_rounding not in ("floor", "nearest"):
+        raise ValueError(f"lot_rounding 'floor' | 'nearest' olmalı: {lot_rounding!r}")
 
     index = open_prices.index
     columns = open_prices.columns
@@ -130,6 +142,7 @@ def run(
     step = None if amount_step is None else amount_step.reindex(columns).to_numpy(dtype=float)
 
     rebalance = None if rebalance_days is None else index.isin(pd.DatetimeIndex(rebalance_days))
+    lot_target = lot_final = 0.0  # "nearest" yuvarlamasının hedefi ne kadar büyüttüğü (lot_scale)
     band_by_day = (band.reindex(index).ffill().fillna(0.0).to_numpy(dtype=float) if isinstance(band, pd.Series)
                    else np.full(n_days, float(band)))
     w_prev = np.zeros(n_sym)  # önceki günün sonunda (drift sonrası) ağırlık
@@ -154,6 +167,10 @@ def run(
         w_cur = np.where(tradable, w_prev, 0.0)
 
         # yeniden dengeleme bandı: küçük sapmalarda mevcut pozisyon korunur
+        if max_gross is not None:  # sinyalin kendisi kaldıraç tavanını aşıyorsa orantılı küçült (sütun sırasına bağlı kalmasın)
+            g = float(np.sum(np.abs(wanted)))
+            if g > max_gross > 0:
+                wanted = wanted * (max_gross / g)
         diff = wanted - w_cur
         b = band_by_day[d]
         trade = np.abs(diff) > (b * np.abs(wanted) if band_relative else b)
@@ -164,8 +181,21 @@ def run(
         # asgari emir / adım yuvarlaması (yalnızca limit verildiyse)
         if min_n is not None or step is not None:
             account_nav = account_size * nav
-            for j in np.flatnonzero(trade):
+            settled = np.where(trade, w_cur, w_new)  # brüt kontrolü: işlenmiş semboller + henüz işlenmemişlerin MEVCUT ağırlığı
+            order = np.flatnonzero(trade)
+            if lot_rounding == "nearest":  # iki geçiş: önce küçültme/kapanışlar (brütü düşürür), sonra artışlar (borsadaki sıra)
+                order = sorted(order, key=lambda k: abs(w_new[k]) > abs(w_cur[k]))
+            for j in order:
                 target_notional = abs(w_new[j]) * account_nav
+                if lot_rounding == "nearest":
+                    target_w = w_new[j]
+                    w_new[j] = _round_to_lot(j, target_w, w_cur, settled, target_notional, px[d, j], account_nav, min_n, step,
+                                             max_gross, skipped, index[d], columns[j])
+                    settled[j] = w_new[j]
+                    if target_w != 0 and w_new[j] != w_cur[j]:
+                        lot_target += abs(target_w)
+                        lot_final += abs(w_new[j])
+                    continue
                 if w_new[j] != 0 and min_n is not None and np.isfinite(min_n[j]) and target_notional < min_n[j]:
                     skipped.append({"date": index[d], "symbol": columns[j], "reason": "min_notional", "notional": float(target_notional), "min_notional": float(min_n[j])})
                     w_new[j] = w_cur[j]
@@ -218,10 +248,41 @@ def run(
             "delay_bars": delay_bars,
             "band": float(np.mean(band_by_day)) if isinstance(band, pd.Series) else band,
             "band_relative": band_relative,
+            "lot_rounding": lot_rounding,
+            "lot_scale": (lot_final / lot_target) if lot_target > 0 else float("nan"),
             "n_days": len(days),
         },
     )
     return result
+
+
+def _round_to_lot(j, w, w_cur, settled, target_notional, price, account_nav, min_n, step, max_gross, skipped, day, symbol) -> float:
+    """En yakın lota yuvarlama (bkz. `run(lot_rounding="nearest")`). Döner: j'nin yeni ağırlığı."""
+    if w == 0:
+        return 0.0  # çıkış her zaman
+    if not np.isfinite(price) or price <= 0:
+        skipped.append({"date": day, "symbol": symbol, "reason": "price", "notional": float(target_notional), "min_notional": None})
+        return w_cur[j]
+    lot = step[j] if (step is not None and np.isfinite(step[j]) and step[j] > 0) else 0.0
+    mn = min_n[j] if (min_n is not None and np.isfinite(min_n[j])) else 0.0
+    min_qty = mn / price
+    if lot > 0:
+        min_qty = max(lot, np.ceil(min_qty / lot - 1e-9) * lot)
+    q_exact = target_notional / price
+    if min_qty > 0 and q_exact < 0.5 * min_qty:  # en yakın lot = 0
+        if w_cur[j] == 0:
+            skipped.append({"date": day, "symbol": symbol, "reason": "min_lot", "notional": float(target_notional),
+                            "min_notional": float(min_qty * price)})
+        return 0.0  # yeni pozisyon açılmaz; mevcut pozisyon (yönü ne olursa olsun) kapatılır
+    q = np.round(q_exact / lot) * lot if lot > 0 else q_exact
+    q = max(q, min_qty)
+    w_try = float(np.sign(w) * q * price / account_nav)
+    if max_gross is not None and abs(w_try) > abs(w_cur[j]):  # yalnızca brütü ARTIRAN emirler kontrol edilir
+        gross = float(np.sum(np.abs(settled)) - abs(settled[j]) + abs(w_try))
+        if gross > max_gross + 1e-12:
+            skipped.append({"date": day, "symbol": symbol, "reason": "leverage", "notional": float(q * price), "min_notional": None})
+            return w_cur[j]
+    return w_try
 
 
 def cost_summary(result: EngineResult) -> dict:

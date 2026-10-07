@@ -68,8 +68,8 @@ Geçersiz deney yine KAYDEDİLİR (karar "GEÇERSİZ: ..."; sayaç artar — giz
 
 ## Deneme bütçesi ve sayaç
 Soru adı normalize edilir (`strip`+küçük harf); `smoke` koşuları sayaca girmez ama soru başına en fazla 10'dur ve sonuçları karar için kullanılamaz. Soru (`question`) başına en fazla **40 varyant** (deneme sayacına giren her varyant; ablasyonlar dahil; tek deney de aşamaz); dolunca
-`BudgetExceededError`, yeni deneme yapılmaz — mevcut sonuçlardan karar verilir. Hesap varsayılanı 250 USDT NAV + Binance min notional
-(`account: {nav, limits}`; KURALLAR §3).
+`BudgetExceededError`, yeni deneme yapılmaz — mevcut sonuçlardan karar verilir. Hesap varsayılanı 250 USDT NAV, 3x kaldıraç, en yakın lot + Binance min notional/adım
+(`account: {nav, leverage, lot_rounding, limits}`; KURALLAR §3); rapor 1x için önerilen asgari hesabı da yazar.
 Her varyant (model) bir deneme sayılır (Deflated Sharpe için global sayaç). `smoke: true` / `--smoke` hiçbir şey kaydetmez.
 
 ## İleriye dönük toplayıcılar (canlı koda dokunan tek istisna)

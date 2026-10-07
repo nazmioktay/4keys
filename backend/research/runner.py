@@ -69,10 +69,14 @@ def load_config(source) -> dict:
     cfg.setdefault("zone", "main")
     if cfg["zone"] not in config.ZONES:
         raise ConfigError(f"zone '{cfg['zone']}' geçersiz (geçerli: {', '.join(config.ZONES)}; KURALLAR.md §10)")
-    cfg["account"] = {"nav": config.ACCOUNT_NAV, "limits": True, **(cfg.get("account") or {})}
-    nav = cfg["account"]["nav"]
-    if isinstance(nav, bool) or not isinstance(nav, (int, float)) or nav <= 0:
-        raise ConfigError(f"account.nav pozitif bir sayı olmalı (USDT): {nav!r}")
+    cfg["account"] = {"nav": config.ACCOUNT_NAV, "leverage": config.ACCOUNT_LEVERAGE, "lot_rounding": config.ACCOUNT_LOT_ROUNDING,
+                      "limits": True, **(cfg.get("account") or {})}
+    for key in ("nav", "leverage"):
+        v = cfg["account"][key]
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or v <= 0:
+            raise ConfigError(f"account.{key} pozitif bir sayı olmalı: {v!r}")
+    if cfg["account"]["lot_rounding"] not in ("floor", "nearest"):
+        raise ConfigError(f"account.lot_rounding 'floor' | 'nearest' olmalı: {cfg['account']['lot_rounding']!r}")
     if not isinstance(cfg["account"]["limits"], bool):
         raise ConfigError(f"account.limits true/false olmalı: {cfg['account']['limits']!r}")
     cfg.setdefault("universe", {"n": 20})
@@ -141,6 +145,25 @@ def load_account_limits(symbols: list[str]):
     return engine_limits(get_limits(list(symbols)))
 
 
+def recommended_nav_1x(min_notional, amount_step, prices: pd.Series, asset_cap: float = config.ONE_X_ASSET_CAP) -> tuple[float, str | None]:
+    """1x kaldıraçla her sembolün EN KÜÇÜK lotunun (max(min notional, 1 adım) — adıma yukarı yuvarlanmış) varlık başına
+    `asset_cap` içine sığması için gereken asgari NAV ve bunu belirleyen sembol. `prices`: sembol -> fiyat (koşucu: deney
+    penceresinin SON fiyatı; tarihi raporlanır). Hiçbir sembolün limiti bilinmiyorsa (NaN, None)."""
+    best, who = 0.0, None
+    for sym, price in prices.dropna().items():
+        if price <= 0:
+            continue
+        mn = float(min_notional.get(sym, np.nan)) if min_notional is not None else np.nan
+        lot = float(amount_step.get(sym, np.nan)) if amount_step is not None else np.nan
+        qty = (mn / price) if np.isfinite(mn) else 0.0
+        if np.isfinite(lot) and lot > 0:
+            qty = max(lot, np.ceil(qty / lot - 1e-9) * lot)
+        need = qty * price / asset_cap
+        if need > best:
+            best, who = need, sym
+    return (best, who) if who is not None else (float("nan"), None)
+
+
 def _portfolio(panel: Panel, weights: pd.DataFrame, fee_mult: float = 1.0, slip_mult: float = 1.0, delay: int = 0, *,
                account: dict):
     """Kol portföyü: hesap (`account`: nav + limits) ZORUNLU — yeni bir çağrı sessizce limitsiz/100k NAV ile koşamasın."""
@@ -156,8 +179,12 @@ def _portfolio(panel: Panel, weights: pd.DataFrame, fee_mult: float = 1.0, slip_
         w, open_px, fee_rate=config.FUTURES_TAKER_FEE * fee_mult, slippage_bps=slip,
         funding=_funding_frame(panel, open_px.index), delay_bars=delay,
         account_size=float(account["nav"]), min_notional=min_n, amount_step=step,
+        lot_rounding=account["lot_rounding"], max_gross=float(account["leverage"]),
     )
     result.diagnostics["unconstrained_symbols"] = list(unconstrained)  # limiti bilinmeyen (delist) -> kısıtsız varsayıldı
+    last_px = open_px.ffill().iloc[-1] if len(open_px) else pd.Series(dtype=float)
+    result.diagnostics["recommended_nav_1x"] = recommended_nav_1x(min_n, step, last_px) if account["limits"] else (float("nan"), None)
+    result.diagnostics["recommended_nav_1x_price_date"] = str(open_px.index[-1].date()) if len(open_px) else None
     return result
 
 
@@ -256,6 +283,7 @@ def _run_experiment(cfg, smoke, results_dir, log_path, registry_file, panel) -> 
             "summary": stats.summary(r, bench_ret), "costs": engine.cost_summary(results[m]), "pred": pred_m[m],
             "turnover_mean": float(results[m].turnover.mean()), "skipped_positions": results[m].diagnostics["skipped_positions"],
             "trades_executed": int(results[m].diagnostics["trades_per_day"].sum()),
+            "lot_scale": results[m].diagnostics["lot_scale"],  # Σ|yuvarlanmış| / Σ|hedef| (>1: lot yuvarlaması pozisyonu büyüttü)
         }
 
     # PBO: modeller = tek bir deneyin varyantları
@@ -282,7 +310,10 @@ def _run_experiment(cfg, smoke, results_dir, log_path, registry_file, panel) -> 
     )
     metrics = {
         "id": cfg["id"], "question": cfg["question"], "zone": cfg["zone"],
-        "account": {**cfg["account"], "unconstrained_symbols": results[primary].diagnostics["unconstrained_symbols"]}, "primary": primary, "sharpe": p["sharpe"], "max_drawdown": p["max_drawdown"],
+        "account": {**cfg["account"], "unconstrained_symbols": results[primary].diagnostics["unconstrained_symbols"],
+                    "recommended_nav_1x": results[primary].diagnostics["recommended_nav_1x"][0],
+                    "recommended_nav_1x_symbol": results[primary].diagnostics["recommended_nav_1x"][1],
+                    "recommended_nav_1x_price_date": results[primary].diagnostics["recommended_nav_1x_price_date"]}, "primary": primary, "sharpe": p["sharpe"], "max_drawdown": p["max_drawdown"],
         "variants": variants, "pbo": pbo, "stress_sharpe": stats.sharpe(stress), "delay1_sharpe": stats.sharpe(delayed),
         "btc_calmar": btc_calmar, "acceptance": acceptance, "acceptance_not_evaluated": ["plateau (parametre taraması gerekir)"],
         "valid": report.valid, "check_results": report.results, "check_failures": report.failures, "check_warnings": report.warnings,
@@ -295,6 +326,13 @@ def _run_experiment(cfg, smoke, results_dir, log_path, registry_file, panel) -> 
         "geçerli": report.valid, "uyarılar": ", ".join(report.warnings) or "yok", "başarısız testler": ", ".join(report.failures) or "yok",
         "birincil model": primary, "PBO": f"{pbo:.2f}" if pbo == pbo else "—", "stres Sharpe (ücret×2, kayma×3)": f"{stats.sharpe(stress):.2f}",
         "+1 bar gecikme Sharpe": f"{stats.sharpe(delayed):.2f}",
+        "hesap": f"{cfg['account']['nav']:g} USDT, {cfg['account']['leverage']:g}x, lot: {cfg['account']['lot_rounding']}",
+        "lot yuvarlaması (gerçekleşen emirlerde Σ|yuvarlanmış|/Σ|hedef|)": (f"{variants[primary]['lot_scale']:.2f}"
+                                                      if variants[primary]["lot_scale"] == variants[primary]["lot_scale"] else "—"),
+        "1x için önerilen asgari hesap": (
+            f"{metrics['account']['recommended_nav_1x']:.0f} USDT ({metrics['account']['recommended_nav_1x_symbol']} en küçük lotu, "
+            f"varlık tavanı %{config.ONE_X_ASSET_CAP * 100:.0f}; fiyat tarihi {metrics['account']['recommended_nav_1x_price_date']})"
+            if metrics["account"]["recommended_nav_1x"] == metrics["account"]["recommended_nav_1x"] else "— (limit yok)"),
         **{f"IC[{m}]": f"{pred_m[m].get('ic_mean', float('nan')):.3f} (t={pred_m[m].get('ic_t', float('nan')):.1f})" for m in pred_m},
     }
     render_report(ret_cols[primary], bench_ret, out_dir, f"{cfg['id']} · {primary}", extra=extra)

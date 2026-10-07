@@ -143,3 +143,99 @@ def test_cost_summary_reports_cost_to_gross_ratio():
 def test_default_slippage_tiers():
     s = engine.default_slippage_bps(["BTCUSDT", "ETHUSDT", "SOLUSDT", "XYZUSDT"], top20={"SOLUSDT"})
     assert s.to_dict() == {"BTCUSDT": 2.0, "ETHUSDT": 2.0, "SOLUSDT": 5.0, "XYZUSDT": 15.0}
+
+
+# ---------------------------------------------------------------- küçük hesap: en yakın lot + kaldıraç tavanı
+def _btc(n=4, price=100_000.0):
+    idx = pd.date_range("2022-01-01", periods=n, freq="D")
+    return pd.DataFrame({"BTCUSDT": price}, index=idx), idx
+
+
+def _lot_run(weight, **kw):
+    px, idx = _btc()
+    tgt = pd.DataFrame({"BTCUSDT": weight}, index=idx)
+    return engine.run(tgt, px, fee_rate=0.0, slippage_bps=0.0, account_size=250.0, min_notional=pd.Series({"BTCUSDT": 50.0}),
+                      amount_step=pd.Series({"BTCUSDT": 0.001}), **kw)
+
+
+def test_nearest_lot_opens_one_lot_when_target_is_at_least_half_a_lot():
+    # 250 USDT, BTC 100k: en küçük lot 0,001 BTC = 100 USDT = %40 NAV
+    assert _lot_run(0.20, lot_rounding="nearest").weights_held["BTCUSDT"].iloc[1] == pytest.approx(0.40)  # 50 USDT >= yarım lot
+    small = _lot_run(0.12, lot_rounding="nearest")  # 30 USDT < 50 USDT (yarım lot) -> açılmaz
+    assert small.weights_held["BTCUSDT"].iloc[1] == 0.0 and {s["reason"] for s in small.skipped} == {"min_lot"}
+    assert _lot_run(1.04, lot_rounding="nearest").weights_held["BTCUSDT"].iloc[1] == pytest.approx(1.20)  # 260 -> 0,003 BTC (en yakın)
+
+
+def test_leverage_cap_blocks_round_ups_beyond_max_gross():
+    res = _lot_run(0.20, lot_rounding="nearest", max_gross=0.30)  # bir lot %40 > %30 tavan
+    assert res.weights_held["BTCUSDT"].iloc[1] == 0.0 and {s["reason"] for s in res.skipped} == {"leverage"}
+    assert _lot_run(0.20, lot_rounding="nearest", max_gross=3.0).weights_held["BTCUSDT"].iloc[1] == pytest.approx(0.40)
+
+
+def test_floor_rounding_is_still_the_default():
+    res = _lot_run(0.20)  # varsayılan floor: 50 USDT = 0,0005 BTC -> 0 adım -> atlanır (önceki davranış)
+    assert res.weights_held["BTCUSDT"].iloc[1] == 0.0 and res.diagnostics["lot_rounding"] == "floor"
+    with pytest.raises(ValueError, match="lot_rounding"):
+        _lot_run(0.2, lot_rounding="yukari")
+
+
+def _lots(targets: dict, prices: dict, **kw):
+    idx = pd.date_range("2022-01-01", periods=len(next(iter(targets.values()))) + 1, freq="D")
+    px = pd.DataFrame({k: v for k, v in prices.items()}, index=idx)
+    tgt = pd.DataFrame({k: list(v) + [v[-1]] for k, v in targets.items()}, index=idx)
+    syms = list(prices)
+    return engine.run(tgt, px, fee_rate=0.0, slippage_bps=0.0, account_size=250.0, lot_rounding="nearest",
+                      min_notional=pd.Series(5.0, index=syms), amount_step=pd.Series(0.001, index=syms), **kw)
+
+
+def test_nearest_lot_closes_a_position_when_the_target_shrinks_or_flips_below_half_a_lot():
+    # BTC 100k: 1 lot = %40 NAV. Gün 1: +%40 (1 lot). Gün 2: hedef -%10 (yön değişti, yarım lotun altında) -> KAPAT (önceden korunuyordu)
+    res = _lots({"BTCUSDT": [0.40, -0.10, 0.0]}, {"BTCUSDT": 100_000.0})
+    assert res.weights_held["BTCUSDT"].tolist()[1:3] == pytest.approx([0.40, 0.0])
+    res2 = _lots({"BTCUSDT": [0.40, 0.10, 0.10]}, {"BTCUSDT": 100_000.0})  # aynı yönde küçülme: en yakın lot 0 -> kapat
+    assert res2.weights_held["BTCUSDT"].tolist()[1:3] == pytest.approx([0.40, 0.0])
+
+
+def test_leverage_check_does_not_block_reductions_and_signal_is_prescaled_order_independently():
+    # A küçülürken B büyür; brüt kontrolü yalnızca artıran emirlere ve işlenmiş + mevcut ağırlıklara bakar
+    res = _lots({"A": [1.2, 0.4, 0.4], "B": [1.6, 2.5, 2.5]}, {"A": 100.0, "B": 100.0}, max_gross=3.0)
+    assert res.weights_held["A"].iloc[2] == pytest.approx(0.4) and res.weights_held["B"].iloc[2] == pytest.approx(2.5)
+    # sinyal 4x > 3x tavan: ikisi de orantılı 1,5x'e iner (alfabetik sıraya bağlı DEĞİL)
+    res2 = _lots({"A": [2.0, 2.0], "B": [2.0, 2.0]}, {"A": 100.0, "B": 100.0}, max_gross=3.0)
+    assert res2.weights_held.iloc[1].tolist() == pytest.approx([1.5, 1.5])
+
+
+def test_lot_scale_reports_how_much_rounding_inflated_positions():
+    res = _lot_run(0.20, lot_rounding="nearest")  # 50 USDT hedef -> 100 USDT lot
+    assert res.diagnostics["lot_scale"] == pytest.approx(2.0)
+    assert np.isnan(_lot_run(0.20).diagnostics["lot_scale"])  # floor modunda hesaplanmaz
+
+
+def test_asset_caps_raise_the_cap_to_one_lot_so_btc_trades_at_any_price():
+    from research import sizing
+
+    idx = pd.date_range("2025-01-01", periods=2, freq="D")
+    price = pd.DataFrame({"BTCUSDT": [114_000.0, 60_000.0], "SOLUSDT": [200.0, 200.0]}, index=idx)
+    caps = sizing.asset_caps(price, 250.0, pd.Series({"BTCUSDT": 50.0, "SOLUSDT": 5.0}), pd.Series({"BTCUSDT": 0.001, "SOLUSDT": 0.01}))
+    assert caps.loc[idx[0], "BTCUSDT"] == pytest.approx(114.0 / 250)  # bir lot (0,001 BTC) = 114 USDT = %45,6
+    assert caps.loc[idx[1], "BTCUSDT"] == pytest.approx(60.0 / 250)  # 60k: 50 USDT min -> 0,001 BTC'ye yukarı = 60 USDT = %24
+    assert caps["SOLUSDT"].tolist() == pytest.approx([0.20, 0.20])  # küçük lotlu sembolde taban tavan (%20) geçerli
+    # tavana dayanan BTC sinyali 114k'da bir lot açar (eskiden %20 = 50 USDT < yarım lot -> hiç açılmıyordu)
+    w = sizing.clip_to_caps(pd.DataFrame({"BTCUSDT": [1.0]}, index=idx[:1]), caps)
+    px = pd.DataFrame({"BTCUSDT": [114_000.0, 114_000.0]}, index=idx)
+    res = engine.run(w.reindex(idx).fillna(0.0), px, fee_rate=0.0, slippage_bps=0.0, account_size=250.0, lot_rounding="nearest",
+                     min_notional=pd.Series({"BTCUSDT": 50.0}), amount_step=pd.Series({"BTCUSDT": 0.001}), max_gross=3.0)
+    assert res.weights_held["BTCUSDT"].iloc[0] == 0.0  # karar günü
+    held = engine.run(pd.DataFrame({"BTCUSDT": [w.iloc[0, 0]] * 3}, index=pd.date_range("2025-01-01", periods=3)),
+                      pd.DataFrame({"BTCUSDT": [114_000.0] * 3}, index=pd.date_range("2025-01-01", periods=3)), fee_rate=0.0,
+                      slippage_bps=0.0, account_size=250.0, lot_rounding="nearest", min_notional=pd.Series({"BTCUSDT": 50.0}),
+                      amount_step=pd.Series({"BTCUSDT": 0.001}), max_gross=3.0).weights_held["BTCUSDT"].iloc[1]
+    assert held == pytest.approx(114.0 / 250)  # 1 lot
+
+
+def test_rotation_within_leverage_is_not_blocked_regardless_of_column_order():
+    """Denetim (2. tur): artış, henüz işlenmemiş küçültmenin ESKİ ağırlığıyla kontrol ediliyordu. Önce küçültmeler işlenir."""
+    # A (alfabetik önce) 0,4 -> 1,2 artar, B 2,5 -> 1,6 küçülür: hedef brüt 2,8x < 3x -> ikisi de gerçekleşmeli
+    res = _lots({"A": [0.4, 1.2, 1.2], "B": [2.5, 1.6, 1.6]}, {"A": 100.0, "B": 100.0}, max_gross=3.0)
+    assert res.weights_held["A"].iloc[2] == pytest.approx(1.2) and res.weights_held["B"].iloc[2] == pytest.approx(1.6)
+    assert not any(s["reason"] == "leverage" for s in res.skipped)
