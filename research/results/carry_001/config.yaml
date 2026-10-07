@@ -1,0 +1,47 @@
+b:
+  exit: 0.03
+  hold_days: 14
+  ks:
+  - 3
+  - 5
+  - 8
+  leverages:
+  - 1
+  - 3
+  safety_margin: 0.1
+  top: 30
+  volume_cap: 0.001
+  windows:
+  - 3
+  - 7
+c:
+  leverages:
+  - 1
+  - 3
+  min_dte: 30
+  modes:
+  - vade
+  - gec
+eval_sim_start: '2021-04-01'
+hypothesis: Perpetual funding ve vadeli basis, delta-nötr toplandığında maliyetler
+  sonrası risksiz getirinin belirgin üstünde ve trend koluyla düşük korelasyonlu getiri
+  sağlar
+leg_tau_min: 1
+leverages:
+- 1
+- 2
+- 3
+liq_mmr: 0.01
+margin_band:
+- 0.5
+- 1.5
+min_annual_return: 0.08
+nav: 250.0
+pm_buffer: 0.1
+pre_registration: deneyler.md ÖN KAYIT — carry
+question: carry
+risk_free: 0.04
+sim_start_a_yearly_only: '2020-01-01'
+window:
+- '2021-04-01'
+- '2025-09-30'
