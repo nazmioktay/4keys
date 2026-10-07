@@ -136,6 +136,7 @@ def run(
     nav = 1.0
     out_nav, out_ret, out_gross, out_turn = [], [], [], []
     out_comm, out_slip, out_fund = [], [], []
+    out_trades = []  # gün başına GERÇEKTEN yapılan emir sayısı (Δağırlık ≠ 0)
     contrib = np.zeros((n_days - 1, n_sym))
     held = np.zeros((n_days - 1, n_sym))
     skipped: list[dict] = []
@@ -192,6 +193,7 @@ def run(
         out_ret.append(day_ret)
         out_gross.append(gross)
         out_turn.append(float(np.sum(np.abs(delta))))
+        out_trades.append(int(np.count_nonzero(np.abs(delta) > 1e-12)))
         out_comm.append(comm)
         out_slip.append(slp)
         out_fund.append(fnd)
@@ -212,6 +214,7 @@ def run(
             "missing_price_symbol_days": missing_days,
             "forced_liquidations": forced_liquidations,
             "skipped_positions": len(skipped),
+            "trades_per_day": pd.Series(out_trades, index=days, name="trades", dtype="int64"),
             "delay_bars": delay_bars,
             "band": float(np.mean(band_by_day)) if isinstance(band, pd.Series) else band,
             "band_relative": band_relative,

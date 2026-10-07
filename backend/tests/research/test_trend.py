@@ -157,3 +157,25 @@ def test_run_study_end_to_end_on_synthetic_market(tmp_path):
     log = paths["log_path"].read_text(encoding="utf-8")
     assert "SONUÇ — `trend_001`" in log and "**Toplam deneme: 248**" in log
     assert s["stress"]["main LF (WF)"]["2020-03"]["max_dd"] is None  # pencere öncesi: değerlendirilemez
+
+
+# ---------------------------------------------------------------- denetim düzeltmeleri: raporlama metrikleri
+def test_leg_contrib_assigns_exit_costs_to_their_leg_and_sums_to_total():
+    idx = pd.date_range("2022-01-01", periods=8, freq="D")
+    px = pd.DataFrame({"A": [100, 101, 99, 102, 100, 103, 101, 100.0], "B": [50, 49, 51, 50, 52, 51, 50, 49.0]}, index=idx)
+    tgt = pd.DataFrame({"A": [0.2, 0.2, 0.0, -0.2, -0.2, 0.0, 0.0, 0.0], "B": [-0.1, -0.1, -0.1, 0.0, 0.1, 0.1, 0.0, 0.0]}, index=idx)
+    res = engine.run(tgt, px, fee_rate=0.001, slippage_bps=10.0)
+    legs = trend.leg_contrib(res)
+    assert legs["long"] + legs["short"] == pytest.approx(legs["total"])
+    assert legs["total"] == pytest.approx(float(res.returns.sum()))  # katkılar toplamı = günlük getiriler toplamı
+
+
+def test_skipped_rate_counts_order_attempts_not_position_days():
+    idx = pd.date_range("2022-01-01", periods=6, freq="D")
+    px = pd.DataFrame({"A": [100, 110, 120, 130, 140, 150.0], "B": [10.0] * 6}, index=idx)
+    tgt = pd.DataFrame({"A": [0.5] * 6, "B": [0.001] * 6}, index=idx)  # B: 1.000 NAV'da 1 USDT < 5 min notional -> her gün atlanır
+    res = engine.run(tgt, px, fee_rate=0.0, slippage_bps=0.0, account_size=1_000.0, min_notional=pd.Series({"A": 5.0, "B": 5.0}))
+    executed = int(res.diagnostics["trades_per_day"].sum())
+    skipped = len(res.skipped)
+    assert skipped == 4 and executed >= 1  # A drift'le her gün küçük düzeltme alır; B her gün denenip atlanır
+    assert trend.skipped_rate(res) == pytest.approx(skipped / (skipped + executed))

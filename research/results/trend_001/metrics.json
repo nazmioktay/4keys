@@ -1,0 +1,18 @@
+{
+ "sharpe": 0.4272066789512915,
+ "max_drawdown": -0.4788635774629203,
+ "deflated_sharpe": 0.3065349664757452,
+ "pbo": 0.49696969696969695,
+ "decision": "KALDI \u2014 main LF: (net_sharpe, deflated_sharpe, pbo, max_drawdown, calmar, stress); main LS: (net_sharpe, deflated_sharpe, pbo, max_drawdown, calmar, stress, plateau). DUR (\u0131zgara geni\u015fletilmez).",
+ "main_LS": {
+  "sharpe": 0.3386908826104105,
+  "max_dd": -0.3524935298919013,
+  "dsr": 0.2438468393715369,
+  "status": "KALDI (net_sharpe, deflated_sharpe, pbo, max_drawdown, calmar, stress, plateau)"
+ },
+ "trials_before": 0,
+ "trials_after": 248,
+ "n_variants": 248,
+ "data_snapshot_hash": "0774e2086a790a0b",
+ "git_commit": "unknown"
+}

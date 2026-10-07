@@ -231,7 +231,7 @@ def stitch_targets(targets: dict[tuple[int, float], pd.DataFrame], choices: list
 
 def run_stitched(m: Market, target: pd.DataFrame, bands: pd.Series, **kw) -> engine.EngineResult:
     """Birleştirilmiş hedef TEK motor koşusunda; bant gün bazında katmanın seçimi (işlem günü = karar günü + 1)."""
-    return run_engine(m, target, band=bands.shift(1).bfill(), **kw)
+    return run_engine(m, target, band=bands.shift(1 + kw.get("delay", 0)).bfill(), **kw)  # +1 gün senaryosunda da hizalı
 
 
 # ---------------------------------------------------------------- metrikler
@@ -280,16 +280,23 @@ def stress_table(returns: pd.Series) -> dict[str, dict]:
 
 
 def leg_contrib(res: engine.EngineResult) -> dict:
-    """Long ve short bacağın değerlendirme penceresindeki toplam net katkısı (NAV oranı, basit toplam)."""
+    """Long ve short bacağın değerlendirme penceresindeki toplam net katkısı (NAV oranı, basit toplam). Bacak, günün pozisyon
+    işaretiyle; pozisyon kapatılan günde (tutulan 0) bir önceki günün işaretiyle atanır -> çıkış maliyeti de kendi bacağına
+    yazılır ve long + short = toplam katkı."""
+    held = res.weights_held
+    side = np.sign(held).where(held != 0, np.sign(held.shift(1)).fillna(0.0))
     sl = slice(EVAL_START, EVAL_END)
-    c, w = res.symbol_contrib.loc[sl], res.weights_held.loc[sl]
-    return {"long": float(c.where(w > 0, 0.0).sum().sum()), "short": float(c.where(w < 0, 0.0).sum().sum())}
+    c, side = res.symbol_contrib.loc[sl], side.loc[sl]
+    return {"long": float(c.where(side > 0, 0.0).sum().sum()), "short": float(c.where(side < 0, 0.0).sum().sum()),
+            "total": float(c.sum().sum())}
 
 
 def skipped_rate(res: engine.EngineResult) -> float:
+    """Emir denemelerinin atlanan oranı: asgari emir altında kalan (atlanan) / (atlanan + gerçekten yapılan emir). Aynı pozisyon
+    her gün yeniden denenip atlanırsa her deneme sayılır (payda ve pay aynı birimde: emir denemesi)."""
     sl = slice(EVAL_START, EVAL_END)
     skipped = sum(1 for x in res.skipped if EVAL_START <= pd.Timestamp(x["date"]) <= EVAL_END)
-    executed = int((res.weights_held.loc[sl].diff().abs() > 1e-12).sum().sum())
+    executed = int(res.diagnostics["trades_per_day"].loc[sl].sum())
     return skipped / (skipped + executed) if (skipped + executed) else float("nan")
 
 
@@ -318,9 +325,9 @@ def benchmarks(m: Market) -> dict[str, engine.EngineResult]:
     }
 
 
-def btc_march_2020_stress() -> dict:
+def btc_march_2020_stress(m: Market) -> dict:
     """2020-03 yalnızca BTC al-tut için (ham açılıştan açılışa; strateji serileri bu dönemde yok)."""
-    px = store.load_panel("open", ["BTCUSDT"])["BTCUSDT"].loc[:EVAL_END]
+    px = m.prices["open"]["BTCUSDT"].loc[:EVAL_END]
     r = (px.shift(-1) / px - 1.0).dropna()
     return stress_table(r)["2020-03"]
 
@@ -452,7 +459,7 @@ def run_study(*, market: Market | None = None, results_dir: Path | None = None, 
                     "annual_return_10000": stats.annual_return(window(w["res"].returns))}
     stress = {f"main {d} (WF)": stress_table(window(wf[("main", d)]["res"].returns)) for d in DIRECTIONS}
     stress |= {k: stress_table(window(v.returns)) for k, v in bench.items()}
-    stress["BTC al-tut"]["2020-03"] = btc_march_2020_stress()
+    stress["BTC al-tut"]["2020-03"] = btc_march_2020_stress(m)
     bench_rows = {k: variant_metrics(v, btc_w) for k, v in bench.items()}
     _turnover_plot(base_rows, out_dir / "turnover_getiri.png")
 
@@ -562,11 +569,12 @@ def _results_md(s: dict) -> str:
         ns = s["nav_small"][d]
         L.append(f"- **main {d}**: walk-forward seçimleri {', '.join(r['selections'])}. Plato (N{p['N']}/b{p['band']:.2f} sabit; "
                  f"temel Sharpe {_fmt(p['base_sharpe'])}): oran **{_fmt(p['ratio'])}**, en kötü komşu `{worst}` "
-                 f"({_fmt(p['neighbors'][worst])}). NAV 1.000: açılamayan pozisyon {_fmt(ns['skipped_rate_1000'], True)} "
+                 f"({_fmt(p['neighbors'][worst])}). NAV 1.000: atlanan emir denemesi {_fmt(ns['skipped_rate_1000'], True)} "
                  f"(10.000'de {_fmt(ns['skipped_rate_10000'], True)}), yıllık getiri "
                  f"{_fmt(ns['annual_return_1000'], True)} vs {_fmt(ns['annual_return_10000'], True)}.")
         if "legs" in r:
-            L.append(f"  Bacak katkısı (toplam, NAV oranı): long {_fmt(r['legs']['long'], True)}, short {_fmt(r['legs']['short'], True)}.")
+            L.append(f"  Bacak katkısı (toplam, NAV oranı; çıkış maliyeti kendi bacağında): long {_fmt(r['legs']['long'], True)}, "
+                     f"short {_fmt(r['legs']['short'], True)} (toplam {_fmt(r['legs']['total'], True)}).")
     L += ["", "### Stres dönemleri (maks. DD / toparlanma günü)", "| Seri | " + " | ".join(STRESS_PERIODS) + " |",
           "|---|" + "---|" * len(STRESS_PERIODS)]
     for k, per in s["stress"].items():
