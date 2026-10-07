@@ -383,3 +383,14 @@ maks. DD ≤ %35; Calmar ≥ max(BTC al-tut Calmar, 0,7); pozitif yıl ≥ %60; 
 NAV'a göre yıllık net getirisi ≥ **%8** (risksiz %4'ün 2 katı) ise. Geçenlerden **EN BASİT** olan aday ilan edilir; sadelik sırası:
 A-1x (BTC, ETH) → A-2x → A-3x → A-PM → C (1x önce; vadeye kadar önce; BTC önce) → B (1x önce; K3 → K5 → K8; W7 → W3).
 Hiçbiri geçmezse DURULUR ve hangi koşullarda kalındığı yazılır. Trend korelasyonu raporlanır, karar koşulu değildir.
+
+> **ÖN KAYIT EKİ — `carry` (2026-10-08, gerçek koşudan önce; kayıt değil, olay notu).** İlk kod denetiminde denetçi ajan, muhasebeyi
+> doğrulamak için gerçek veride ~40 simülasyon çalıştırdı. Bir kontrol çıktısında bazı varyantların pencere içi yıllık getiri ve Sharpe
+> değerleri basıldı. Bu sayılar uygulayıcıya iletilmedi ve hiçbir karara girmedi; kayıt ve sayaç değişmedi. Ön kayıt (`e3b5ebc`) bu
+> bakıştan ÖNCE commit edilmişti; sonrasında eşik, varyant ya da parametre DEĞİŞMEDİ. Denetimden sonra yapılan değişiklikler yalnızca
+> ön kayda uyum ve muhasebe düzeltmeleridir: B ve C de pencere başında 250 USDT ile başlar (A ayrıca 2020'den, yalnızca yıllık tablo);
+> tasfiye kaybı ayrı kalem; atlanan emir / lot_scale / 1x önerisi raporlanır; tek bacak fiyatsızken MTM ve işlem yapılmaz, > 5 gün
+> senkron boşlukta son kapanıştan kapatılır; lot yuvarlaması marjı hedefe getiremezse boştaki nakit vadeli cüzdana aktarılır (ön kayıt:
+> "nakit cüzdanlar arasında taşınır"); vade günü yeni kontrat açılmaz (ertesi karar günü); plato oranında NaN komşu = başarısız;
+> stres ve τ = 5 dk koşularında giriş/çıkış eşikleri birincil maliyetle kalır. Kullanıcı kararı (2026-10-08): not düşülerek devam edilir.
+> Sonraki denetimlerde denetçi gerçek veride metrik üretmez.
