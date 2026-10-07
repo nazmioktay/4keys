@@ -523,3 +523,15 @@ PnL kalemleri pencere toplamıdır, pencere başı NAV'ına (250 USDT) oranla. B
 > - ETHUSDT perp 2020-03-13 en yüksek 323 (spot 139,7): veri/iğne kaynaklı; A|ETH|1x'in 2020 yılı −%27,9 bu sahte tasfiyeden. 2020 yalnızca
 >   bilgi; pencere dışı.
 > - Koşu sonrası bu iki tarihe bakmak için kayıtlı varyantlar yeniden koşturuldu (A|ETH|1x 2020'den); yeni varyant/parametre denenmedi.
+
+## ML turnuvası — KOŞTURULMADI (2026-10-08; deneme sayılmaz)
+Kullanıcı talimatı (3 soru: volatilite tahmini, kesitsel sıralama, trend meta-label) kabul edilmiş kolların varlığına dayanıyor:
+"ML yalnızca kabul edilmiş bir kolun net performansını ... iyileştirirse portföye girer." Bu tarihte kabul edilmiş kol YOK
+(trend_001, kesitsel_001, carry_001: KALDI).
+- Soru 2 talimatın kendi koşuluyla uygulanamaz ("yalnızca kesitsel kol kabul edildiyse").
+- Soru 3: filtrelenecek kabul edilmiş trend kolu yok; başarısız bir kolu meta-label ile kurtarmak ilkeye aykırı (aşırı uyum riski).
+- Soru 1: tahmin kısmı yapılabilir ama ikinci başarı ölçütü (kolun vol hedeflemesinde net Sharpe artışı) kol gerektirir; ML portföye
+  giremez.
+- Portföye giremeyecek deneyler global deneme sayacını (321) büyütüp gelecekteki kolların Deflated Sharpe eşiğini zorlaştıracağından
+  **kullanıcı kararıyla (2026-10-08) koşturulmadı.** Tasarım `docs/research/sablonlar/ml_turnuva.md`'de bekliyor; bir kol kabul edilince
+  her soru için config listesi ön kayıt olarak yazılıp uygulanır.
