@@ -41,6 +41,8 @@ Kâr getiren bir sistem bulunmadı. Ama kaybettiren bir sistemi gerçek parayla 
   gerektiriyor.
 - **Çalışma düzeni:** `CLAUDE.md`, reviewer denetimi, ruff; 702 test (2026-10-08, `pytest --collect-only`).
 - **Veri dışa aktarımı:** BTC/ETH araştırma verisi Excel olarak (nihai pencere hariç).
+- **RL hazırlığı** (`backend/app/rl/`): ortam, epizod verisi, rastgele politika referansı ve Hurst tabanlı yürütme zamanlaması testi;
+  ajan eğitilmedi. İlk proje rehberinin değerlendirmesi: `REHBER_DEGERLENDIRME.md`.
 
 ## Dürüst sınırlar
 - Test edilen alan dar: 2021–2025, Binance USDⓈ-M perpetual + spot + quarterly, günlük/saatlik, kamuya açık fiyat verisi. "Hiçbir yerde

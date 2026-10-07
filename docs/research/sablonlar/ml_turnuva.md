@@ -30,3 +30,7 @@ sayısıyla Deflated Sharpe ≥ 0,95.
 
 **Çıktı:** her soru için aday modeller tablosu, ablasyon tablosu ve kazanan (ya da gerekçesiyle "ML katkısı yok");
 kazanan config'ler `research/configs/` altına.
+
+**Rehberden gelenler** (bkz. `REHBER_DEGERLENDIRME.md`): ilk proje rehberinin Faz A'sı (XGBoost) buradaki ağaç modelleri (LightGBM/XGBoost)
+olarak, doğrusal kıyastan SONRA koşulur; Faz B (LSTM/PatchTST) yalnızca ağaç modelleri anlamlı beceri gösterirse ek deneme olarak.
+Faz C (RL) bu turnuvanın DIŞINDADIR: yalnızca kabul edilmiş bir kolun yürütme/boyutlandırma katmanı olarak, ayrı ön kayıtla.
