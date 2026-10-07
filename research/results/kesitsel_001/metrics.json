@@ -1,0 +1,16 @@
+{
+ "sharpe": 0.14358632121432202,
+ "max_drawdown": -0.36986926289441546,
+ "deflated_sharpe": 0.010023741083031081,
+ "pbo": 0.23986013986013985,
+ "corr_trend": {
+  "main_LF_wf": 0.20135578944383836,
+  "main_LS_wf": 0.3190699378638332
+ },
+ "decision": "KALDI \u2014 ana aday: (net_sharpe, deflated_sharpe, max_drawdown, calmar, stress, plateau). DUR (\u0131zgara geni\u015fletilmez).",
+ "trials_before": 248,
+ "trials_after": 285,
+ "n_variants": 37,
+ "data_snapshot_hash": "0774e2086a790a0b",
+ "git_commit": "13d10c7"
+}

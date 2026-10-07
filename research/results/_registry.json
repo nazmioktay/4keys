@@ -1,5 +1,5 @@
 {
- "total_trials": 248,
+ "total_trials": 285,
  "experiments": [
   {
    "id": "trend_001",
@@ -9,6 +9,16 @@
    "trials_after": 248,
    "date": "2026-10-07T07:35:46+00:00",
    "git_commit": "unknown",
+   "data_hash": "0774e2086a790a0b"
+  },
+  {
+   "id": "kesitsel_001",
+   "question": "kesitsel",
+   "n_variants": 37,
+   "trials_before": 248,
+   "trials_after": 285,
+   "date": "2026-10-07T16:41:25+00:00",
+   "git_commit": "13d10c7",
    "data_hash": "0774e2086a790a0b"
   }
  ],

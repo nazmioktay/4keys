@@ -1,0 +1,54 @@
+account:
+  leverage: 3.0
+  lot_rounding: nearest
+  nav: 250.0
+  recommended_nav_1x: 569.9440000000001
+  recommended_nav_1x_price_date: '2025-09-30'
+  recommended_nav_1x_symbol: BTCUSDT
+band_relative: 0.25
+beta_window: 60
+folds:
+- '2021-04-01'
+- '2021-10-01'
+- '2022-04-01'
+- '2022-10-01'
+- '2023-04-01'
+- '2023-10-01'
+- '2024-04-01'
+- '2024-10-01'
+- '2025-04-01'
+gross_cap:
+  a: 2.0
+  b: 2.0
+  c: 1.0
+hypothesis: Kripto'da kesitsel momentum (Liu, Tsyvinski & Wu 2022), maliyetler sonrası
+  trend koluyla düşük korelasyonlu pozitif getiri üretir
+lookbacks:
+- 7
+- 14
+- 28
+name_cap: 0.1
+portfolios:
+- a
+- b
+- c
+position_start: '2020-10-01'
+pre_registration: deneyler.md ÖN KAYIT — kesitsel
+quantile: 5
+question: kesitsel
+rebalances:
+- W
+- 3D
+scores:
+- duz
+- vol
+skip_days: 1
+stop_loss: 0.25
+target_vol: 0.2
+universes:
+- 30
+- 50
+vol_span: 60
+window:
+- '2021-04-01'
+- '2025-09-30'

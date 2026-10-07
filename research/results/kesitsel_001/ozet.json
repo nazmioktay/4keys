@@ -1,0 +1,634 @@
+{
+ "experiment_id": "kesitsel_001",
+ "decision": "KALDI — ana aday: (net_sharpe, deflated_sharpe, max_drawdown, calmar, stress, plateau). DUR (ızgara genişletilmez).",
+ "pbo": 0.23986013986013985,
+ "n_variants": 37,
+ "trials_after": 285,
+ "btc_calmar": 0.20735530682802936,
+ "plateau": {
+  "N": 30,
+  "rebalance": "3D",
+  "base_sharpe": 0.5960782013737068,
+  "neighbors": {
+   "L7×0.5": 0.7603816049331292,
+   "L7×1.5": 0.9794581629461803,
+   "L14×0.5": 0.2350014871299097,
+   "L14×1.5": 0.37141966376379176,
+   "L28×0.5": 0.8154844029093079,
+   "L28×1.5": 0.6732140402953027,
+   "vol_span×0.5": 0.7070325471806929,
+   "vol_span×1.5": 0.42653357322335855
+  },
+  "ratio": 0.39424606802988466
+ },
+ "corr_trend": {
+  "main_LF_wf": 0.20135578944383836,
+  "main_LS_wf": 0.3190699378638332
+ },
+ "mix": {
+  "sharpe": 0.5206834420674967,
+  "max_dd": -0.34797519657969034,
+  "calmar": 0.2279441360208209,
+  "annual_return": 0.07931890554103282,
+  "sharpe_ok": false,
+  "max_dd_ok": false
+ },
+ "horizon": {
+  "1": -9.727478827956054e-05,
+  "2": -0.00011766679398451053,
+  "3": -7.46425408637398e-05,
+  "4": -0.0006236105584515563,
+  "5": -0.00081970040350403,
+  "6": -0.0012558265953700478,
+  "7": -0.0009214502812559054,
+  "8": -0.0007440488197894234,
+  "9": -0.00095255694569037,
+  "10": -0.0012790870430311558,
+  "11": -0.0007973226774138457,
+  "12": -0.0007842864557856731,
+  "13": -0.0014890581703288807,
+  "14": -0.001557553111948624,
+  "15": -0.0012086165960614617,
+  "16": -0.0011201448711332526,
+  "17": -0.0013489667094420208,
+  "18": -0.0012308708163497417,
+  "19": -0.001350528532345027,
+  "20": -0.001285446962490656,
+  "21": -0.0009191447080055928,
+  "22": -0.001323252845698553,
+  "23": -0.0015339289453923043,
+  "24": -0.0014743091099025064,
+  "25": -0.002618713347152127,
+  "26": -0.0033152248211715768,
+  "27": -0.004135711770026878,
+  "28": -0.0058755412626534075,
+  "29": -0.007329122715919717,
+  "30": -0.008523313103093096,
+  "31": -0.010544162630929442,
+  "32": -0.011906159524234794,
+  "33": -0.013385989151528239,
+  "34": -0.013718713903409152,
+  "35": -0.014105704836190863,
+  "36": -0.014600299068749042,
+  "37": -0.014863663366514306,
+  "38": -0.0150442705407396,
+  "39": -0.01496006199004137,
+  "40": -0.014710869829314197,
+  "41": -0.01474820871773721,
+  "42": -0.01437105908107674,
+  "43": -0.013867806135096646,
+  "44": -0.013799177771487491,
+  "45": -0.013567130686745907,
+  "46": -0.01328712296807517,
+  "47": -0.013262247407169801,
+  "48": -0.014356768090384544,
+  "49": -0.015120748599192501,
+  "50": -0.015853097970569628,
+  "51": -0.016884491763385058,
+  "52": -0.01744607211625797,
+  "53": -0.017522415686968513,
+  "54": -0.017479228343503454,
+  "55": -0.016961207060107546,
+  "56": -0.01711380355515673,
+  "57": -0.01664602195105859,
+  "58": -0.016036389667904258,
+  "59": -0.016629897630737647,
+  "60": -0.017366985081045023
+ },
+ "horizon_peak": 3,
+ "stress": {
+  "ana aday (WF)": {
+   "2020-03": {
+    "max_dd": null,
+    "recovery_days": null,
+    "note": "değerlendirilemez (seri dönemden sonra başlıyor)"
+   },
+   "2021-05": {
+    "max_dd": -0.08987347568078707,
+    "recovery_days": null,
+    "note": "2025-09-30'e kadar toparlanmadı"
+   },
+   "2022-05 (LUNA)": {
+    "max_dd": -0.2508516362206046,
+    "recovery_days": null,
+    "note": "2025-09-30'e kadar toparlanmadı"
+   },
+   "2022-11 (FTX)": {
+    "max_dd": -0.153549887766541,
+    "recovery_days": null,
+    "note": "2025-09-30'e kadar toparlanmadı"
+   }
+  },
+  "ana aday + zarar limiti (WF)": {
+   "2020-03": {
+    "max_dd": null,
+    "recovery_days": null,
+    "note": "değerlendirilemez (seri dönemden sonra başlıyor)"
+   },
+   "2021-05": {
+    "max_dd": -0.07149261138395524,
+    "recovery_days": 179,
+    "note": ""
+   },
+   "2022-05 (LUNA)": {
+    "max_dd": -0.18524649545695193,
+    "recovery_days": null,
+    "note": "2025-09-30'e kadar toparlanmadı"
+   },
+   "2022-11 (FTX)": {
+    "max_dd": -0.16844865053058644,
+    "recovery_days": null,
+    "note": "2025-09-30'e kadar toparlanmadı"
+   }
+  },
+  "BTC al-tut": {
+   "2020-03": {
+    "max_dd": -0.5401549013303055,
+    "recovery_days": 137,
+    "note": ""
+   },
+   "2021-05": {
+    "max_dd": -0.45612286992065976,
+    "recovery_days": 143,
+    "note": ""
+   },
+   "2022-05 (LUNA)": {
+    "max_dd": -0.5765633374522795,
+    "recovery_days": 647,
+    "note": ""
+   },
+   "2022-11 (FTX)": {
+    "max_dd": -0.766619107269602,
+    "recovery_days": 469,
+    "note": ""
+   }
+  },
+  "EW ilk-10 al-tut (aylık)": {
+   "2020-03": {
+    "max_dd": null,
+    "recovery_days": null,
+    "note": "değerlendirilemez (seri dönemden sonra başlıyor)"
+   },
+   "2021-05": {
+    "max_dd": -0.5163396410543537,
+    "recovery_days": null,
+    "note": "2025-09-30'e kadar toparlanmadı"
+   },
+   "2022-05 (LUNA)": {
+    "max_dd": -0.8279767408352645,
+    "recovery_days": null,
+    "note": "2025-09-30'e kadar toparlanmadı"
+   },
+   "2022-11 (FTX)": {
+    "max_dd": -0.8976566624601071,
+    "recovery_days": null,
+    "note": "2025-09-30'e kadar toparlanmadı"
+   }
+  },
+  "BTC EMA200 long/flat": {
+   "2020-03": {
+    "max_dd": null,
+    "recovery_days": null,
+    "note": "değerlendirilemez (seri dönemden sonra başlıyor)"
+   },
+   "2021-05": {
+    "max_dd": -0.44547044176481954,
+    "recovery_days": 1026,
+    "note": ""
+   },
+   "2022-05 (LUNA)": {
+    "max_dd": -0.5941229508482775,
+    "recovery_days": 680,
+    "note": ""
+   },
+   "2022-11 (FTX)": {
+    "max_dd": -0.5941229508482775,
+    "recovery_days": 496,
+    "note": ""
+   }
+  }
+ },
+ "benchmarks": {
+  "BTC al-tut": {
+   "sharpe": 0.5441262646580297,
+   "calmar": 0.20735530682802936,
+   "max_dd": -0.766619107269602,
+   "annual_return": 0.15896254020811829,
+   "turnover": 3.5688973923974407e-14,
+   "cost_to_gross": 8.066313466696863e-17,
+   "positive_years": 0.6,
+   "corr_btc": 0.9999999999999999
+  },
+  "EW ilk-10 al-tut (aylık)": {
+   "sharpe": 0.1476190368391599,
+   "calmar": -0.21521932016829323,
+   "max_dd": -0.9264354337944551,
+   "annual_return": -0.19938680424106048,
+   "turnover": 7.94234764743158,
+   "cost_to_gross": 0.06679985664865591,
+   "positive_years": 0.6,
+   "corr_btc": 0.8303042336129545
+  },
+  "BTC EMA200 long/flat": {
+   "sharpe": 0.23272819174450568,
+   "calmar": 0.01687243483461658,
+   "max_dd": -0.6046888503095816,
+   "annual_return": 0.010202573222067635,
+   "turnover": 12.960093732591213,
+   "cost_to_gross": 0.48087450358687994,
+   "positive_years": 0.6,
+   "corr_btc": 0.7329232502244519
+  }
+ },
+ "wf": [
+  {
+   "score": "duz",
+   "portfolio": "a",
+   "stop": false,
+   "sharpe": 0.14358632121432202,
+   "calmar": 0.02270805876188242,
+   "max_dd": -0.36986926289441546,
+   "annual_return": 0.008399012956020524,
+   "turnover": 64.7169125332447,
+   "cost_to_gross": 0.5991344970420811,
+   "positive_years": 0.6,
+   "corr_btc": -0.08671717823203372,
+   "dsr": 0.010023741083031081,
+   "stress_sharpe": -0.43867852917159195,
+   "delay1_sharpe": 0.31529984144247686,
+   "lot_scale": 1.0486149642620683,
+   "skipped_rate": 0.06030294369819949,
+   "skipped_reasons": {
+    "min_lot": 422
+   },
+   "selections": [
+    "2021-04:N50/3D",
+    "2021-10:N50/3D",
+    "2022-04:N30/3D",
+    "2022-10:N30/3D",
+    "2023-04:N30/3D",
+    "2023-10:N30/3D",
+    "2024-04:N30/3D",
+    "2024-10:N30/3D",
+    "2025-04:N30/3D"
+   ],
+   "corr_trend": {
+    "main_LF_wf": 0.20135578944383836,
+    "main_LS_wf": 0.3190699378638332
+   },
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": true,
+    "max_drawdown": false,
+    "calmar": false,
+    "positive_years": true,
+    "stress": false,
+    "plateau": false
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, max_drawdown, calmar, stress, plateau)",
+   "legs": {
+    "long": 0.43429718480298385,
+    "short": -0.30045643270173766,
+    "total": 0.13384075210124624
+   }
+  },
+  {
+   "score": "duz",
+   "portfolio": "b",
+   "stop": false,
+   "sharpe": -0.1149418380327737,
+   "calmar": -0.0850203603742404,
+   "max_dd": -0.5113736571609276,
+   "annual_return": -0.04347717261771533,
+   "turnover": 33.409280458508185,
+   "cost_to_gross": NaN,
+   "positive_years": 0.4,
+   "corr_btc": -0.02872486215652342,
+   "dsr": 0.002109147469980839,
+   "stress_sharpe": -0.5320085752035806,
+   "delay1_sharpe": -0.13840569838207975,
+   "lot_scale": 1.0328619480797383,
+   "skipped_rate": 0.05738669805768099,
+   "skipped_reasons": {
+    "min_lot": 195
+   },
+   "selections": [
+    "2021-04:N50/3D",
+    "2021-10:N50/3D",
+    "2022-04:N30/3D",
+    "2022-10:N30/3D",
+    "2023-04:N30/3D",
+    "2023-10:N30/3D",
+    "2024-04:N30/3D",
+    "2024-10:N30/3D",
+    "2025-04:N30/3D"
+   ],
+   "corr_trend": {
+    "main_LF_wf": 0.39690365310016246,
+    "main_LS_wf": 0.18627360249016267
+   },
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": true,
+    "max_drawdown": false,
+    "calmar": false,
+    "positive_years": false,
+    "stress": false,
+    "plateau": false
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, max_drawdown, calmar, positive_years, stress)",
+   "legs": {
+    "long": 0.27692393537412496,
+    "short": -0.3830290423892032,
+    "total": -0.10610510701507825
+   }
+  },
+  {
+   "score": "duz",
+   "portfolio": "c",
+   "stop": false,
+   "sharpe": 0.1773160973011515,
+   "calmar": 0.036634558406376506,
+   "max_dd": -0.42852103430712785,
+   "annual_return": 0.015698678859685344,
+   "turnover": 20.50370015309098,
+   "cost_to_gross": -0.12501649926675842,
+   "positive_years": 0.8,
+   "corr_btc": 0.6550156836906994,
+   "dsr": 0.012164293860913179,
+   "stress_sharpe": -0.09396706350245572,
+   "delay1_sharpe": 0.25817794765183294,
+   "lot_scale": 1.057484005199233,
+   "skipped_rate": 0.08343672456575682,
+   "skipped_reasons": {
+    "min_lot": 269
+   },
+   "selections": [
+    "2021-04:N50/3D",
+    "2021-10:N50/W",
+    "2022-04:N50/W",
+    "2022-10:N30/3D",
+    "2023-04:N30/3D",
+    "2023-10:N30/3D",
+    "2024-04:N30/3D",
+    "2024-10:N30/3D",
+    "2025-04:N30/3D"
+   ],
+   "corr_trend": {
+    "main_LF_wf": 0.7450247028688285,
+    "main_LS_wf": 0.1877828629721482
+   },
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": true,
+    "max_drawdown": false,
+    "calmar": false,
+    "positive_years": true,
+    "stress": false,
+    "plateau": false
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, max_drawdown, calmar, stress)"
+  },
+  {
+   "score": "vol",
+   "portfolio": "a",
+   "stop": false,
+   "sharpe": 0.6384357801358576,
+   "calmar": 0.4737854942647395,
+   "max_dd": -0.23849403813796655,
+   "annual_return": 0.1129950157383901,
+   "turnover": 70.26172330402294,
+   "cost_to_gross": 0.28926362475325157,
+   "positive_years": 0.6,
+   "corr_btc": -0.045815215888490766,
+   "dsr": 0.10290147722950299,
+   "stress_sharpe": 0.14276033674561656,
+   "delay1_sharpe": 0.8000099566296262,
+   "lot_scale": 1.0361808456794184,
+   "skipped_rate": 0.031505791505791504,
+   "skipped_reasons": {
+    "min_lot": 204
+   },
+   "selections": [
+    "2021-04:N50/3D",
+    "2021-10:N30/3D",
+    "2022-04:N30/3D",
+    "2022-10:N30/3D",
+    "2023-04:N30/3D",
+    "2023-10:N30/3D",
+    "2024-04:N30/3D",
+    "2024-10:N30/3D",
+    "2025-04:N30/3D"
+   ],
+   "corr_trend": {
+    "main_LF_wf": 0.12018754031687533,
+    "main_LS_wf": 0.2131939015721141
+   },
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": true,
+    "max_drawdown": true,
+    "calmar": false,
+    "positive_years": true,
+    "stress": false,
+    "plateau": false
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, calmar, stress)",
+   "legs": {
+    "long": 0.4082838512453142,
+    "short": 0.16262727380485048,
+    "total": 0.5709111250501647
+   }
+  },
+  {
+   "score": "vol",
+   "portfolio": "b",
+   "stop": false,
+   "sharpe": -0.09958048431564986,
+   "calmar": -0.08025533390211755,
+   "max_dd": -0.48486478747378114,
+   "annual_return": -0.038912985416087564,
+   "turnover": 35.80558333710477,
+   "cost_to_gross": NaN,
+   "positive_years": 0.4,
+   "corr_btc": -0.05861549610801877,
+   "dsr": 0.00229462007575629,
+   "stress_sharpe": -0.6177945936713473,
+   "delay1_sharpe": -0.13679674014041354,
+   "lot_scale": 1.0513301161437503,
+   "skipped_rate": 0.047867711053089644,
+   "skipped_reasons": {
+    "min_lot": 165
+   },
+   "selections": [
+    "2021-04:N50/3D",
+    "2021-10:N50/3D",
+    "2022-04:N30/3D",
+    "2022-10:N30/3D",
+    "2023-04:N30/3D",
+    "2023-10:N30/3D",
+    "2024-04:N30/3D",
+    "2024-10:N30/3D",
+    "2025-04:N30/3D"
+   ],
+   "corr_trend": {
+    "main_LF_wf": 0.36843881280513724,
+    "main_LS_wf": 0.1774611112154326
+   },
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": true,
+    "max_drawdown": false,
+    "calmar": false,
+    "positive_years": false,
+    "stress": false,
+    "plateau": false
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, max_drawdown, calmar, positive_years, stress)",
+   "legs": {
+    "long": 0.19907900755366909,
+    "short": -0.2884780987261987,
+    "total": -0.08939909117252959
+   }
+  },
+  {
+   "score": "vol",
+   "portfolio": "c",
+   "stop": false,
+   "sharpe": 0.13715441010844817,
+   "calmar": 0.01897397416701053,
+   "max_dd": -0.4069986110450988,
+   "annual_return": 0.007722381131978873,
+   "turnover": 23.297576216871096,
+   "cost_to_gross": 0.21524550454308336,
+   "positive_years": 0.8,
+   "corr_btc": 0.6910629750059274,
+   "dsr": 0.009757196171181242,
+   "stress_sharpe": -0.11825096794010784,
+   "delay1_sharpe": 0.3070122522554406,
+   "lot_scale": 1.0732873094534816,
+   "skipped_rate": 0.08621181844133599,
+   "skipped_reasons": {
+    "min_lot": 302
+   },
+   "selections": [
+    "2021-04:N50/3D",
+    "2021-10:N50/3D",
+    "2022-04:N30/3D",
+    "2022-10:N30/3D",
+    "2023-04:N30/3D",
+    "2023-10:N30/3D",
+    "2024-04:N30/3D",
+    "2024-10:N30/3D",
+    "2025-04:N30/3D"
+   ],
+   "corr_trend": {
+    "main_LF_wf": 0.7530860918145655,
+    "main_LS_wf": 0.17360830547765707
+   },
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": true,
+    "max_drawdown": false,
+    "calmar": false,
+    "positive_years": true,
+    "stress": false,
+    "plateau": false
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, max_drawdown, calmar, stress)"
+  },
+  {
+   "score": "duz",
+   "portfolio": "a",
+   "stop": true,
+   "sharpe": 0.12841088528263986,
+   "calmar": 0.01517494177096525,
+   "max_dd": -0.36377430883950246,
+   "annual_return": 0.0055202539544125795,
+   "turnover": 54.58219216684237,
+   "cost_to_gross": 0.5550910112549167,
+   "positive_years": 0.6,
+   "corr_btc": -0.041583345605883684,
+   "dsr": 0.009170933245419387,
+   "stress_sharpe": -0.8609970658157218,
+   "delay1_sharpe": 0.3732845053349815,
+   "lot_scale": 1.0342330682521588,
+   "skipped_rate": 0.03511980976769709,
+   "skipped_reasons": {
+    "min_lot": 192
+   },
+   "selections": [
+    "2021-04:N50/W",
+    "2021-10:N50/W",
+    "2022-04:N30/W",
+    "2022-10:N30/3D",
+    "2023-04:N30/3D",
+    "2023-10:N30/3D",
+    "2024-04:N30/W",
+    "2024-10:N30/3D",
+    "2025-04:N30/3D"
+   ],
+   "corr_trend": {
+    "main_LF_wf": 0.23158208938365352,
+    "main_LS_wf": 0.3198822673345065
+   },
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": true,
+    "max_drawdown": false,
+    "calmar": false,
+    "positive_years": true,
+    "stress": false,
+    "plateau": false
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, max_drawdown, calmar, stress)",
+   "legs": {
+    "long": 0.5516605617764758,
+    "short": -0.43393703441185055,
+    "total": 0.11772352736462521
+   }
+  }
+ ],
+ "account": {
+  "nav": 250.0,
+  "leverage": 3.0,
+  "lot_rounding": "nearest",
+  "recommended_nav_1x": 569.9440000000001,
+  "recommended_nav_1x_symbol": "BTCUSDT",
+  "recommended_nav_1x_price_date": "2025-09-30"
+ },
+ "unlimited_symbols": [
+  "AERGOUSDT",
+  "ANTUSDT",
+  "AUDIOUSDT",
+  "BTTUSDT",
+  "BZRXUSDT",
+  "COCOSUSDT",
+  "DODOUSDT",
+  "EOSUSDT",
+  "FRONTUSDT",
+  "GALUSDT",
+  "HNTUSDT",
+  "KEEPUSDT",
+  "LENDUSDT",
+  "LUNAUSDT",
+  "MATICUSDT",
+  "RNDRUSDT",
+  "SRMUSDT",
+  "SXPUSDT",
+  "TOMOUSDT",
+  "YFIIUSDT"
+ ],
+ "data_hash": "0774e2086a790a0b",
+ "window": [
+  "2021-04-01",
+  "2025-09-30"
+ ]
+}
