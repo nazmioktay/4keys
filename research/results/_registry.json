@@ -1,5 +1,5 @@
 {
- "total_trials": 248,
+ "total_trials": 321,
  "experiments": [
   {
    "id": "trend_001",
@@ -9,6 +9,26 @@
    "trials_after": 248,
    "date": "2026-10-07T07:35:46+00:00",
    "git_commit": "unknown",
+   "data_hash": "0774e2086a790a0b"
+  },
+  {
+   "id": "kesitsel_001",
+   "question": "kesitsel",
+   "n_variants": 37,
+   "trials_before": 248,
+   "trials_after": 285,
+   "date": "2026-10-07T16:41:25+00:00",
+   "git_commit": "13d10c7",
+   "data_hash": "0774e2086a790a0b"
+  },
+  {
+   "id": "carry_001",
+   "question": "carry",
+   "n_variants": 36,
+   "trials_before": 285,
+   "trials_after": 321,
+   "date": "2026-10-07T21:40:16+00:00",
+   "git_commit": "3a7563a",
    "data_hash": "0774e2086a790a0b"
   }
  ],

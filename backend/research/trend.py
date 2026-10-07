@@ -158,11 +158,11 @@ class Market:
     data_hash: str
 
 
-def load_market(with_limits: bool = True) -> Market:
+def load_market(with_limits: bool = True, universes: tuple[int, ...] = UNIVERSES) -> Market:
     qv = store.load_panel("quote_volume")
     full_idx = pd.date_range(qv.index.min(), EVAL_END, freq="D")
-    memberships = {n: universe_membership(qv, n).reindex(full_idx).fillna(False) for n in UNIVERSES}
-    window = memberships[max(UNIVERSES)].loc[POSITION_START:EVAL_END]
+    memberships = {n: universe_membership(qv, n).reindex(full_idx).fillna(False) for n in universes}
+    window = memberships[max(universes)].loc[POSITION_START:EVAL_END]
     candidates = sorted(window.columns[window.any()])
     memberships = {n: m.reindex(columns=candidates).fillna(False) for n, m in memberships.items()}
     prices = {f: store.load_panel(f, candidates).reindex(full_idx) for f in ("open", "high", "low", "close")}

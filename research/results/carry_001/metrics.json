@@ -1,0 +1,13 @@
+{
+ "sharpe": 9.758841853935094,
+ "max_drawdown": -0.002611140034108783,
+ "deflated_sharpe": 0.9992558738133561,
+ "pbo": 0.0696969696969697,
+ "decision": "KALDI \u2014 hi\u00e7bir varyant t\u00fcm ko\u015fullar\u0131 ge\u00e7medi. DUR (\u0131zgara geni\u015fletilmez).",
+ "first_variant": "A|BTC|1x",
+ "trials_before": 285,
+ "trials_after": 321,
+ "n_variants": 36,
+ "data_snapshot_hash": "0774e2086a790a0b",
+ "git_commit": "3a7563a"
+}
