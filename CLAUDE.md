@@ -26,7 +26,7 @@ Kod değişikliği içeren her anlamlı iş bittiğinde, kullanıcıya nihai cev
 Küçük işlerde (yorum, yazım düzeltmesi, tek satırlık config) reviewer atlanabilir.
 
 ## Onay gerektirenler
-`git push`, `deploy/*.sh`, `docker compose up/down/restart` ve veritabanı işlemleri için kullanıcıya sor.
+`deploy/*.sh`, VPS/üretim, `docker compose up/down/restart`, veritabanı ve geri alınamayan işlemler için kullanıcıya sor; push, PR ve reviewer onayından sonra birleştirme için sorma.
 
 ## Araştırma işleri
 Araştırma işlerinde önce docs/research/KURALLAR.md ve deneyler.md'yi oku. Araştırma kodu (`backend/research/`) canlı/paper koduna (`backend/app/**`) dokunmaz (istisna: opt-in, varsayılan KAPALI `app/forwardcollect`). Araştırma testleri için `backend/research/Dockerfile` imajı gerekir (bkz. docs/research/EKLENTI_REHBERI.md).
