@@ -1,0 +1,632 @@
+{
+ "decision": "KALDI — hiçbir varyant tüm koşulları geçmedi. DUR (ızgara genişletilmez).",
+ "pbo": 0.36138306138306137,
+ "n_variants": 18,
+ "trials_after": 339,
+ "btc_calmar": 1.8619949257856308,
+ "plateau": {
+  "main": "lightgbm_reg|b|h7",
+  "base_sharpe": -0.044266333326689805,
+  "neighbors": {
+   "k×0.5": -0.053191544011771945,
+   "k×1.5": -0.07932063615009445,
+   "num_leaves×0.5": -0.04917443202913387,
+   "num_leaves×1.5": 0.26433347186678885,
+   "learning_rate×0.5": 0.1149740891593457,
+   "learning_rate×1.5": -0.12719663500557055
+  },
+  "ratio": NaN
+ },
+ "table": [
+  {
+   "variant": "ridge|a|h7",
+   "experiment": "ml_kol_a_h7",
+   "kind": "base",
+   "model": "ridge",
+   "tier": "a",
+   "h": 7,
+   "valid": true,
+   "check_failures": [],
+   "rank_ic": -0.02303164565697513,
+   "rank_ic_t": -1.8937719271257618,
+   "sharpe": 0.277767572767052,
+   "calmar": 0.19783571739501266,
+   "max_dd": -0.1793220901475545,
+   "annual_return": 0.03547631434911458,
+   "positive_years": 0.5,
+   "dsr": 0.06284141258550555,
+   "stress_sharpe": -0.2923848155799883,
+   "delay1_sharpe": 0.9359434701239511,
+   "turnover": 51.61813954743438,
+   "cost_to_gross": 0.5822129461953766,
+   "corr_btc": -0.041159287560793865,
+   "corr_trend": {
+    "main_LF_wf": 0.15817440231464136,
+    "main_LS_wf": 0.23016179016359944
+   },
+   "vs_ridge": null,
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": false,
+    "max_drawdown": true,
+    "calmar": false,
+    "positive_years": false,
+    "stress": false,
+    "plateau": false,
+    "leakage_checks": true
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, pbo, calmar, positive_years, stress, plateau)"
+  },
+  {
+   "variant": "ridge|b|h7",
+   "experiment": "ml_kol_b_h7",
+   "kind": "base",
+   "model": "ridge",
+   "tier": "b",
+   "h": 7,
+   "valid": true,
+   "check_failures": [],
+   "rank_ic": -0.033007747428559574,
+   "rank_ic_t": -2.777411349396415,
+   "sharpe": 0.2872032389711749,
+   "calmar": 0.16453685692813425,
+   "max_dd": -0.22819601073917684,
+   "annual_return": 0.037546654370562926,
+   "positive_years": 0.5,
+   "dsr": 0.06492920030990049,
+   "stress_sharpe": -0.2930830554964951,
+   "delay1_sharpe": 0.7084214686619302,
+   "turnover": 51.576911777923094,
+   "cost_to_gross": 0.6804865987488289,
+   "corr_btc": 0.028937092208794604,
+   "corr_trend": {
+    "main_LF_wf": 0.20137493672093668,
+    "main_LS_wf": 0.2119094446062009
+   },
+   "vs_ridge": null,
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": false,
+    "max_drawdown": true,
+    "calmar": false,
+    "positive_years": false,
+    "stress": false,
+    "plateau": false,
+    "leakage_checks": true
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, pbo, calmar, positive_years, stress, plateau)"
+  },
+  {
+   "variant": "ridge|b|h3",
+   "experiment": "ml_kol_b_h3",
+   "kind": "base",
+   "model": "ridge",
+   "tier": "b",
+   "h": 3,
+   "valid": true,
+   "check_failures": [],
+   "rank_ic": -0.028108259408180403,
+   "rank_ic_t": -3.3467276244193407,
+   "sharpe": 0.5671747512344399,
+   "calmar": 0.6304662454592329,
+   "max_dd": -0.1558335117204781,
+   "annual_return": 0.09824776905113719,
+   "positive_years": 0.5,
+   "dsr": 0.15151994139893965,
+   "stress_sharpe": -0.08748670006121624,
+   "delay1_sharpe": 0.12687361648432874,
+   "turnover": 55.1669746706049,
+   "cost_to_gross": 0.5227926943749016,
+   "corr_btc": -0.08166341726230598,
+   "corr_trend": {
+    "main_LF_wf": 0.1417386941831308,
+    "main_LS_wf": 0.29260181215828307
+   },
+   "vs_ridge": null,
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": false,
+    "max_drawdown": true,
+    "calmar": false,
+    "positive_years": false,
+    "stress": false,
+    "plateau": false,
+    "leakage_checks": true
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, pbo, calmar, positive_years, stress, plateau)"
+  },
+  {
+   "variant": "ridge|d|h7",
+   "experiment": "ml_kol_d_h7",
+   "kind": "base",
+   "model": "ridge",
+   "tier": "d",
+   "h": 7,
+   "valid": true,
+   "check_failures": [],
+   "rank_ic": -0.043216808015491506,
+   "rank_ic_t": -3.448418432983245,
+   "sharpe": -0.1203842398269501,
+   "calmar": -0.10245851356052797,
+   "max_dd": -0.297512000961634,
+   "annual_return": -0.030482637384947386,
+   "positive_years": 0.5,
+   "dsr": 0.01368453918852813,
+   "stress_sharpe": -0.8662397099360818,
+   "delay1_sharpe": -0.24739664856753812,
+   "turnover": 49.39374759548498,
+   "cost_to_gross": 1.3974071159951382,
+   "corr_btc": -0.09602419063826324,
+   "corr_trend": {
+    "main_LF_wf": -0.04471756205185408,
+    "main_LS_wf": 0.11358746026240817
+   },
+   "vs_ridge": null,
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": false,
+    "max_drawdown": true,
+    "calmar": false,
+    "positive_years": false,
+    "stress": false,
+    "plateau": false,
+    "leakage_checks": true
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, pbo, calmar, positive_years, stress, plateau)"
+  },
+  {
+   "variant": "lightgbm_reg|a|h7",
+   "experiment": "ml_kol_a_h7",
+   "kind": "base",
+   "model": "lightgbm_reg",
+   "tier": "a",
+   "h": 7,
+   "valid": true,
+   "check_failures": [],
+   "rank_ic": 0.013251698416624547,
+   "rank_ic_t": 1.0295298794149086,
+   "sharpe": 0.6410724152036478,
+   "calmar": 0.5303830795506004,
+   "max_dd": -0.19582164425240878,
+   "annual_return": 0.1038604867212547,
+   "positive_years": 0.75,
+   "dsr": 0.18466807374282418,
+   "stress_sharpe": -0.27165052119356226,
+   "delay1_sharpe": 0.04673970646205321,
+   "turnover": 76.7350950325549,
+   "cost_to_gross": 0.4721829037272169,
+   "corr_btc": -0.12175726620223537,
+   "corr_trend": {
+    "main_LF_wf": -0.03556534176914596,
+    "main_LS_wf": 0.00992387448973603
+   },
+   "vs_ridge": {
+    "d_sharpe": 0.3633048424365958,
+    "lo": -0.8590864311810189,
+    "hi": 1.553564035911545
+   },
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": false,
+    "max_drawdown": true,
+    "calmar": false,
+    "positive_years": true,
+    "stress": false,
+    "plateau": false,
+    "leakage_checks": true,
+    "beats_ridge": false
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, pbo, calmar, stress, plateau, beats_ridge)"
+  },
+  {
+   "variant": "lightgbm_reg|b|h7",
+   "experiment": "ml_kol_b_h7",
+   "kind": "base",
+   "model": "lightgbm_reg",
+   "tier": "b",
+   "h": 7,
+   "valid": true,
+   "check_failures": [],
+   "rank_ic": 0.00550730629762115,
+   "rank_ic_t": 0.425359221973275,
+   "sharpe": -0.044266333326689805,
+   "calmar": -0.06562741668135334,
+   "max_dd": -0.3179445810791002,
+   "annual_return": -0.02086588150405644,
+   "positive_years": 0.5,
+   "dsr": 0.01845857929623335,
+   "stress_sharpe": -0.7784525630704376,
+   "delay1_sharpe": -0.22796745051163364,
+   "turnover": 69.85323338212352,
+   "cost_to_gross": 1.0772135383548056,
+   "corr_btc": -0.06808767270079114,
+   "corr_trend": {
+    "main_LF_wf": 0.017537733650033676,
+    "main_LS_wf": 0.02264308590759267
+   },
+   "vs_ridge": {
+    "d_sharpe": -0.33146957229786467,
+    "lo": -1.5373442922477003,
+    "hi": 0.9367684446994827
+   },
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": false,
+    "max_drawdown": true,
+    "calmar": false,
+    "positive_years": false,
+    "stress": false,
+    "plateau": false,
+    "leakage_checks": true,
+    "beats_ridge": false
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, pbo, calmar, positive_years, stress, plateau, beats_ridge)"
+  },
+  {
+   "variant": "lightgbm_reg|b|h3",
+   "experiment": "ml_kol_b_h3",
+   "kind": "base",
+   "model": "lightgbm_reg",
+   "tier": "b",
+   "h": 3,
+   "valid": true,
+   "check_failures": [],
+   "rank_ic": 0.00941909391695382,
+   "rank_ic_t": 1.1108625015521976,
+   "sharpe": 1.1030303037622158,
+   "calmar": 1.1254102675677906,
+   "max_dd": -0.17360267251239103,
+   "annual_return": 0.19537423012265354,
+   "positive_years": 1.0,
+   "dsr": 0.4604756445154734,
+   "stress_sharpe": 0.03889395051104411,
+   "delay1_sharpe": 0.20541604866082738,
+   "turnover": 92.1497317016256,
+   "cost_to_gross": 0.39373463569606,
+   "corr_btc": -0.18177679181372725,
+   "corr_trend": {
+    "main_LF_wf": -0.1027430592199062,
+    "main_LS_wf": 0.030776795717318003
+   },
+   "vs_ridge": {
+    "d_sharpe": 0.5358555525277758,
+    "lo": -0.7843892528554609,
+    "hi": 1.90079622317633
+   },
+   "acceptance": {
+    "net_sharpe": true,
+    "deflated_sharpe": false,
+    "pbo": false,
+    "max_drawdown": true,
+    "calmar": false,
+    "positive_years": true,
+    "stress": false,
+    "plateau": false,
+    "leakage_checks": true,
+    "beats_ridge": false
+   },
+   "status": "KALDI (deflated_sharpe, pbo, calmar, stress, plateau, beats_ridge)"
+  },
+  {
+   "variant": "lightgbm_reg|d|h7",
+   "experiment": "ml_kol_d_h7",
+   "kind": "base",
+   "model": "lightgbm_reg",
+   "tier": "d",
+   "h": 7,
+   "valid": true,
+   "check_failures": [],
+   "rank_ic": 0.018676203445302426,
+   "rank_ic_t": 1.510280161878288,
+   "sharpe": -0.38858810125460463,
+   "calmar": -0.18918113883065607,
+   "max_dd": -0.3717412362219644,
+   "annual_return": -0.07032643041878717,
+   "positive_years": 0.5,
+   "dsr": 0.005016520299720973,
+   "stress_sharpe": -0.8599122917064373,
+   "delay1_sharpe": -0.8395337307743861,
+   "turnover": 49.15752276527277,
+   "cost_to_gross": 22.942083277009893,
+   "corr_btc": -0.07673108404666205,
+   "corr_trend": {
+    "main_LF_wf": -0.041588196561936464,
+    "main_LS_wf": 0.05072437557442599
+   },
+   "vs_ridge": {
+    "d_sharpe": -0.2682038614276545,
+    "lo": -1.7787834586289077,
+    "hi": 1.0729089013962967
+   },
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": false,
+    "max_drawdown": false,
+    "calmar": false,
+    "positive_years": false,
+    "stress": false,
+    "plateau": false,
+    "leakage_checks": true,
+    "beats_ridge": false
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, pbo, max_drawdown, calmar, positive_years, stress, plateau, beats_ridge)"
+  },
+  {
+   "variant": "xgboost_reg|a|h7",
+   "experiment": "ml_kol_a_h7",
+   "kind": "base",
+   "model": "xgboost_reg",
+   "tier": "a",
+   "h": 7,
+   "valid": true,
+   "check_failures": [],
+   "rank_ic": 0.0122449731406744,
+   "rank_ic_t": 0.9419047751525839,
+   "sharpe": 0.5159614180015014,
+   "calmar": 0.35058619949595243,
+   "max_dd": -0.22138224007438534,
+   "annual_return": 0.07761355818357929,
+   "positive_years": 0.5,
+   "dsr": 0.13148971087805145,
+   "stress_sharpe": -0.6762536823886797,
+   "delay1_sharpe": 0.219656749801581,
+   "turnover": 73.89432602812245,
+   "cost_to_gross": 0.5244758535506301,
+   "corr_btc": -0.1352758426233325,
+   "corr_trend": {
+    "main_LF_wf": -0.04927839070654051,
+    "main_LS_wf": 0.004902183652377332
+   },
+   "vs_ridge": {
+    "d_sharpe": 0.23819384523444942,
+    "lo": -0.9990773319572313,
+    "hi": 1.4239494913442965
+   },
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": false,
+    "max_drawdown": true,
+    "calmar": false,
+    "positive_years": false,
+    "stress": false,
+    "plateau": false,
+    "leakage_checks": true,
+    "beats_ridge": false
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, pbo, calmar, positive_years, stress, plateau, beats_ridge)"
+  },
+  {
+   "variant": "xgboost_reg|b|h7",
+   "experiment": "ml_kol_b_h7",
+   "kind": "base",
+   "model": "xgboost_reg",
+   "tier": "b",
+   "h": 7,
+   "valid": true,
+   "check_failures": [],
+   "rank_ic": 0.0028235743833098246,
+   "rank_ic_t": 0.2107823916268516,
+   "sharpe": 0.11033565355527482,
+   "calmar": 0.016144635459183328,
+   "max_dd": -0.2922648796159588,
+   "annual_return": 0.0047185099389217555,
+   "positive_years": 0.5,
+   "dsr": 0.03460074751375104,
+   "stress_sharpe": -0.7142759790471467,
+   "delay1_sharpe": -0.2469299778821025,
+   "turnover": 69.17126707562429,
+   "cost_to_gross": 0.8491684739864619,
+   "corr_btc": -0.05624283489341458,
+   "corr_trend": {
+    "main_LF_wf": -0.023832387816164174,
+    "main_LS_wf": -0.053826934350900114
+   },
+   "vs_ridge": {
+    "d_sharpe": -0.17686758541590009,
+    "lo": -1.409940888027042,
+    "hi": 1.1473580144033766
+   },
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": false,
+    "max_drawdown": true,
+    "calmar": false,
+    "positive_years": false,
+    "stress": false,
+    "plateau": false,
+    "leakage_checks": true,
+    "beats_ridge": false
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, pbo, calmar, positive_years, stress, plateau, beats_ridge)"
+  },
+  {
+   "variant": "xgboost_reg|b|h3",
+   "experiment": "ml_kol_b_h3",
+   "kind": "base",
+   "model": "xgboost_reg",
+   "tier": "b",
+   "h": 3,
+   "valid": true,
+   "check_failures": [],
+   "rank_ic": 0.010382532976143971,
+   "rank_ic_t": 1.226902778235264,
+   "sharpe": 0.7795865196945055,
+   "calmar": 0.5756655986076414,
+   "max_dd": -0.22398854219817665,
+   "annual_return": 0.1289424982257663,
+   "positive_years": 0.75,
+   "dsr": 0.25405418306149186,
+   "stress_sharpe": -0.13307869198754252,
+   "delay1_sharpe": 0.3998996051967986,
+   "turnover": 89.82248979810204,
+   "cost_to_gross": 0.4735169561880047,
+   "corr_btc": -0.20990128524647014,
+   "corr_trend": {
+    "main_LF_wf": -0.09858154170206213,
+    "main_LS_wf": 0.07505118329291928
+   },
+   "vs_ridge": {
+    "d_sharpe": 0.2124117684600656,
+    "lo": -1.1086954813807608,
+    "hi": 1.5414864919302416
+   },
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": false,
+    "max_drawdown": true,
+    "calmar": false,
+    "positive_years": true,
+    "stress": false,
+    "plateau": false,
+    "leakage_checks": true,
+    "beats_ridge": false
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, pbo, calmar, stress, plateau, beats_ridge)"
+  },
+  {
+   "variant": "xgboost_reg|d|h7",
+   "experiment": "ml_kol_d_h7",
+   "kind": "base",
+   "model": "xgboost_reg",
+   "tier": "d",
+   "h": 7,
+   "valid": true,
+   "check_failures": [],
+   "rank_ic": -0.0008939798567640186,
+   "rank_ic_t": -0.07383596631228943,
+   "sharpe": -0.27391762744397713,
+   "calmar": -0.1418903286941683,
+   "max_dd": -0.4320298577935969,
+   "annual_return": -0.061300858528028246,
+   "positive_years": 0.5,
+   "dsr": 0.00948850244446426,
+   "stress_sharpe": -0.6945120906604036,
+   "delay1_sharpe": -1.0649999697142785,
+   "turnover": 47.87796284987437,
+   "cost_to_gross": 3.945295854137378,
+   "corr_btc": -0.0746340645651999,
+   "corr_trend": {
+    "main_LF_wf": -0.002020708509100109,
+    "main_LS_wf": 0.06663643814739653
+   },
+   "vs_ridge": {
+    "d_sharpe": -0.15353338761702703,
+    "lo": -1.9958905427017422,
+    "hi": 1.4098077318780815
+   },
+   "acceptance": {
+    "net_sharpe": false,
+    "deflated_sharpe": false,
+    "pbo": false,
+    "max_drawdown": false,
+    "calmar": false,
+    "positive_years": false,
+    "stress": false,
+    "plateau": false,
+    "leakage_checks": true,
+    "beats_ridge": false
+   },
+   "status": "KALDI (net_sharpe, deflated_sharpe, pbo, max_drawdown, calmar, positive_years, stress, plateau, beats_ridge)"
+  }
+ ],
+ "tiers": [
+  {
+   "model": "ridge",
+   "step": "a→b",
+   "d_sharpe": [
+    0.009435666204122894,
+    -0.42229674608650536,
+    0.41714631580875394
+   ],
+   "d_rank_ic": [
+    -0.009976101771584443,
+    -0.02212204430714882,
+    0.0003171951157294166
+   ]
+  },
+  {
+   "model": "ridge",
+   "step": "b→d",
+   "d_sharpe": [
+    -0.40758747879812496,
+    -1.8338169875707573,
+    0.9467320878917
+   ],
+   "d_rank_ic": [
+    -0.010209060586931933,
+    -0.025885470994823898,
+    0.0056034097164543014
+   ]
+  },
+  {
+   "model": "lightgbm_reg",
+   "step": "a→b",
+   "d_sharpe": [
+    -0.6853387485303376,
+    -1.3917541915681149,
+    0.0016720653718965022
+   ],
+   "d_rank_ic": [
+    -0.007744392119003397,
+    -0.028186746940146307,
+    0.009491257204904914
+   ]
+  },
+  {
+   "model": "lightgbm_reg",
+   "step": "b→d",
+   "d_sharpe": [
+    -0.3443217679279148,
+    -2.035151514922253,
+    1.1677351031998868
+   ],
+   "d_rank_ic": [
+    0.013168897147681276,
+    -0.016558691238285156,
+    0.04107074408447341
+   ]
+  },
+  {
+   "model": "xgboost_reg",
+   "step": "a→b",
+   "d_sharpe": [
+    -0.4056257644462266,
+    -1.0432387502819338,
+    0.23645592499346063
+   ],
+   "d_rank_ic": [
+    -0.009421398757364575,
+    -0.028301300181820806,
+    0.006470535764441244
+   ]
+  },
+  {
+   "model": "xgboost_reg",
+   "step": "b→d",
+   "d_sharpe": [
+    -0.38425328099925193,
+    -2.060403567299159,
+    0.9979216617871923
+   ],
+   "d_rank_ic": [
+    -0.0037175542400738433,
+    -0.0338746499803841,
+    0.026037771261137772
+   ]
+  }
+ ],
+ "period": [
+  "2021-01-01",
+  "2025-09-30"
+ ]
+}

@@ -14,13 +14,14 @@ Kâr getiren bir sistem bulunmadı. Ama kaybettiren bir sistemi gerçek parayla 
   olduğundan İYİ gösterdi; paper'daki zarar modelin bozulması değil, baştan avantajı olmamasıydı.
 - Dürüst ölçümde (sızıntılar kapalı, sonraki mumun açılışında giriş, high/low stop, funding dahil) ~8 ayda 24–47 işlem, PnL ≈ 0.
 
-**Önceden kayıtlı üç hipotez (2021-04 → 2025-09; toplam 321 deneme)**
+**Önceden kayıtlı dört hipotez (2021–2025; toplam 339 deneme)**
 
 | Deney | Sonuç | Özü |
 |---|---|---|
 | `trend_001` — zaman serisi momentumu | KALDI | Net Sharpe 0,43 (eşik 0,8; BTC al-tut 0,54). Maks. düşüş −%48 (BTC al-tut −%77): riski azaltıyor ama yeterli getiri üretmiyor. Short bacak katkısı ≈ 0. |
 | `kesitsel_001` — kesitsel momentum | KALDI | Net Sharpe 0,14. En iyi − en kötü dilim farkı 1–60 günün hiçbirinde pozitif değil: bu evrende/dönemde kesitsel momentum yok. |
 | `carry_001` — funding/basis carry | KALDI | Gerçek ve çok düşük riskli pozitif getiri (en iyi A\|BTC\|PM: yıllık %7,2, maks. düşüş −%0,3), ama risksiz faizin (%4) 2 katı koşulunu geçmiyor; funding geliri eriyor (BTC carry 2021 %18,3 → 2025 %2,0). |
+| `ml_kol` — ML tek başına kol (2026-10-08) | KALDI | Hedef sınıf değil maliyet sonrası beklenen getiri (vol'e göre 7/3 gün), ilk-30 evren, ridge/LightGBM/XGBoost × 3 veri kademesi. Ağaç modellerinde rank IC ~0,01 (beceri yok), hiçbiri ridge'i anlamlı yenmiyor; plato ve PBO (0,36) başarısız. Ek veri (funding, taker, makro, duygu) yardım etmiyor. Ridge'in IC'si anlamlı NEGATİF: geçmişteki ilişki tersine dönmüş (rejim değişimi). |
 
 **Piyasa ve hesap**
 - Altcoin evreni bu dönemde çok kötü: eşit ağırlıklı ilk-10 al-tut yıllık ≈ −%20, maks. düşüş −%92,6.

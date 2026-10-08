@@ -106,6 +106,9 @@ def load_config(source) -> dict:
         hint = " Forward bölgesinde evren ilk ~90 gün boştur (KURALLAR.md §10): etkin keşif ~9 ay." if cfg["zone"] == "forward" else ""
         raise ConfigError(f"cv.min_train_days ({cv['min_train_days']}) dönem uzunluğundan ({period_days} gün) küçük olmalı (kullanılabilir: {usable_days} gün).{hint}")
     cfg["signal"].setdefault("params", {})
+    cfg["execution"] = {"band": 0.0, **(cfg.get("execution") or {})}  # göreli işlem bandı (motor; 0 = her gün hedefe)
+    if not (0.0 <= float(cfg["execution"]["band"]) < 1.0):
+        raise ConfigError(f"execution.band [0, 1) aralığında olmalı: {cfg['execution']['band']!r}")
     if not re_id(cfg["id"]):
         raise ConfigError("id yalnızca harf/rakam/_.- içerebilir")
     return cfg
@@ -164,8 +167,18 @@ def recommended_nav_1x(min_notional, amount_step, prices: pd.Series, asset_cap: 
     return (best, who) if who is not None else (float("nan"), None)
 
 
+def adapter_context(panel: Panel, account: dict) -> dict:
+    """Bağlam isteyen adaptörler için (bkz. `signals.make_weights`): fiyat, kayma kademesi (bps), hesap NAV'ı ve limitleri."""
+    close = panel.prices["close"].reindex(columns=panel.candidates)
+    min_n = step = None
+    if account["limits"]:
+        min_n, step, _ = load_account_limits(panel.candidates)
+    return {"close": close, "slip_bps": _slippage_frame(panel, close.index), "nav": float(account["nav"]),
+            "min_notional": min_n, "amount_step": step}
+
+
 def _portfolio(panel: Panel, weights: pd.DataFrame, fee_mult: float = 1.0, slip_mult: float = 1.0, delay: int = 0, *,
-               account: dict):
+               account: dict, band: float = 0.0):
     """Kol portföyü: hesap (`account`: nav + limits) ZORUNLU — yeni bir çağrı sessizce limitsiz/100k NAV ile koşamasın."""
     start = weights.index[weights.abs().sum(axis=1) > 0].min() if (weights.abs().sum(axis=1) > 0).any() else weights.index.min()
     open_px = panel.prices["open"].loc[start:, panel.candidates]
@@ -179,7 +192,7 @@ def _portfolio(panel: Panel, weights: pd.DataFrame, fee_mult: float = 1.0, slip_
         w, open_px, fee_rate=config.FUTURES_TAKER_FEE * fee_mult, slippage_bps=slip,
         funding=_funding_frame(panel, open_px.index), delay_bars=delay,
         account_size=float(account["nav"]), min_notional=min_n, amount_step=step,
-        lot_rounding=account["lot_rounding"], max_gross=float(account["leverage"]),
+        lot_rounding=account["lot_rounding"], max_gross=float(account["leverage"]), band=float(band), band_relative=True,
     )
     result.diagnostics["unconstrained_symbols"] = list(unconstrained)  # limiti bilinmeyen (delist) -> kısıtsız varsayıldı
     last_px = open_px.ffill().iloc[-1] if len(open_px) else pd.Series(dtype=float)
@@ -268,12 +281,14 @@ def _run_experiment(cfg, smoke, results_dir, log_path, registry_file, panel) -> 
 
     # (d)(e) sinyal -> kol -> motor
     adapter, aparams = cfg["signal"]["adapter"], cfg["signal"]["params"]
+    band = cfg["execution"]["band"]
+    ctx = adapter_context(panel, cfg["account"]) if getattr(signals.ADAPTERS.get(adapter), "needs_context", False) else None
     variants, ret_cols, results = {}, {}, {}
     first_oof = res.oof.dropna(how="all").index.get_level_values("date").min()
     for m in res.oof.columns:
         pred_wide = res.oof[m].unstack("symbol").reindex(columns=panel.candidates)
-        weights = signals.make_weights(adapter, pred_wide, panel.membership.reindex(columns=panel.candidates).fillna(False), **aparams)
-        results[m] = _portfolio(panel, weights, account=cfg["account"])
+        weights = signals.make_weights(adapter, pred_wide, panel.membership.reindex(columns=panel.candidates).fillna(False), ctx, **aparams)
+        results[m] = _portfolio(panel, weights, account=cfg["account"], band=band)
         ret_cols[m] = _trim(results[m].returns, first_oof)
     bench = _benchmark(panel, first_oof)
     bench_ret = _trim(bench.returns, first_oof) if bench is not None else None
@@ -294,10 +309,11 @@ def _run_experiment(cfg, smoke, results_dir, log_path, registry_file, panel) -> 
 
     # stres (ücret ×2, kayma ×3) ve +1 bar gecikme — birincil varyant
     pm_weights = signals.make_weights(adapter, res.oof[primary].unstack("symbol").reindex(columns=panel.candidates),
-                                      panel.membership.reindex(columns=panel.candidates).fillna(False), **aparams)
+                                      panel.membership.reindex(columns=panel.candidates).fillna(False), ctx, **aparams)
     a = config.ACCEPTANCE
-    stress = _trim(_portfolio(panel, pm_weights, a["stress_fee_mult"], a["stress_slippage_mult"], account=cfg["account"]).returns, first_oof)
-    delayed = _trim(_portfolio(panel, pm_weights, delay=1, account=cfg["account"]).returns, first_oof)
+    stress = _trim(_portfolio(panel, pm_weights, a["stress_fee_mult"], a["stress_slippage_mult"], account=cfg["account"], band=band).returns,
+                   first_oof)
+    delayed = _trim(_portfolio(panel, pm_weights, delay=1, account=cfg["account"], band=band).returns, first_oof)
     p = variants[primary]["summary"]
     yearly = p["yearly_returns"]
     pos_years = (sum(1 for v in yearly.values() if v > 0) / len(yearly)) if yearly else float("nan")

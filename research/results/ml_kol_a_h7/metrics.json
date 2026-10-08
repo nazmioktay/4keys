@@ -1,0 +1,257 @@
+{
+ "id": "ml_kol_a_h7",
+ "question": "ml_kol",
+ "zone": "main",
+ "account": {
+  "nav": 250.0,
+  "leverage": 3.0,
+  "lot_rounding": "nearest",
+  "limits": true,
+  "unconstrained_symbols": [
+   "AERGOUSDT",
+   "BTTUSDT",
+   "COCOSUSDT",
+   "EOSUSDT",
+   "FRONTUSDT",
+   "HNTUSDT",
+   "KEEPUSDT",
+   "LUNAUSDT",
+   "MATICUSDT",
+   "RNDRUSDT",
+   "SRMUSDT",
+   "SXPUSDT",
+   "TOMOUSDT",
+   "YFIIUSDT"
+  ],
+  "recommended_nav_1x": 571.2855,
+  "recommended_nav_1x_symbol": "BTCUSDT",
+  "recommended_nav_1x_price_date": "2025-09-30"
+ },
+ "primary": "ridge|a|h7",
+ "sharpe": 0.277767572767052,
+ "max_drawdown": -0.1793220901475545,
+ "variants": {
+  "ridge|a|h7": {
+   "summary": {
+    "n_days": 1096,
+    "annual_return": 0.03547631434911458,
+    "annual_vol": 0.19099921453197555,
+    "sharpe": 0.277767572767052,
+    "sortino": 0.40627495043959394,
+    "calmar": 0.19783571739501266,
+    "max_drawdown": -0.1793220901475545,
+    "max_drawdown_days": 376,
+    "yearly_returns": {
+     "2022": -0.09237157585383426,
+     "2023": 0.10736208332064834,
+     "2024": 0.3008025751258907,
+     "2025": -0.15071615622055046
+    },
+    "beta_vs_btc": -0.016565374152153388,
+    "corr_vs_btc": -0.041159287560793865
+   },
+   "costs": {
+    "commission": 0.07749791910135354,
+    "slippage": 0.12727922094256544,
+    "funding": 0.01722527293283509,
+    "total_cost": 0.22200241297675408,
+    "gross_pnl": 0.3813079293881855,
+    "cost_to_gross": 0.5822129461953766
+   },
+   "pred": {
+    "n_rows": 52020,
+    "n_scored": 34393,
+    "n_pred_nan": 17340,
+    "ic_mean": -0.018497389617300804,
+    "ic_t": -1.40491625966931,
+    "ic_ir": -0.08159993109275498,
+    "rank_ic_mean": -0.02303164565697513,
+    "rank_ic_t": -1.9299099269091482,
+    "n_dates": 1148,
+    "rmse": 1.153236846762412,
+    "r2_oos": -0.01258862057214949
+   },
+   "turnover_mean": 0.1414195604039298,
+   "skipped_positions": 14726,
+   "trades_executed": 8362,
+   "lot_scale": 1.1758053852495909
+  },
+  "lightgbm_reg|a|h7": {
+   "summary": {
+    "n_days": 1096,
+    "annual_return": 0.1038604867212547,
+    "annual_vol": 0.17917759489441767,
+    "sharpe": 0.6410724152036478,
+    "sortino": 0.9510839238656853,
+    "calmar": 0.5303830795506004,
+    "max_drawdown": -0.19582164425240878,
+    "max_drawdown_days": 498,
+    "yearly_returns": {
+     "2022": -0.07274367001393078,
+     "2023": 0.02245517832397792,
+     "2024": 0.3564808417916474,
+     "2025": 0.04617030011859846
+    },
+    "beta_vs_btc": -0.04597062523752981,
+    "corr_vs_btc": -0.12175726620223537
+   },
+   "costs": {
+    "commission": 0.11520775911737008,
+    "slippage": 0.18625500058622568,
+    "funding": 0.007094158215373089,
+    "total_cost": 0.30855691791896883,
+    "gross_pnl": 0.653469059305934,
+    "cost_to_gross": 0.4721829037272169
+   },
+   "pred": {
+    "n_rows": 52020,
+    "n_scored": 34393,
+    "n_pred_nan": 17340,
+    "ic_mean": 0.01884524751362469,
+    "ic_t": 1.4950311918970143,
+    "ic_ir": 0.08407076221564154,
+    "rank_ic_mean": 0.013251698416624547,
+    "rank_ic_t": 1.0604290964536314,
+    "n_dates": 1148,
+    "rmse": 1.2117425992257729,
+    "r2_oos": -0.11793556962353224
+   },
+   "turnover_mean": 0.21023313707549285,
+   "skipped_positions": 17773,
+   "trades_executed": 9317,
+   "lot_scale": 1.105223312590539
+  },
+  "xgboost_reg|a|h7": {
+   "summary": {
+    "n_days": 1096,
+    "annual_return": 0.07761355818357929,
+    "annual_vol": 0.17422487766453545,
+    "sharpe": 0.5159614180015014,
+    "sortino": 0.7762488684051566,
+    "calmar": 0.35058619949595243,
+    "max_drawdown": -0.22138224007438534,
+    "max_drawdown_days": 545,
+    "yearly_returns": {
+     "2022": -0.08657699661581486,
+     "2023": -0.030924851999438396,
+     "2024": 0.28121708657885347,
+     "2025": 0.1036362527051804
+    },
+    "beta_vs_btc": -0.049662918232411556,
+    "corr_vs_btc": -0.1352758426233325
+   },
+   "costs": {
+    "commission": 0.1109427141463318,
+    "slippage": 0.17979003644301947,
+    "funding": 0.006980393533900177,
+    "total_cost": 0.29771314412325145,
+    "gross_pnl": 0.5676393719706523,
+    "cost_to_gross": 0.5244758535506301
+   },
+   "pred": {
+    "n_rows": 52020,
+    "n_scored": 34393,
+    "n_pred_nan": 17340,
+    "ic_mean": 0.017040878476546964,
+    "ic_t": 1.3453545617874805,
+    "ic_ir": 0.07520068764516828,
+    "rank_ic_mean": 0.0122449731406744,
+    "rank_ic_t": 0.9716477492271697,
+    "n_dates": 1148,
+    "rmse": 1.2118836046681816,
+    "r2_oos": -0.11819576377919572
+   },
+   "turnover_mean": 0.2024502082962259,
+   "skipped_positions": 18566,
+   "trades_executed": 8642,
+   "lot_scale": 1.1019507416045968
+  }
+ },
+ "pbo": 0.8051282051282052,
+ "stress_sharpe": -0.2923848155799883,
+ "delay1_sharpe": 0.9359434701239511,
+ "btc_calmar": 1.8619949257856308,
+ "acceptance": {
+  "net_sharpe": false,
+  "deflated_sharpe": false,
+  "pbo": false,
+  "max_drawdown": true,
+  "calmar": false,
+  "positive_years": false,
+  "stress": false,
+  "plateau": false
+ },
+ "acceptance_not_evaluated": [
+  "plateau (parametre taramas\u0131 gerekir)"
+ ],
+ "valid": true,
+ "check_results": {
+  "availability": {
+   "passed": true,
+   "available_at_violations": {
+    "ohlcv_core": 0
+   },
+   "available_before_observation": {
+    "ohlcv_core": 0
+   },
+   "train_label_overlap_days": 0
+  },
+  "shuffled_target": {
+   "passed": true,
+   "per_model": {
+    "ridge|a|h7": {
+     "ic_mean": -0.0006221402146571438,
+     "ic_t": -0.1157506331798538
+    },
+    "lightgbm_reg|a|h7": {
+     "ic_mean": -0.0044758803975681,
+     "ic_t": -0.7853354047598121
+    },
+    "xgboost_reg|a|h7": {
+     "ic_mean": -0.0026825803748668567,
+     "ic_t": -0.47682744692112944
+    }
+   },
+   "limit_t": 3.0
+  },
+  "extra_lag": {
+   "passed": true,
+   "ic_base": {
+    "ridge|a|h7": -0.018497389617300804,
+    "lightgbm_reg|a|h7": 0.01884524751362469,
+    "xgboost_reg|a|h7": 0.017040878476546964
+   },
+   "ic_lag1": {
+    "ridge|a|h7": -0.013320415009323952,
+    "lightgbm_reg|a|h7": 0.018861494060070216,
+    "xgboost_reg|a|h7": 0.016212059226836256
+   },
+   "collapsed": {},
+   "note": ""
+  },
+  "reproducibility": {
+   "passed": true,
+   "max_abs_diff": 0.0
+  }
+ },
+ "check_failures": [],
+ "check_warnings": [],
+ "folds": 4,
+ "n_features": 16,
+ "target": {
+  "name": "vol_adj_return",
+  "horizon": 7,
+  "kind": "regression",
+  "params": {
+   "h": 7,
+   "vol_window": 20
+  }
+ },
+ "smoke": false,
+ "deflated_sharpe": 0.00739475799532696,
+ "trials_before": 321,
+ "trials_after": 324,
+ "n_variants": 3,
+ "data_snapshot_hash": "0774e2086a790a0b",
+ "git_commit": "d17a659"
+}
