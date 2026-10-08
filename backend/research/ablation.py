@@ -14,7 +14,7 @@ from . import guard, pred_metrics, signals, stats
 from .oof import build_folds, run_oof
 from .panel import Panel
 from .registry import assert_budget, record_smoke_run, register_experiment
-from .runner import _portfolio, _trim, check_panel_zone, load_config
+from .runner import _portfolio, _trim, adapter_context, check_panel_zone, load_config
 
 
 def _primary_returns(panel: Panel, cfg: dict, X: pd.DataFrame, folds, seed: int):
@@ -22,9 +22,11 @@ def _primary_returns(panel: Panel, cfg: dict, X: pd.DataFrame, folds, seed: int)
     res = run_oof(X, panel.y, [model], panel.target, cfg["cv"], seed, folds)
     pred = res.oof[model["id"]]
     first = pred.dropna().index.get_level_values("date").min()
-    weights = signals.make_weights(cfg["signal"]["adapter"], pred.unstack("symbol").reindex(columns=panel.candidates),
-                                   panel.membership.reindex(columns=panel.candidates).fillna(False), **cfg["signal"]["params"])
-    returns = _trim(_portfolio(panel, weights, account=cfg["account"]).returns, first)
+    adapter = cfg["signal"]["adapter"]
+    ctx = adapter_context(panel, cfg["account"]) if getattr(signals.ADAPTERS.get(adapter), "needs_context", False) else None
+    weights = signals.make_weights(adapter, pred.unstack("symbol").reindex(columns=panel.candidates),
+                                   panel.membership.reindex(columns=panel.candidates).fillna(False), ctx, **cfg["signal"]["params"])
+    returns = _trim(_portfolio(panel, weights, account=cfg["account"], band=cfg["execution"]["band"]).returns, first)
     ic = pred_metrics.daily_ic(pred, panel.y)[0]
     return pred, returns, ic
 

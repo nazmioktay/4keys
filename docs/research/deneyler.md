@@ -592,3 +592,14 @@ kaynak önce (a → b → d); h = 7 önce. Hiçbiri geçmezse DURULUR ve nedeni 
 
 **Raporlanan ek bilgiler (karar dışı):** günlük rank IC ve t (her varyant), kaynak kademelerinin marjinal katkısı (a→b, b→d; IC ve net Sharpe
 farkı, eşleştirilmiş bootstrap aralığı), turnover ve maliyet/brüt oranı, trend_001 main_LF/LS serileriyle korelasyon.
+
+> **ÖN KAYIT EKİ — `ml_kol` (2026-10-08, gerçek koşudan ÖNCE; kod denetiminden).** Hiçbir sonuç görülmedi; denetçi gerçek veride
+> metrik üretmedi. Netleştirmeler:
+> - **Vol hedefi ısınması:** ham portföy getirisi, ilk geçerli tahminden ÖNCEKİ günlerde (tahmin yok) hesaba katılmaz; böylece "geçmiş
+>   60 g EWMA vol" tanımı sıfır getirili ısınma günleriyle şişmez. Sonuç: her varyantta OOF'un ilk 60 gününde pozisyon yok.
+> - **Plato `num_leaves` değerleri:** varsayılan 15 → ×0,5 = **8**, ×1,5 = **22** (Python yuvarlaması). `learning_rate` 0,03 → 0,015 / 0,045.
+> - **Rank IC t-istatistiği:** örtüşen h günlük etiketler nedeniyle Newey-West (gecikme h) ile raporlanır (karar dışı bilgi).
+> - **BTC al-tut Calmar eşiği:** her varyant kendi OOF penceresindeki BTC al-tut ile kıyaslanır.
+> - **Kademe d ön kontrolü:** 6 makro serinin ve duygu endeksinin özellikleri panelde yoksa ya da satırların < %50'sinde doluysa deney
+>   HİÇBİR kayıt yapılmadan durur (kademe d sessizce b'ye dönüşmez). Tüm paneller kayıttan önce kurulur; bir config kaydedildikten sonra
+>   koşu yarıda kalırsa kayıtlı config'ler yeniden koşmadan diskten okunarak devam edilir.
