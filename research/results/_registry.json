@@ -1,5 +1,5 @@
 {
- "total_trials": 321,
+ "total_trials": 339,
  "experiments": [
   {
    "id": "trend_001",
@@ -29,6 +29,76 @@
    "trials_after": 321,
    "date": "2026-10-07T21:40:16+00:00",
    "git_commit": "3a7563a",
+   "data_hash": "0774e2086a790a0b"
+  },
+  {
+   "id": "ml_kol_a_h7",
+   "question": "ml_kol",
+   "n_variants": 3,
+   "trials_before": 321,
+   "trials_after": 324,
+   "date": "2026-10-08T00:36:17+00:00",
+   "git_commit": "d17a659",
+   "data_hash": "0774e2086a790a0b"
+  },
+  {
+   "id": "ml_kol_b_h7",
+   "question": "ml_kol",
+   "n_variants": 3,
+   "trials_before": 324,
+   "trials_after": 327,
+   "date": "2026-10-08T00:40:09+00:00",
+   "git_commit": "d17a659",
+   "data_hash": "0774e2086a790a0b"
+  },
+  {
+   "id": "ml_kol_d_h7",
+   "question": "ml_kol",
+   "n_variants": 3,
+   "trials_before": 327,
+   "trials_after": 330,
+   "date": "2026-10-08T00:44:14+00:00",
+   "git_commit": "d17a659",
+   "data_hash": "0774e2086a790a0b"
+  },
+  {
+   "id": "ml_kol_b_h3",
+   "question": "ml_kol",
+   "n_variants": 3,
+   "trials_before": 330,
+   "trials_after": 333,
+   "date": "2026-10-08T00:47:35+00:00",
+   "git_commit": "d17a659",
+   "data_hash": "0774e2086a790a0b"
+  },
+  {
+   "id": "ml_kol_plato_k0.5",
+   "question": "ml_kol",
+   "n_variants": 1,
+   "trials_before": 333,
+   "trials_after": 334,
+   "date": "2026-10-08T00:49:56+00:00",
+   "git_commit": "d17a659",
+   "data_hash": "0774e2086a790a0b"
+  },
+  {
+   "id": "ml_kol_plato_k1.5",
+   "question": "ml_kol",
+   "n_variants": 1,
+   "trials_before": 334,
+   "trials_after": 335,
+   "date": "2026-10-08T00:51:22+00:00",
+   "git_commit": "d17a659",
+   "data_hash": "0774e2086a790a0b"
+  },
+  {
+   "id": "ml_kol_plato_lgbm",
+   "question": "ml_kol",
+   "n_variants": 4,
+   "trials_before": 335,
+   "trials_after": 339,
+   "date": "2026-10-08T00:55:10+00:00",
+   "git_commit": "d17a659",
    "data_hash": "0774e2086a790a0b"
   }
  ],

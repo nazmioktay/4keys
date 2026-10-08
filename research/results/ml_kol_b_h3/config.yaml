@@ -1,0 +1,58 @@
+account:
+  leverage: 3.0
+  limits: true
+  lot_rounding: nearest
+  nav: 250.0
+arm: arm
+checks:
+  availability: true
+  extra_lag: true
+  reproducibility: true
+  shuffled_target: true
+cv:
+  embargo_days: 3
+  min_train_days: 365
+  n_splits: 5
+execution:
+  band: 0.25
+hypothesis: Vol'e göre ölçeklenmiş 7 günlük ileri getiriyi tahmin eden model, yalnızca
+  beklenen getirinin maliyeti aştığı sembollerde pozisyon alarak maliyetler sonrası
+  kol eşiklerini geçen getiri üretir
+id: ml_kol_b_h3
+models:
+- id: ridge|b|h3
+  name: ridge
+  params: {}
+- id: lightgbm_reg|b|h3
+  name: lightgbm_reg
+  params: {}
+- id: xgboost_reg|b|h3
+  name: xgboost_reg
+  params: {}
+period:
+  end: '2025-09-30'
+  start: '2021-01-01'
+primary_model: ridge|b|h3
+question: ml_kol
+seed: 0
+signal:
+  adapter: edge_threshold
+  params:
+    base_cap: 0.1
+    gross_cap: 2.0
+    h: 3
+    k: 1.0
+    target_vol_annual: 0.2
+    vol_span: 60
+    vol_window: 20
+smoke: false
+sources:
+- ohlcv_core
+- funding
+- taker_flow
+target:
+  h: 3
+  name: vol_adj_return
+universe:
+  n: 30
+zone: main
