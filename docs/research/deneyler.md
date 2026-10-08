@@ -548,3 +548,47 @@ varlığına dayanıyor. Bu tarihte kabul edilmiş kol YOK (trend_001, kesitsel_
 Talimat "aday_v1 nihai testi geçti" varsayımıyla geldi; `research/configs/aday_v1.yaml` yok ve nihai test yapılmadı (kabul edilmiş kol
 yok). Kullanıcı kararıyla (2026-10-08) kod yazılmadı; saatlik ML motoru varsayılan olarak kalıyor. Tasarım
 `docs/research/sablonlar/portfoy_paper.md`'de bekliyor.
+
+## ÖN KAYIT — `ml_kol` (2026-10-08, sonuç görülmeden önce; dal `research/ml-kol`)
+**Kullanıcı kararları (2026-10-08):** (1) ML'yi tek başına bir kol adayı olarak sınamak için TEK bir ön kayıtlı soru açılır; ML turnuvası
+şablonundaki "ML yalnızca kabul edilmiş kolu büyütür" ilkesine bu soru için açık istisna. Kabul eşikleri aynı (KURALLAR §5). (2) Tahmin
+hedefi düşüş/nötr/yükseliş sınıfı değil, **maliyet sonrası beklenen getiri**.
+
+**Hipotez:** Günlük çok varlıklı veride, vol'e göre ölçeklenmiş 7 günlük ileri getiriyi tahmin eden bir model, yalnızca beklenen
+getirinin işlem maliyetini aştığı sembollerde pozisyon alarak maliyetler sonrası kol eşiklerini geçen getiri üretir.
+
+**Veri, evren, doğrulama.** Noktasal-zamanlı ilk-30 perpetual; dönem 2021-01-01 → 2025-09-30 (nihai pencere kapalı). Koşucu
+(`research.runner`): tarih bazlı purge + embargo'lu walk-forward, 5 katman, embargo = h, `min_train_days` 365, tohum 0. Sızıntı testleri
+(karıştırılmış hedef, `available_at`, +1 gün gecikme uyarısı, tekrarlanabilirlik) açık. Hesap: 250 USDT, 3x, en yakın lot, Binance limitleri.
+
+**Hedef.** `vol_adj_return(h)` = ileri h gün açılıştan açılışa getiri / (t'ye kadar bilinen 20 günlük günlük vol × √h). Birincil h = 7; ek h = 3.
+
+**Kaynak kademeleri.** a: `ohlcv_core`; b: a + `funding` + `taker_flow`; d: b + `macro` + `sentiment_fng`. (`derivatives_metrics` yalnızca
+BTC/ETH'yi kapsadığı için evrende kullanılamaz; dışarıda.)
+
+**Modeller.** `ridge` (doğrusal kıyas), `lightgbm_reg`, `xgboost_reg` (çerçevenin varsayılan parametreleri).
+
+**Sinyal adaptörü `edge_threshold` (yeni; karar t kapanışında, işlem t+1 açılışında):**
+- p = model tahmini (σ birimi). Maliyet eşiği c_i = 2 × (taker ücreti + sembolün kayma kademesi) / (σ_i · √h); σ_i = t'ye kadar bilinen
+  20 günlük günlük vol (hedefteki ile aynı).
+- |p| > k · c_i ise yön = işaret(p) (long ya da short), değilse 0. Sabit **k = 1,0**.
+- Ham ağırlık ∝ işaret(p) · |p| / σ_i. Kol hedef vol yıllık **%20** (ham portföyün geçmiş günlük getirisinin 60 g EWMA vol'ü; yalnızca ≤ t).
+- İsim tavanı `sizing.asset_caps(base_cap = 0,10)` (BTC için en küçük lota göre yükseltilir, KURALLAR §3); brüt tavan **2,0x**.
+- Yürütme: motorda göreli işlem bandı **%25** (|hedef − mevcut| ≤ 0,25·|hedef| ise işlem yok; çıkış her zaman). Hesap kaldıracı ayrıca 3x.
+
+**Varyantlar (soru `ml_kol`; bütçe 40; bu deney 18):**
+- Temel: 3 model × kademe {a, b, d} × h = 7 → **9**.
+- Ek ufuk: 3 model × kademe b × h = 3 → **3**.
+- Plato (ana aday ÖNCEDEN: `lightgbm_reg`, kademe b, h = 7): k ×0,5 / ×1,5; lightgbm `num_leaves` (varsayılan) ×0,5 / ×1,5;
+  `learning_rate` ×0,5 / ×1,5 → **6**. Plato oranı = en kötü komşu Sharpe / ana aday Sharpe ≥ 0,70; plato sonucu tüm varyantlara uygulanır.
+- PBO: 12 temel varyant (9 + 3), CSCV 16 blok. DSR: global toplam deneme sayısı ve 18 varyantın Sharpe varyansı.
+
+**Karar kuralı.** Bir varyant **"ML kolu adayı"**dır ancak: (1) tüm sızıntı testleri geçti; (2) KURALLAR §5 kol eşiklerinin TÜMÜ (net Sharpe
+≥ 0,8; DSR ≥ 0,95; PBO ≤ 0,25; maks. DD ≤ %35; Calmar ≥ max(BTC al-tut Calmar, 0,7); pozitif yıl ≥ %60; ücret ×2 + kayma ×3 Sharpe ≥ 0,5;
+plato ≥ 0,70) geçti; (3) model `ridge` değilse, aynı kademe ve ufuktaki `ridge`'e karşı günlük net getiri Sharpe farkının eşleştirilmiş
+durağan blok bootstrap %95 aralığı 0'ın üstünde. Birden çok geçen varsa EN BASİT olan aday ilan edilir: ridge → lightgbm → xgboost; az
+kaynak önce (a → b → d); h = 7 önce. Hiçbiri geçmezse DURULUR ve nedeni yazılır. Kazanan varsa config'i
+`backend/research/configs/ml_kol_kazanan.yaml` olarak kaydedilir.
+
+**Raporlanan ek bilgiler (karar dışı):** günlük rank IC ve t (her varyant), kaynak kademelerinin marjinal katkısı (a→b, b→d; IC ve net Sharpe
+farkı, eşleştirilmiş bootstrap aralığı), turnover ve maliyet/brüt oranı, trend_001 main_LF/LS serileriyle korelasyon.
